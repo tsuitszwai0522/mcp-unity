@@ -1,0 +1,3 @@
+[submodule "shared-ai-sop"]
+	path = shared-ai-sop
+	url = https://github.com/tsuitszwai0522/shared-ai-sop.git
