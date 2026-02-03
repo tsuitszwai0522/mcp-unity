@@ -1,6 +1,6 @@
 ---
-paths:
-  - "doc/requirement/**/*_tracker.md"
+name: implementation-tracker
+description: Track multi-phase feature implementation progress. Use when user starts implementing a phase, continues previous progress, completes a phase, or wants to update progress tracking.
 ---
 
 # Implementation Tracker for Claude Code

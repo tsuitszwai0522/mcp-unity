@@ -1,6 +1,6 @@
 ---
-paths:
-  - "doc/apiDesign/**/*"
+name: api-design-protocol
+description: Design APIs with contract-first approach. Use when user wants to design an API, add an endpoint, or plan API structure.
 ---
 
 # API Design Protocol for Claude Code

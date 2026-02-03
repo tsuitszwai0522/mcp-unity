@@ -1,6 +1,6 @@
 ---
-paths:
-  - "doc/migration/**/*"
+name: migration-guide
+description: Execute large-scale migration operations with checklist and rollback strategy. Use when user wants to upgrade versions, migrate to new technology, or create an upgrade checklist.
 ---
 
 # Migration Guide Protocol for Claude Code

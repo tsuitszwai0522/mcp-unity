@@ -1,6 +1,6 @@
 ---
-paths:
-  - "doc/requirement/**/*"
+name: feature-design-protocol
+description: Design new features with requirement clarification and solution comparison. Use when user wants to design a system, add a feature, discuss architecture, or asks how to implement something.
 ---
 
 # Feature Design Protocol for Claude Code

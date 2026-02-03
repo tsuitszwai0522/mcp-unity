@@ -1,6 +1,6 @@
 ---
-paths:
-  - "doc/postmortem/**/*"
+name: incident-postmortem
+description: Create blameless incident postmortem with root cause analysis and action items. Use when user wants a postmortem, to review an incident, or analyze production issues.
 ---
 
 # Incident Postmortem Protocol for Claude Code

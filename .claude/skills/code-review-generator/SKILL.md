@@ -1,6 +1,6 @@
 ---
-paths:
-  - "doc/codeReview/Request_*.md"
+name: code-review-generator
+description: Generate code review request document for PR submission. Use when user wants to generate a code review request, prepare a PR, or summarize changes.
 ---
 
 # Code Review Generator for Claude Code

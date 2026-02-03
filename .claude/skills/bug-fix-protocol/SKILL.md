@@ -1,6 +1,6 @@
 ---
-paths:
-  - "doc/bugFix/**/*"
+name: bug-fix-protocol
+description: Execute bug fix analysis and documentation. Use when user reports a bug, pastes error logs, asks why code isn't working, or mentions strange behavior.
 ---
 
 # Bug Fix Protocol for Claude Code

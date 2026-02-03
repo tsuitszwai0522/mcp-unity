@@ -1,6 +1,6 @@
 ---
-paths:
-  - "doc/codeReview/Response_*.md"
+name: code-reviewer
+description: Review code and generate review response with improvement suggestions. Use when user asks to review code, review a request, or wants feedback on code.
 ---
 
 # Code Reviewer for Claude Code

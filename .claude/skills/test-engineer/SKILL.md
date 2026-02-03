@@ -1,6 +1,6 @@
 ---
-paths:
-  - "doc/test/**/*"
+name: test-engineer
+description: Generate test code and documentation. Use when user asks to write tests, needs unit tests for a class, or wants integration tests.
 ---
 
 # Test Engineer for Claude Code

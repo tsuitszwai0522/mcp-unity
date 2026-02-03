@@ -1,6 +1,6 @@
 ---
-paths:
-  - "doc/refactor/**/*"
+name: refactor-protocol
+description: Execute code refactoring with impact analysis. Use when user asks to refactor code, optimize code, mentions code is too large, or wants to eliminate duplicate code.
 ---
 
 # Refactor Protocol for Claude Code
