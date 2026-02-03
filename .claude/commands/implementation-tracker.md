@@ -1,7 +1,3 @@
----
-paths:
-  - "doc/requirement/**/*_tracker.md"
----
 
 # Implementation Tracker for Claude Code
 

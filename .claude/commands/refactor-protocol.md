@@ -1,7 +1,3 @@
----
-paths:
-  - "doc/refactor/**/*"
----
 
 # Refactor Protocol for Claude Code
 

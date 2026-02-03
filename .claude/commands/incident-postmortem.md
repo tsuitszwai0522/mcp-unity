@@ -1,7 +1,3 @@
----
-paths:
-  - "doc/postmortem/**/*"
----
 
 # Incident Postmortem Protocol for Claude Code
 

@@ -1,7 +1,3 @@
----
-paths:
-  - "doc/bugFix/**/*"
----
 
 # Bug Fix Protocol for Claude Code
 

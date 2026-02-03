@@ -1,7 +1,3 @@
----
-paths:
-  - "doc/codeReview/Request_*.md"
----
 
 # Code Review Generator for Claude Code
 

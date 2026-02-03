@@ -1,7 +1,3 @@
----
-paths:
-  - "doc/requirement/**/*"
----
 
 # Feature Design Protocol for Claude Code
 

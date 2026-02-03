@@ -1,7 +1,3 @@
----
-paths:
-  - "doc/apiDesign/**/*"
----
 
 # API Design Protocol for Claude Code
 
