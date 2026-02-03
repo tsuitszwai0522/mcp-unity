@@ -1,0 +1,24 @@
+{
+    "language": "zh-TW",
+    "paths": {
+        "bugFix": "doc/bugFix/",
+        "requirement": "doc/requirement/",
+        "codeReview": "doc/codeReview/",
+        "test": "doc/test/",
+        "refactor": "doc/refactor/",
+        "migration": "doc/migration/",
+        "postmortem": "doc/postmortem/",
+        "apiDesign": "doc/apiDesign/"
+    },
+    "testStrategies": [
+        {
+            "pathMatch": "/UnityProject/",
+            "strategy": "unity-utf",
+            "testPath": "Assets/Tests/"
+        },
+        {
+            "pathMatch": "/Server/",
+            "strategy": "dotnet-xunit"
+        }
+    ]
+}
