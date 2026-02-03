@@ -1,3 +1,7 @@
+---
+paths:
+  - "doc/codeReview/Response_*.md"
+---
 
 # Code Reviewer for Claude Code
 

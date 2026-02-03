@@ -1,3 +1,7 @@
+---
+paths:
+  - "doc/test/**/*"
+---
 
 # Test Engineer for Claude Code
 

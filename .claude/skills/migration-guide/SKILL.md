@@ -1,3 +1,7 @@
+---
+paths:
+  - "doc/migration/**/*"
+---
 
 # Migration Guide Protocol for Claude Code
 
