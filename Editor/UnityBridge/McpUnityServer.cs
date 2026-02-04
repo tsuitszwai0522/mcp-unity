@@ -389,6 +389,22 @@ namespace McpUnity.Unity
             GetMaterialInfoTool getMaterialInfoTool = new GetMaterialInfoTool();
             _tools.Add(getMaterialInfoTool.Name, getMaterialInfoTool);
 
+            // Register UGUI Tools
+            CreateCanvasTool createCanvasTool = new CreateCanvasTool();
+            _tools.Add(createCanvasTool.Name, createCanvasTool);
+
+            CreateUIElementTool createUIElementTool = new CreateUIElementTool();
+            _tools.Add(createUIElementTool.Name, createUIElementTool);
+
+            SetRectTransformTool setRectTransformTool = new SetRectTransformTool();
+            _tools.Add(setRectTransformTool.Name, setRectTransformTool);
+
+            AddLayoutComponentTool addLayoutComponentTool = new AddLayoutComponentTool();
+            _tools.Add(addLayoutComponentTool.Name, addLayoutComponentTool);
+
+            GetUIElementInfoTool getUIElementInfoTool = new GetUIElementInfoTool();
+            _tools.Add(getUIElementInfoTool.Name, getUIElementInfoTool);
+
             // Register BatchExecuteTool (must be registered last as it needs access to other tools)
             BatchExecuteTool batchExecuteTool = new BatchExecuteTool(this);
             _tools.Add(batchExecuteTool.Name, batchExecuteTool);

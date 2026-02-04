@@ -9,7 +9,7 @@
   "description": "The purpose of this package is to provide a MCP Unity Server for executing Unity operations and request Editor information from AI MCP enabled hosts",
   "dependencies": {
     "com.unity.nuget.newtonsoft-json": "3.2.1",
-    "com.unity.editorcoroutines": "1.0.0",
+    "com.unity.editorcoroutines": "1.0.1",
     "com.unity.test-framework": "1.3.3"
   },
   "type": "library",
