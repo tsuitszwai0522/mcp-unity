@@ -405,6 +405,10 @@ namespace McpUnity.Unity
             GetUIElementInfoTool getUIElementInfoTool = new GetUIElementInfoTool();
             _tools.Add(getUIElementInfoTool.Name, getUIElementInfoTool);
 
+            // Register CreateScriptableObjectTool
+            CreateScriptableObjectTool createScriptableObjectTool = new CreateScriptableObjectTool();
+            _tools.Add(createScriptableObjectTool.Name, createScriptableObjectTool);
+
             // Register BatchExecuteTool (must be registered last as it needs access to other tools)
             BatchExecuteTool batchExecuteTool = new BatchExecuteTool(this);
             _tools.Add(batchExecuteTool.Name, batchExecuteTool);

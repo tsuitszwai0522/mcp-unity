@@ -25,6 +25,7 @@ import { registerTransformTools } from './tools/transformTools.js';
 import { registerCreateMaterialTool, registerAssignMaterialTool, registerModifyMaterialTool, registerGetMaterialInfoTool } from './tools/materialTools.js';
 import { registerDuplicateGameObjectTool, registerDeleteGameObjectTool, registerReparentGameObjectTool } from './tools/gameObjectTools.js';
 import { registerUGUITools } from './tools/uguiTools.js';
+import { registerCreateScriptableObjectTool } from './tools/createScriptableObjectTool.js';
 import { registerBatchExecuteTool } from './tools/batchExecuteTool.js';
 import { registerGetMenuItemsResource } from './resources/getMenuItemResource.js';
 import { registerGetConsoleLogsResource } from './resources/getConsoleLogsResource.js';
@@ -91,6 +92,9 @@ registerGetMaterialInfoTool(server, mcpUnity, toolLogger);
 
 // Register UGUI Tools
 registerUGUITools(server, mcpUnity, toolLogger);
+
+// Register ScriptableObject Tool
+registerCreateScriptableObjectTool(server, mcpUnity, toolLogger);
 
 // Register Batch Execute Tool (high-priority for performance)
 registerBatchExecuteTool(server, mcpUnity, toolLogger);
