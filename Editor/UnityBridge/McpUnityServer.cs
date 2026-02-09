@@ -431,6 +431,13 @@ namespace McpUnity.Unity
             CreateScriptableObjectTool createScriptableObjectTool = new CreateScriptableObjectTool();
             _tools.Add(createScriptableObjectTool.Name, createScriptableObjectTool);
 
+            // Register Sprite Tools
+            ImportTextureAsSpriteTool importTextureAsSpriteTool = new ImportTextureAsSpriteTool();
+            _tools.Add(importTextureAsSpriteTool.Name, importTextureAsSpriteTool);
+
+            CreateSpriteAtlasTool createSpriteAtlasTool = new CreateSpriteAtlasTool();
+            _tools.Add(createSpriteAtlasTool.Name, createSpriteAtlasTool);
+
             // Register BatchExecuteTool (must be registered last as it needs access to other tools)
             BatchExecuteTool batchExecuteTool = new BatchExecuteTool(this);
             _tools.Add(batchExecuteTool.Name, batchExecuteTool);
