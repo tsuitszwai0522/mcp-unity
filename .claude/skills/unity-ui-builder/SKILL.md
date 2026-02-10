@@ -56,11 +56,17 @@ description: Build Unity UGUI from Figma designs using MCP Unity tools. Use when
 
 ### 第五階段：可複用元件
 
+**A. 新建 Prefab**：
 1. 建構第一個完整實例。
 2. `save_as_prefab` 將場景中建好的實例存為 Prefab（存放 `Assets/Prefabs/{DesignName}/`），場景物件自動成為 Prefab 實例。
 3. `add_asset_to_scene` 放置更多 Prefab 實例，用回傳的 `instanceId` 搭配 `update_gameobject` 逐一重新命名。
 4. `batch_execute` + `update_component` 更新差異文字/顏色。
 5. 驗證所有實例 localScale 為 (1,1,1)，若異常則用 `scale_gameobject` 修正。
+
+**B. 修改既有 Prefab**（Prefab Edit Mode）：
+1. `open_prefab_contents(prefabPath)` 開啟 Prefab → 回傳 root 資訊與 children 階層。
+2. 使用 `reparent_gameobject`、`set_rect_transform`、`update_component` 等工具修改（objectPath 以 Prefab root 名稱開頭，如 `ProductCard/Container`）。
+3. `save_prefab_contents()` 儲存 → 所有場景實例自動同步。或 `save_prefab_contents(discard: true)` 放棄。
 
 ### 第六階段：儲存
 
@@ -78,6 +84,7 @@ description: Build Unity UGUI from Figma designs using MCP Unity tools. Use when
 | TMP 更新 | componentName 為 `TMPro.TextMeshProUGUI` |
 | Outline | componentName 為 `Outline`（非 `UnityEngine.UI.Outline`） |
 | Prefab 工作流 | 可複用元件須用 `save_as_prefab` 存為 Prefab（`Assets/Prefabs/{DesignName}/`），再用 `add_asset_to_scene` 放置實例，不可只用 duplicate |
+| Prefab Edit Mode | 修改**既有 Prefab** 內部結構時，使用 `open_prefab_contents` → 修改（objectPath 以 Prefab root 名稱開頭）→ `save_prefab_contents`，所有實例自動同步。同一時間只能編輯一個 Prefab |
 
 ## 禁止事項 (Don'ts)
 
@@ -89,3 +96,5 @@ description: Build Unity UGUI from Figma designs using MCP Unity tools. Use when
 6. ❌ 規律排列子元素不使用 Layout Group
 7. ❌ ScrollRect 結構不按規範（缺 Viewport/RectMask2D 或 Content/LayoutGroup）
 8. ❌ 跳過場景儲存
+9. ❌ 直接修改場景中 Prefab 實例的結構（應用 `open_prefab_contents` 編輯 Prefab 資產）
+10. ❌ Prefab Edit Mode 中忘記呼叫 `save_prefab_contents` 結束編輯

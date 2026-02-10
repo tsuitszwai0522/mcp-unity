@@ -343,6 +343,11 @@ namespace McpUnity.Tools
             else if (!string.IsNullOrEmpty(newParentPath))
             {
                 GameObject newParent = GameObject.Find(newParentPath);
+                // Fallback: search in Prefab edit mode contents
+                if (newParent == null && PrefabEditingService.IsEditing)
+                {
+                    newParent = PrefabEditingService.FindByPath(newParentPath);
+                }
                 if (newParent == null)
                 {
                     return McpUnitySocketHandler.CreateErrorResponse(

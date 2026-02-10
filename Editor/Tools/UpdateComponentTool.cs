@@ -1,6 +1,7 @@
 using System;
 using System.Reflection;
 using McpUnity.Unity;
+using McpUnity.Services;
 using McpUnity.Utils;
 using UnityEngine;
 using UnityEditor;
@@ -62,11 +63,16 @@ namespace McpUnity.Tools
                 // Find by path
                 gameObject = GameObject.Find(objectPath);
                 identifier = $"path '{objectPath}'";
-                
+
                 if (gameObject == null)
                 {
                     // Try to find using the Unity Scene hierarchy path
                     gameObject = FindGameObjectByPath(objectPath);
+                }
+                // Fallback: search in Prefab edit mode contents
+                if (gameObject == null && PrefabEditingService.IsEditing)
+                {
+                    gameObject = PrefabEditingService.FindByPath(objectPath);
                 }
             }
                     

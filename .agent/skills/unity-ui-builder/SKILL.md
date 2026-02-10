@@ -98,6 +98,7 @@ Figma Hex → Unity RGB (0-1)：每個通道值除以 255。
 | Outline 元件名 | 使用 `Outline` 作為 componentName（非 `UnityEngine.UI.Outline`） |
 | TMP 元件名 | 使用 `TMPro.TextMeshProUGUI` 作為 componentName 來更新 TextMeshPro 屬性 |
 | Prefab 工作流 | 可複用元件須用 `save_as_prefab` 存為 Prefab（`Assets/Prefabs/{DesignName}/`），再用 `add_asset_to_scene` 放置實例，不可只用 duplicate |
+| Prefab Edit Mode | 修改**既有 Prefab** 內部結構（reparent、新增元件等）時，使用 `open_prefab_contents` → 修改（objectPath 以 Prefab root 名稱開頭）→ `save_prefab_contents`，所有實例自動同步。同一時間只能編輯一個 Prefab |
 
 ## 執行流程 (Workflow)
 
@@ -226,6 +227,8 @@ Figma Hex → Unity RGB (0-1)：每個通道值除以 255。
 
 ### 第五階段：可複用元件 (Reusable Components)
 
+#### A. 新建 Prefab（首次建構）
+
 1. **建構第一個實例**：完整建立所有子元素。
 
 2. **存為 Prefab**：
@@ -266,6 +269,37 @@ Figma Hex → Unity RGB (0-1)：每個通道值除以 255。
 5. **驗證 localScale**：
    確認所有實例 localScale 為 (1,1,1)，若異常則用 `scale_gameobject` 修正。
 
+#### B. 修改既有 Prefab（Prefab Edit Mode）
+
+當需要修改已存在的 Prefab 內部結構（如調整階層、新增元件、修改 RectTransform）時：
+
+1. **開啟 Prefab**：
+   ```
+   open_prefab_contents:
+     prefabPath: "Assets/Prefabs/{DesignName}/ProductCard.prefab"
+   → 回傳 rootName, rootInstanceId, children 階層
+   ```
+
+2. **修改結構**（objectPath 以 Prefab root 名稱開頭）：
+   ```
+   reparent_gameobject:
+     objectPath: "ProductCard/ProductImage"
+     newParent: "ProductCard/Container"
+
+   set_rect_transform:
+     objectPath: "ProductCard/Container/ProductImage"
+     anchorPreset: topLeft
+     ...
+   ```
+
+3. **儲存**：
+   ```
+   save_prefab_contents    → 儲存修改，所有場景實例自動同步
+   save_prefab_contents(discard: true)  → 放棄修改
+   ```
+
+> **注意**：同一時間只能編輯一個 Prefab。Prefab Edit Mode 使用隔離環境，`GameObject.Find()` 無法搜尋場景物件，但工具已內建 fallback 支援。
+
 ### 第六階段：儲存 (Save)
 
 1. **儲存場景**：使用 `save_scene` 儲存當前場景。
@@ -302,6 +336,8 @@ Figma Hex → Unity RGB (0-1)：每個通道值除以 255。
 - [ ] 可複用元件已用 `save_as_prefab` 存為 Prefab，更多實例用 `add_asset_to_scene` 放置
 - [ ] 各實例的差異資料已更新
 - [ ] 位置已正確調整
+- [ ] 若修改既有 Prefab，已使用 `open_prefab_contents` → 修改 → `save_prefab_contents` 流程
+- [ ] Prefab Edit Mode 結束後已呼叫 `save_prefab_contents`（儲存或放棄）
 
 ### 最終
 - [ ] 場景已儲存
@@ -328,6 +364,8 @@ Figma Hex → Unity RGB (0-1)：每個通道值除以 255。
 9. ❌ 規律排列的子元素不使用 Layout Group 而逐個絕對定位
 10. ❌ ScrollRect 結構不按規範（缺少 Viewport/RectMask2D 或 Content/LayoutGroup）
 11. ❌ 跳過場景儲存
+12. ❌ 直接修改場景中的 Prefab 實例結構（reparent 等），應使用 `open_prefab_contents` 編輯 Prefab 資產本身
+13. ❌ 在 Prefab Edit Mode 中忘記呼叫 `save_prefab_contents` 結束編輯
 
 ## 手動後續步驟 (Post-Implementation)
 
