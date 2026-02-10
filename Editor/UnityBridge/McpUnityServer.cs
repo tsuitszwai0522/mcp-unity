@@ -341,6 +341,10 @@ namespace McpUnity.Unity
             CreatePrefabTool createPrefabTool = new CreatePrefabTool();
             _tools.Add(createPrefabTool.Name, createPrefabTool);
 
+            // Register SaveAsPrefabTool
+            SaveAsPrefabTool saveAsPrefabTool = new SaveAsPrefabTool();
+            _tools.Add(saveAsPrefabTool.Name, saveAsPrefabTool);
+
             // Register CreateSceneTool
             CreateSceneTool createSceneTool = new CreateSceneTool();
             _tools.Add(createSceneTool.Name, createSceneTool);
