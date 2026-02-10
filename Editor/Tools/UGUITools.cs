@@ -7,6 +7,7 @@ using UnityEngine.EventSystems;
 using UnityEditor;
 using Newtonsoft.Json.Linq;
 using McpUnity.Unity;
+using McpUnity.Services;
 using McpUnity.Utils;
 
 namespace McpUnity.Tools
@@ -172,6 +173,11 @@ namespace McpUnity.Tools
                     // Try to find using scene hierarchy traversal
                     gameObject = FindGameObjectByPath(objectPath);
                 }
+                // Fallback: search in Prefab edit mode contents
+                if (gameObject == null && PrefabEditingService.IsEditing)
+                {
+                    gameObject = PrefabEditingService.FindByPath(objectPath);
+                }
             }
 
             return gameObject;
@@ -202,6 +208,21 @@ namespace McpUnity.Tools
                     }
                     return current;
                 }
+            }
+
+            // Fallback: check Prefab edit mode root
+            if (PrefabEditingService.IsEditing
+                && PrefabEditingService.PrefabRoot.name == pathParts[0])
+            {
+                GameObject current = PrefabEditingService.PrefabRoot;
+                for (int i = 1; i < pathParts.Length; i++)
+                {
+                    Transform child = current.transform.Find(pathParts[i]);
+                    if (child == null)
+                        return null;
+                    current = child.gameObject;
+                }
+                return current;
             }
 
             return null;

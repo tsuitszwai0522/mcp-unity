@@ -1,6 +1,7 @@
 using System;
 using UnityEngine;
 using UnityEditor; // Required for Undo operations
+using McpUnity.Services;
 
 namespace McpUnity.Utils
 {
@@ -35,6 +36,12 @@ namespace McpUnity.Utils
                 if (currentParent == null)
                 {
                     GameObject rootObj = GameObject.Find(name);
+                    // Fallback: check Prefab edit mode root
+                    if (rootObj == null && PrefabEditingService.IsEditing
+                        && PrefabEditingService.PrefabRoot.name == name)
+                    {
+                        rootObj = PrefabEditingService.PrefabRoot;
+                    }
                     childTransform = rootObj?.transform;
                 }
                 else

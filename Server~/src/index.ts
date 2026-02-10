@@ -28,6 +28,7 @@ import { registerDuplicateGameObjectTool, registerDeleteGameObjectTool, register
 import { registerUGUITools } from './tools/uguiTools.js';
 import { registerCreateScriptableObjectTool } from './tools/createScriptableObjectTool.js';
 import { registerImportTextureAsSpriteTool, registerCreateSpriteAtlasTool } from './tools/spriteTools.js';
+import { registerOpenPrefabContentsTool, registerSavePrefabContentsTool } from './tools/prefabEditTools.js';
 import { registerBatchExecuteTool } from './tools/batchExecuteTool.js';
 import { registerGetMenuItemsResource } from './resources/getMenuItemResource.js';
 import { registerGetConsoleLogsResource } from './resources/getConsoleLogsResource.js';
@@ -102,6 +103,10 @@ registerCreateScriptableObjectTool(server, mcpUnity, toolLogger);
 // Register Sprite Tools
 registerImportTextureAsSpriteTool(server, mcpUnity, toolLogger);
 registerCreateSpriteAtlasTool(server, mcpUnity, toolLogger);
+
+// Register Prefab Edit Tools
+registerOpenPrefabContentsTool(server, mcpUnity, toolLogger);
+registerSavePrefabContentsTool(server, mcpUnity, toolLogger);
 
 // Register Batch Execute Tool (high-priority for performance)
 registerBatchExecuteTool(server, mcpUnity, toolLogger);

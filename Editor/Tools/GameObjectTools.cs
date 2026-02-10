@@ -2,6 +2,7 @@ using System;
 using UnityEngine;
 using UnityEditor;
 using McpUnity.Unity;
+using McpUnity.Services;
 using Newtonsoft.Json.Linq;
 
 namespace McpUnity.Tools
@@ -36,6 +37,11 @@ namespace McpUnity.Tools
                 {
                     // Try finding by traversing hierarchy
                     gameObject = FindGameObjectByPath(objectPath);
+                }
+                // Fallback: search in Prefab edit mode contents
+                if (gameObject == null && PrefabEditingService.IsEditing)
+                {
+                    gameObject = PrefabEditingService.FindByPath(objectPath);
                 }
                 identifierInfo = $"path '{objectPath}'";
             }
@@ -81,6 +87,13 @@ namespace McpUnity.Tools
                     current = root;
                     break;
                 }
+            }
+
+            // Fallback: check Prefab edit mode root
+            if (current == null && PrefabEditingService.IsEditing
+                && PrefabEditingService.PrefabRoot.name == parts[0])
+            {
+                current = PrefabEditingService.PrefabRoot;
             }
 
             if (current == null) return null;

@@ -442,6 +442,13 @@ namespace McpUnity.Unity
             CreateSpriteAtlasTool createSpriteAtlasTool = new CreateSpriteAtlasTool();
             _tools.Add(createSpriteAtlasTool.Name, createSpriteAtlasTool);
 
+            // Register Prefab Edit Tools
+            OpenPrefabContentsTool openPrefabContentsTool = new OpenPrefabContentsTool();
+            _tools.Add(openPrefabContentsTool.Name, openPrefabContentsTool);
+
+            SavePrefabContentsTool savePrefabContentsTool = new SavePrefabContentsTool();
+            _tools.Add(savePrefabContentsTool.Name, savePrefabContentsTool);
+
             // Register BatchExecuteTool (must be registered last as it needs access to other tools)
             BatchExecuteTool batchExecuteTool = new BatchExecuteTool(this);
             _tools.Add(batchExecuteTool.Name, batchExecuteTool);
