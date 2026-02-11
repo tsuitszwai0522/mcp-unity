@@ -393,10 +393,35 @@ namespace McpUnity.Tools
                 );
             }
             
-            // Handle UnityEngine.Object types;
-            if (targetType == typeof(UnityEngine.Object))
+            // Handle UnityEngine.Object derived types (Sprite, Material, Font, AudioClip, etc.)
+            if (typeof(UnityEngine.Object).IsAssignableFrom(targetType) && token.Type == JTokenType.String)
             {
-                return token.ToObject<UnityEngine.Object>();
+                string assetRef = token.ToObject<string>();
+                if (string.IsNullOrEmpty(assetRef))
+                {
+                    return null;
+                }
+
+                // Try as asset path first (e.g. "Assets/Sprites/tomato.png")
+                var asset = AssetDatabase.LoadAssetAtPath(assetRef, targetType);
+                if (asset != null)
+                {
+                    return asset;
+                }
+
+                // Try as GUID
+                string guidPath = AssetDatabase.GUIDToAssetPath(assetRef);
+                if (!string.IsNullOrEmpty(guidPath))
+                {
+                    asset = AssetDatabase.LoadAssetAtPath(guidPath, targetType);
+                    if (asset != null)
+                    {
+                        return asset;
+                    }
+                }
+
+                McpLogger.LogWarning($"[MCP Unity] Could not load asset of type {targetType.Name} from '{assetRef}'");
+                return null;
             }
             
             // Handle enum types
