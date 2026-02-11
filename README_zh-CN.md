@@ -64,8 +64,8 @@ MCP Unity 通过将 Unity `Library/PackedCache` 文件夹添加到您的工作�
 - `update_gameobject`: 更新 GameObject 的核心属性（名称、标签、层、激活/静态状态），如果不存在则创建
   > **示例提示:** "将 Player 对象的标签设置为 ‘Enemy’ 并使其不可用"
 
-- `update_component`: 更新 GameObject 上的组件字段，如果 GameObject 不包含该组件则添加它
-  > **示例提示:** "给 Player 对象添加 Rigidbody 组件并设置其质量为 5"
+- `update_component`: 更新 GameObject 上的组件字段，如果 GameObject 不包含该组件则添加它。支持通过资源路径字符串设置资源引用（Sprite、Material、Font 等）
+  > **示例提示:** "给 Player 对象添加 Rigidbody 组件并设置其质量为 5" 或 "将 Image 的 sprite 设置为 Assets/Sprites/icon.png"
 
 - `add_package`: 在 Unity 包管理器中安装新包
   > **示例提示:** "给我的项目添加 TextMeshPro 包"

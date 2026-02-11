@@ -64,8 +64,8 @@ MCP Unityは、Unityの`Library/PackedCache`フォルダーをワークスペー
 - `update_gameobject`: GameObject のコアプロパティ（名前、タグ、レイヤー、アクティブ/静的状態）を更新、または存在しない場合は作成します
   > **例:** "Playerオブジェクトのタグを ‘Enemy’ に設定し、非アクティブにする"
 
-- `update_component`: GameObject上のコンポーネントフィールドを更新、またはGameObjectに含まれていない場合は追加
-  > **例:** "PlayerオブジェクトにRigidbodyコンポーネントを追加し、その質量を5に設定"
+- `update_component`: GameObject上のコンポーネントフィールドを更新、またはGameObjectに含まれていない場合は追加。アセット参照（Sprite、Material、Fontなど）はアセットパス文字列で指定可能
+  > **例:** "PlayerオブジェクトにRigidbodyコンポーネントを追加し、その質量を5に設定" または "ImageのspriteをAssets/Sprites/icon.pngに設定"
 
 - `add_package`: Unityパッケージマネージャーに新しいパッケージをインストール
   > **例:** "プロジェクトにTextMeshProパッケージを追加"
