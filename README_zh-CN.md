@@ -130,6 +130,39 @@ MCP Unity 通过将 Unity `Library/PackedCache` 文件夹添加到您的工作�
 - `set_transform`: 在单个操作中设置 GameObject 的位置、旋转和缩放
   > **示例提示:** "将 Cube 的位置设置为 (0, 5, 0)，旋转为 (0, 90, 0)，缩放为 (2, 2, 2)"
 
+- `save_as_prefab`: 将场景中的现有 GameObject 保存为 Prefab 资源并连接为 Prefab 实例
+  > **示例提示:** "将 'PlayerCard' 对象保存为 Prefab 到 Assets/Prefabs/PlayerCard.prefab"
+
+- `open_prefab_contents`: 在隔离环境中打开 Prefab 资源进行编辑（Prefab 编辑模式），允许对 Prefab 进行结构性修改
+  > **示例提示:** "打开 PlayerCard Prefab 进行编辑"
+
+- `save_prefab_contents`: 保存或放弃通过 open_prefab_contents 打开的 Prefab 的更改
+  > **示例提示:** "保存 Prefab 更改" 或 "放弃 Prefab 编辑"
+
+- `create_canvas`: 创建带有 CanvasScaler 和 GraphicRaycaster 组件的 Canvas，可选创建 EventSystem
+  > **示例提示:** "创建一个参考分辨率为 1920x1080、ScaleWithScreenSize 模式的 UI Canvas"
+
+- `create_ui_element`: 创建 UI 元素（Button、Text、TextMeshPro、Image、Panel、InputField、Toggle、Slider、Dropdown、ScrollView 等）
+  > **示例提示:** "在 Canvas/Panel 下创建一个文本为 'Start Game' 的 Button"
+
+- `set_rect_transform`: 修改 UI 元素的 RectTransform 属性（锚点、轴心、位置、大小、旋转、缩放）
+  > **示例提示:** "将 Button 的锚点设置为左上角，大小设置为 200x50"
+
+- `add_layout_component`: 为 UI 元素添加布局组件（HorizontalLayoutGroup、VerticalLayoutGroup、GridLayoutGroup、ContentSizeFitter、LayoutElement、AspectRatioFitter）
+  > **示例提示:** "给 Panel 添加一个间距为 10、内边距为 20 的 VerticalLayoutGroup"
+
+- `get_ui_element_info`: 获取 UI 元素的详细信息，包括 RectTransform、UI 组件和布局设置
+  > **示例提示:** "显示 MainPanel 的 RectTransform 和布局详情"
+
+- `import_texture_as_sprite`: 将纹理的导入设置设为 Sprite 类型，可配置精灵模式、网格类型和压缩
+  > **示例提示:** "将 Assets/Images/icon.png 的纹理导入为 Sprite"
+
+- `create_sprite_atlas`: 创建 SpriteAtlas 资源，打包指定文件夹中的精灵
+  > **示例提示:** "为 Assets/Sprites/UI/ 中的所有精灵创建 SpriteAtlas"
+
+- `create_scriptable_object`: 创建 ScriptableObject 资源，支持设置可选字段值并保存到项目中
+  > **示例提示:** "在 Assets/Settings/GameSettings.asset 创建一个 maxHealth 设为 100 的 GameSettings ScriptableObject"
+
 - `create_material`: 使用指定的着色器创建新材质并保存到项目中
   > **示例提示:** "使用 URP Lit 着色器创建一个名为 'EnemyMaterial' 的红色材质"
 

@@ -130,6 +130,39 @@ MCP Unityは、Unityの`Library/PackedCache`フォルダーをワークスペー
 - `set_transform`: 単一の操作でGameObjectの位置、回転、スケールを設定
   > **例:** "Cubeの位置を(0, 5, 0)、回転を(0, 90, 0)、スケールを(2, 2, 2)に設定"
 
+- `save_as_prefab`: シーン内の既存のGameObjectをPrefabアセットとして保存し、Prefabインスタンスとして接続
+  > **例:** "'PlayerCard'オブジェクトをAssets/Prefabs/PlayerCard.prefabにPrefabとして保存"
+
+- `open_prefab_contents`: Prefabアセットを分離された編集環境で開く（Prefab Edit Mode）、Prefabの構造変更が可能
+  > **例:** "PlayerCard Prefabを編集用に開く"
+
+- `save_prefab_contents`: open_prefab_contentsで開いたPrefabの変更を保存または破棄
+  > **例:** "Prefabの変更を保存" または "Prefabの編集を破棄"
+
+- `create_canvas`: CanvasScalerとGraphicRaycasterコンポーネントを持つCanvasを作成（オプションでEventSystem付き）
+  > **例:** "1920x1080の参照解像度でScaleWithScreenSizeのUI Canvasを作成"
+
+- `create_ui_element`: UI要素を作成（Button、Text、TextMeshPro、Image、Panel、InputField、Toggle、Slider、Dropdown、ScrollViewなど）
+  > **例:** "Canvas/Panelの下に'Start Game'テキストのButtonを作成"
+
+- `set_rect_transform`: UI要素のRectTransformプロパティを変更（アンカー、ピボット、位置、サイズ、回転、スケール）
+  > **例:** "Buttonのアンカーを左上に設定し、サイズを200x50に設定"
+
+- `add_layout_component`: UI要素にレイアウトコンポーネントを追加（HorizontalLayoutGroup、VerticalLayoutGroup、GridLayoutGroup、ContentSizeFitter、LayoutElement、AspectRatioFitter）
+  > **例:** "Panelにスペーシング10、パディング20のVerticalLayoutGroupを追加"
+
+- `get_ui_element_info`: RectTransform、UIコンポーネント、レイアウト設定を含むUI要素の詳細情報を取得
+  > **例:** "MainPanelのRectTransformとレイアウトの詳細を表示"
+
+- `import_texture_as_sprite`: テクスチャのインポート設定をSpriteタイプに設定（スプライトモード、メッシュタイプ、圧縮を設定可能）
+  > **例:** "Assets/Images/icon.pngのテクスチャをSpriteとしてインポート"
+
+- `create_sprite_atlas`: 指定されたフォルダからスプライトをパックするSpriteAtlasアセットを作成
+  > **例:** "Assets/Sprites/UI/のすべてのスプライトのSpriteAtlasを作成"
+
+- `create_scriptable_object`: ScriptableObjectアセットをオプションのフィールド値とともに作成し、プロジェクトに保存
+  > **例:** "Assets/Settings/GameSettings.assetにmaxHealthを100に設定したGameSettings ScriptableObjectを作成"
+
 - `create_material`: 指定されたシェーダーで新しいマテリアルを作成し、プロジェクトに保存
   > **例:** "URP Litシェーダーを使用して'EnemyMaterial'という赤いマテリアルを作成"
 

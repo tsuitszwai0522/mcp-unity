@@ -132,6 +132,39 @@ The following tools are available for manipulating and querying Unity scenes and
 - `set_transform`: Sets position, rotation, and scale of a GameObject in a single operation
   > **Example prompt:** "Set the Cube's position to (0, 5, 0), rotation to (0, 90, 0), and scale to (2, 2, 2)"
 
+- `save_as_prefab`: Saves an existing scene GameObject as a Prefab asset and connects it as a Prefab instance
+  > **Example prompt:** "Save the 'PlayerCard' object as a prefab at Assets/Prefabs/PlayerCard.prefab"
+
+- `open_prefab_contents`: Opens a Prefab asset for isolated editing (Prefab Edit Mode), allowing structural changes to the Prefab
+  > **Example prompt:** "Open the PlayerCard prefab for editing"
+
+- `save_prefab_contents`: Saves or discards changes to a Prefab opened with open_prefab_contents
+  > **Example prompt:** "Save the prefab changes" or "Discard the prefab edits"
+
+- `create_canvas`: Creates a Canvas with CanvasScaler and GraphicRaycaster components, and optionally an EventSystem
+  > **Example prompt:** "Create a UI Canvas with ScaleWithScreenSize at 1920x1080 reference resolution"
+
+- `create_ui_element`: Creates a UI element (Button, Text, TextMeshPro, Image, Panel, InputField, Toggle, Slider, Dropdown, ScrollView, etc.)
+  > **Example prompt:** "Create a Button under Canvas/Panel with the text 'Start Game'"
+
+- `set_rect_transform`: Modifies RectTransform properties of a UI element (anchors, pivot, position, size, rotation, scale)
+  > **Example prompt:** "Set the Button's anchors to top-left and size to 200x50"
+
+- `add_layout_component`: Adds a layout component (HorizontalLayoutGroup, VerticalLayoutGroup, GridLayoutGroup, ContentSizeFitter, LayoutElement, AspectRatioFitter) to a UI element
+  > **Example prompt:** "Add a VerticalLayoutGroup to the Panel with spacing 10 and padding 20"
+
+- `get_ui_element_info`: Gets detailed information about a UI element including RectTransform, UI components, and layout settings
+  > **Example prompt:** "Show me the RectTransform and layout details of the MainPanel"
+
+- `import_texture_as_sprite`: Sets a texture's import settings to Sprite type with configurable sprite mode, mesh type, and compression
+  > **Example prompt:** "Import the texture at Assets/Images/icon.png as a Sprite"
+
+- `create_sprite_atlas`: Creates a SpriteAtlas asset that packs sprites from a specified folder
+  > **Example prompt:** "Create a SpriteAtlas for all sprites in Assets/Sprites/UI/"
+
+- `create_scriptable_object`: Creates a ScriptableObject asset with optional field values and saves it to the project
+  > **Example prompt:** "Create a GameSettings ScriptableObject at Assets/Settings/GameSettings.asset with maxHealth set to 100"
+
 - `create_material`: Creates a new material with specified shader and saves it to the project
   > **Example prompt:** "Create a red material called 'EnemyMaterial' using the URP Lit shader"
 
