@@ -99,6 +99,7 @@ Figma Hex → Unity RGB (0-1)：每個通道值除以 255。
 | TMP 元件名 | 使用 `TMPro.TextMeshProUGUI` 作為 componentName 來更新 TextMeshPro 屬性 |
 | Prefab 工作流 | 可複用元件須用 `save_as_prefab` 存為 Prefab（`Assets/Prefabs/{DesignName}/`），再用 `add_asset_to_scene` 放置實例，不可只用 duplicate |
 | Prefab Edit Mode | 修改**既有 Prefab** 內部結構（reparent、新增元件等）時，使用 `open_prefab_contents` → 修改（objectPath 以 Prefab root 名稱開頭）→ `save_prefab_contents`，所有實例自動同步。同一時間只能編輯一個 Prefab |
+| Asset Reference 設定 | `update_component` 的 `componentData` 支援以 asset path 字串設定 Sprite、Material、Font 等資源引用，例如 `{"sprite": "Assets/Sprites/{DesignName}/image.png"}`。也支援 GUID |
 
 ## 執行流程 (Workflow)
 
@@ -225,6 +226,16 @@ Figma Hex → Unity RGB (0-1)：每個通道值除以 255。
    - 先建立 Button，`elementData.color` 設定背景色。
    - 再用 `update_component` 修改 `{ButtonPath}/Text` 子物件的 `UnityEngine.UI.Text` 元件來設定文字顏色。
 
+4. **指定 Sprite 給 Image 元件**：
+   使用 `update_component` 將已匯入的 Sprite 指定給 Image：
+   ```json
+   {"tool": "update_component", "params": {
+     "objectPath": ".../ProductImage",
+     "componentName": "Image",
+     "componentData": {"sprite": "Assets/Sprites/{DesignName}/tomato.png"}
+   }}
+   ```
+
 ### 第五階段：可複用元件 (Reusable Components)
 
 #### A. 新建 Prefab（首次建構）
@@ -341,7 +352,8 @@ Figma Hex → Unity RGB (0-1)：每個通道值除以 255。
 
 ### 最終
 - [ ] 場景已儲存
-- [ ] 記錄需手動完成的項目（圖片 Sprite 指定、字型匯入等）
+- [ ] 所有 Image 元件已透過 `update_component` 指定對應的 Sprite
+- [ ] 記錄需手動完成的項目（字型匯入等）
 
 ## 觸發時機 (When to use)
 
@@ -371,8 +383,6 @@ Figma Hex → Unity RGB (0-1)：每個通道值除以 255。
 
 以下操作目前無法透過 MCP 自動完成，需使用者在 Unity Editor 手動處理：
 
-1. **圖片 Sprite 指定**：將下載的 PNG 圖片設定為 Sprite 類型，並指定給 Image 元件。
-2. **SVG 圖示**：匯入 SVG 並指定給對應的 Image 元件。
-3. **字型匯入**：匯入設計稿指定的字型（如 Inter、Newsreader），建立 TMP Font Asset。
-4. **Font Style**：TMP 的 Semi-Bold 等粗細需透過對應的 Font Asset 設定。
+1. **字型匯入**：匯入設計稿指定的字型（如 Inter、Newsreader），建立 TMP Font Asset。
+2. **Font Style**：TMP 的 Semi-Bold 等粗細需透過對應的 Font Asset 設定。
 

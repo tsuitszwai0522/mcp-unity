@@ -54,6 +54,8 @@ description: Build Unity UGUI from Figma designs using MCP Unity tools. Use when
 - 絕對定位：`topLeft` + pivot (0,1) + Figma 座標（Y 取負）
 - 右對齊：`topRight` + pivot (1,1) + 負 X offset
 
+4. **Sprite 指定**：用 `update_component` 將 Sprite 指定給 Image（`{"sprite": "Assets/Sprites/{DesignName}/image.png"}`）。
+
 ### 第五階段：可複用元件
 
 **A. 新建 Prefab**：
@@ -85,6 +87,7 @@ description: Build Unity UGUI from Figma designs using MCP Unity tools. Use when
 | Outline | componentName 為 `Outline`（非 `UnityEngine.UI.Outline`） |
 | Prefab 工作流 | 可複用元件須用 `save_as_prefab` 存為 Prefab（`Assets/Prefabs/{DesignName}/`），再用 `add_asset_to_scene` 放置實例，不可只用 duplicate |
 | Prefab Edit Mode | 修改**既有 Prefab** 內部結構時，使用 `open_prefab_contents` → 修改（objectPath 以 Prefab root 名稱開頭）→ `save_prefab_contents`，所有實例自動同步。同一時間只能編輯一個 Prefab |
+| Asset Reference | `update_component` 支援以 asset path 字串設定 Sprite、Material、Font 等，如 `{"sprite": "Assets/Sprites/{DesignName}/image.png"}` |
 
 ## 禁止事項 (Don'ts)
 
