@@ -66,8 +66,8 @@ The following tools are available for manipulating and querying Unity scenes and
 - `update_gameobject`: Updates a GameObject's core properties (name, tag, layer, active/static state), or creates the GameObject if it does not exist
   > **Example prompt:** "Set the Player object's tag to 'Enemy' and make it inactive"
 
-- `update_component`: Updates component fields on a GameObject or adds it to the GameObject if it does not contain the component
-  > **Example prompt:** "Add a Rigidbody component to the Player object and set its mass to 5"
+- `update_component`: Updates component fields on a GameObject or adds it to the GameObject if it does not contain the component. Supports asset references (Sprite, Material, Font, etc.) via asset path strings
+  > **Example prompt:** "Add a Rigidbody component to the Player object and set its mass to 5" or "Set the Image sprite to Assets/Sprites/icon.png"
 
 - `add_package`: Installs new packages in the Unity Package Manager
   > **Example prompt:** "Add the TextMeshPro package to my project"
