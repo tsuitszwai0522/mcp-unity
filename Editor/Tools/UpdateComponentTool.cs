@@ -6,6 +6,7 @@ using McpUnity.Utils;
 using UnityEngine;
 using UnityEditor;
 using Newtonsoft.Json.Linq;
+using ComponentResolver = McpUnity.Utils.ComponentTypeResolver;
 
 namespace McpUnity.Tools
 {
@@ -86,21 +87,25 @@ namespace McpUnity.Tools
             
             McpLogger.LogInfo($"[MCP Unity] Updating component '{componentName}' on GameObject '{gameObject.name}' (found by {identifier})");
             
-            // Try to find the component by name
-            Component component = gameObject.GetComponent(componentName);
-            
+            // Resolve the component type first for reliable lookup
+            Type componentType = ComponentResolver.FindComponentType(componentName);
+
+            // Try to find the existing component using resolved Type (preferred) or string fallback
+            Component component = componentType != null
+                ? gameObject.GetComponent(componentType)
+                : gameObject.GetComponent(componentName);
+
             // If component not found, try to add it
             if (component == null)
             {
-                Type componentType = FindComponentType(componentName);
                 if (componentType == null)
                 {
                     return McpUnitySocketHandler.CreateErrorResponse(
-                        $"Component type '{componentName}' not found in Unity", 
+                        $"Component type '{componentName}' not found in Unity",
                         "component_error"
                     );
                 }
-                
+
                 component = Undo.AddComponent(gameObject, componentType);
 
                 // Ensure changes are saved
@@ -109,7 +114,7 @@ namespace McpUnity.Tools
                 {
                     PrefabUtility.RecordPrefabInstancePropertyModifications(component);
                 }
-                
+
                 McpLogger.LogInfo($"[MCP Unity] Added component '{componentName}' to GameObject '{gameObject.name}'");
             }
             // Update component fields
@@ -185,63 +190,6 @@ namespace McpUnity.Tools
             }
             
             // Not found
-            return null;
-        }
-        
-        /// <summary>
-        /// Find a component type by name
-        /// </summary>
-        /// <param name="componentName">The name of the component type</param>
-        /// <returns>The component type, or null if not found</returns>
-        private Type FindComponentType(string componentName)
-        {
-            // First try direct match
-            Type type = Type.GetType(componentName);
-            if (type != null && typeof(Component).IsAssignableFrom(type))
-            {
-                return type;
-            }
-            
-            // Try common Unity namespaces
-            string[] commonNamespaces = new string[] 
-            {
-                "UnityEngine",
-                "UnityEngine.UI",
-                "UnityEngine.EventSystems",
-                "UnityEngine.Animations",
-                "UnityEngine.Rendering",
-                "TMPro"
-            };
-            
-            foreach (string ns in commonNamespaces)
-            {
-                type = Type.GetType($"{ns}.{componentName}, UnityEngine");
-                if (type != null && typeof(Component).IsAssignableFrom(type))
-                {
-                    return type;
-                }
-            }
-            
-            // Try assemblies search
-            foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
-            {
-                try
-                {
-                    foreach (Type t in assembly.GetTypes())
-                    {
-                        if (t.Name == componentName && typeof(Component).IsAssignableFrom(t))
-                        {
-                            return t;
-                        }
-                    }
-                }
-                catch (Exception)
-                {
-                    // Some assemblies might throw exceptions when getting types
-                    continue;
-                }
-            }
-            
             return null;
         }
         

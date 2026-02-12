@@ -1,5 +1,6 @@
 using System;
 using UnityEngine;
+using UnityEngine.UI;
 using UnityEditor;
 using McpUnity.Utils; // For GameObjectHierarchyCreator and McpLogger
 using McpUnity.Unity; // For McpUnitySocketHandler
@@ -127,14 +128,31 @@ namespace McpUnity.Tools
                 EditorUtility.SetDirty(targetGameObject);
             }
 
+            // Check if the GameObject is under a Canvas but lacks RectTransform
+            string warningMessage = null;
+            if (targetGameObject.GetComponentInParent<Canvas>() != null
+                && targetGameObject.GetComponent<RectTransform>() == null)
+            {
+                warningMessage = "WARNING: This GameObject is under a Canvas but has no RectTransform. "
+                               + "Use 'create_ui_element' for UI objects to get RectTransform automatically, "
+                               + "or add a RectTransform via 'update_component'.";
+            }
+
             // Compose result message and return as JObject (like UpdateComponentTool)
+            string message = propertiesUpdated
+                ? $"GameObject '{targetGameObject.name}' (identified by {identifierInfo}) updated successfully."
+                : $"No properties were changed for GameObject '{targetGameObject.name}' (identified by {identifierInfo}).";
+
+            if (warningMessage != null)
+            {
+                message += $"\n{warningMessage}";
+            }
+
             return new JObject
             {
                 ["success"] = true,
                 ["type"] = "text",
-                ["message"] = propertiesUpdated
-                    ? $"GameObject '{targetGameObject.name}' (identified by {identifierInfo}) updated successfully."
-                    : $"No properties were changed for GameObject '{targetGameObject.name}' (identified by {identifierInfo}).",
+                ["message"] = message,
                 ["instanceId"] = targetGameObject.GetInstanceID(),
                 ["name"] = targetGameObject.name,
                 ["path"] = GetGameObjectPath(targetGameObject)
