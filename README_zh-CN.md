@@ -67,6 +67,9 @@ MCP Unity 通过将 Unity `Library/PackedCache` 文件夹添加到您的工作�
 - `update_component`: 更新 GameObject 上的组件字段，如果 GameObject 不包含该组件则添加它。支持通过资源路径字符串设置资源引用（Sprite、Material、Font 等）
   > **示例提示:** "给 Player 对象添加 Rigidbody 组件并设置其质量为 5" 或 "将 Image 的 sprite 设置为 Assets/Sprites/icon.png"
 
+- `remove_component`: 通过实例 ID 或层级路径从 GameObject 上移除组件。支持撤销
+  > **示例提示:** "移除 Button 对象上的 Outline 组件"
+
 - `add_package`: 在 Unity 包管理器中安装新包
   > **示例提示:** "给我的项目添加 TextMeshPro 包"
 

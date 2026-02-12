@@ -67,6 +67,9 @@ MCP Unityは、Unityの`Library/PackedCache`フォルダーをワークスペー
 - `update_component`: GameObject上のコンポーネントフィールドを更新、またはGameObjectに含まれていない場合は追加。アセット参照（Sprite、Material、Fontなど）はアセットパス文字列で指定可能
   > **例:** "PlayerオブジェクトにRigidbodyコンポーネントを追加し、その質量を5に設定" または "ImageのspriteをAssets/Sprites/icon.pngに設定"
 
+- `remove_component`: インスタンスIDまたは階層パスでGameObjectからコンポーネントを削除。元に戻す操作をサポート
+  > **例:** "ButtonオブジェクトからOutlineコンポーネントを削除"
+
 - `add_package`: Unityパッケージマネージャーに新しいパッケージをインストール
   > **例:** "プロジェクトにTextMeshProパッケージを追加"
 

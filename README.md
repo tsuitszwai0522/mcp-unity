@@ -69,6 +69,9 @@ The following tools are available for manipulating and querying Unity scenes and
 - `update_component`: Updates component fields on a GameObject or adds it to the GameObject if it does not contain the component. Supports asset references (Sprite, Material, Font, etc.) via asset path strings
   > **Example prompt:** "Add a Rigidbody component to the Player object and set its mass to 5" or "Set the Image sprite to Assets/Sprites/icon.png"
 
+- `remove_component`: Removes a component from a GameObject by instance ID or hierarchy path. Supports undo
+  > **Example prompt:** "Remove the Outline component from the Button object"
+
 - `add_package`: Installs new packages in the Unity Package Manager
   > **Example prompt:** "Add the TextMeshPro package to my project"
 

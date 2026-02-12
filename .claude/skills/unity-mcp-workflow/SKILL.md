@@ -30,7 +30,7 @@ create_material → assign_material
 create_prefab / create_scriptable_object → add_asset_to_scene
 save_as_prefab → add_asset_to_scene          # 場景物件 → Prefab 資產
 open_prefab_contents → 修改工具 → save_prefab_contents  # 編輯既有 Prefab
-update_gameobject → update_component / move / rotate / scale / reparent
+update_gameobject → update_component / remove_component / move / rotate / scale / reparent
 ```
 
 ## Prefab Edit Mode（編輯既有 Prefab）
