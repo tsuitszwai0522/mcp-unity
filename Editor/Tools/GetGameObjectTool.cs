@@ -75,8 +75,13 @@ namespace McpUnity.Tools
                 );
             }
 
+            // Parse optional depth control parameters
+            int maxDepth = parameters["maxDepth"]?.ToObject<int?>() ?? -1;
+            bool includeChildren = parameters["includeChildren"]?.ToObject<bool?>() ?? true;
+
             // Convert the GameObject to a JObject using the resource's static method
-            JObject gameObjectData = GetGameObjectResource.GameObjectToJObject(gameObject, true);
+            JObject gameObjectData = GetGameObjectResource.GameObjectToJObject(
+                gameObject, true, maxDepth, 0, includeChildren);
 
             // Create the response
             return new JObject

@@ -15,6 +15,20 @@ const paramsSchema = z.object({
     .describe(
       "The instance ID (integer), name, or hierarchical path of the GameObject to retrieve. Use hierarchical paths like 'Canvas/Panel/Button' for nested objects."
     ),
+  maxDepth: z
+    .number()
+    .int()
+    .gte(-1)
+    .optional()
+    .describe(
+      "Maximum depth for traversing children. 0 = target only, 1 = direct children, -1 = unlimited (default)"
+    ),
+  includeChildren: z
+    .boolean()
+    .optional()
+    .describe(
+      "Whether to include child GameObjects in the response. Default: true"
+    ),
 });
 
 /**
@@ -63,13 +77,15 @@ async function toolHandler(
   mcpUnity: McpUnity,
   params: z.infer<typeof paramsSchema>
 ): Promise<CallToolResult> {
-  const { idOrName } = params;
+  const { idOrName, maxDepth, includeChildren } = params;
 
   // Send request to Unity
   const response = await mcpUnity.sendRequest({
     method: toolName,
     params: {
       idOrName: idOrName,
+      ...(maxDepth !== undefined && { maxDepth }),
+      ...(includeChildren !== undefined && { includeChildren }),
     },
   });
 

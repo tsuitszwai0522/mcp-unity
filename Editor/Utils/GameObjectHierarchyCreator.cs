@@ -56,6 +56,13 @@ namespace McpUnity.Utils
                     if (currentParent != null)
                     {
                         newObj.transform.SetParent(currentParent.transform, false);
+
+                        // Auto-add RectTransform for objects created under a Canvas hierarchy
+                        if (currentParent.GetComponentInParent<Canvas>() != null
+                            && newObj.GetComponent<RectTransform>() == null)
+                        {
+                            Undo.AddComponent<RectTransform>(newObj);
+                        }
                     }
                     foundOrCreatedObject = newObj;
                     currentParent = newObj;

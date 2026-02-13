@@ -90,18 +90,19 @@ namespace McpUnity.Resources
         /// </summary>
         /// <param name="gameObject">The GameObject to convert</param>
         /// <param name="includeDetailedComponents">Whether to include detailed component information</param>
+        /// <param name="maxDepth">Maximum depth for child traversal (-1 = unlimited)</param>
+        /// <param name="currentDepth">Current recursion depth (internal use)</param>
+        /// <param name="includeChildren">Whether to include child GameObjects</param>
         /// <returns>A JObject representing the GameObject</returns>
-        public static JObject GameObjectToJObject(GameObject gameObject, bool includeDetailedComponents)
+        public static JObject GameObjectToJObject(
+            GameObject gameObject,
+            bool includeDetailedComponents,
+            int maxDepth = -1,
+            int currentDepth = 0,
+            bool includeChildren = true)
         {
             if (gameObject == null) return null;
-            
-            // Add children
-            JArray childrenArray = new JArray();
-            foreach (Transform child in gameObject.transform)
-            {
-                childrenArray.Add(GameObjectToJObject(child.gameObject, includeDetailedComponents));
-            }
-            
+
             // Create a JObject for the game object
             JObject gameObjectJson = new JObject
             {
@@ -112,10 +113,37 @@ namespace McpUnity.Resources
                 ["layer"] = gameObject.layer,
                 ["layerName"] = LayerMask.LayerToName(gameObject.layer),
                 ["instanceId"] = gameObject.GetInstanceID(),
-                ["components"] = GetComponentsInfo(gameObject, includeDetailedComponents),
-                ["children"] = childrenArray
+                ["components"] = GetComponentsInfo(gameObject, includeDetailedComponents)
             };
-            
+
+            // Add children with depth control
+            JArray childrenArray = new JArray();
+            if (includeChildren && (maxDepth < 0 || currentDepth < maxDepth))
+            {
+                foreach (Transform child in gameObject.transform)
+                {
+                    childrenArray.Add(GameObjectToJObject(
+                        child.gameObject, includeDetailedComponents,
+                        maxDepth, currentDepth + 1, includeChildren));
+                }
+            }
+            else if (gameObject.transform.childCount > 0)
+            {
+                // Only report child summary (no recursion)
+                JArray childSummary = new JArray();
+                foreach (Transform child in gameObject.transform)
+                {
+                    childSummary.Add(new JObject
+                    {
+                        ["name"] = child.name,
+                        ["instanceId"] = child.gameObject.GetInstanceID(),
+                        ["childCount"] = child.childCount
+                    });
+                }
+                gameObjectJson["childSummary"] = childSummary;
+            }
+            gameObjectJson["children"] = childrenArray;
+
             return gameObjectJson;
         }
         

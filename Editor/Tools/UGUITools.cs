@@ -897,7 +897,7 @@ namespace McpUnity.Tools
                 if (colorObj != null)
                 {
                     PropertyInfo colorProp = tmpTextType.GetProperty("color");
-                    colorProp?.SetValue(tmpText, UGUIToolUtils.ParseColor(colorObj));
+                    colorProp?.SetValue(tmpText, UGUIToolUtils.ParseColor(colorObj, Color.white));
                 }
             }
 

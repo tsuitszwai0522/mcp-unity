@@ -1,9 +1,11 @@
 using System;
+using System.Linq;
 using System.Reflection;
 using McpUnity.Unity;
 using McpUnity.Services;
 using McpUnity.Utils;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 using UnityEditor;
 using Newtonsoft.Json.Linq;
 using ComponentResolver = McpUnity.Utils.ComponentTypeResolver;
@@ -18,7 +20,7 @@ namespace McpUnity.Tools
         public UpdateComponentTool()
         {
             Name = "update_component";
-            Description = "Updates component fields on a GameObject or adds it to the GameObject if it does not contain the component";
+            Description = "Updates component fields on a GameObject or adds it to the GameObject if it does not contain the component. Prefer passing componentData in the same call to avoid duplicate additions.";
         }
         
         /// <summary>
@@ -91,8 +93,9 @@ namespace McpUnity.Tools
             Type componentType = ComponentResolver.FindComponentType(componentName);
 
             // Try to find the existing component using resolved Type (preferred) or string fallback
+            // Use GetComponents (plural) to ensure we find all instances and take the first
             Component component = componentType != null
-                ? gameObject.GetComponent(componentType)
+                ? gameObject.GetComponents(componentType).FirstOrDefault()
                 : gameObject.GetComponent(componentName);
 
             // If component not found, try to add it
@@ -106,16 +109,25 @@ namespace McpUnity.Tools
                     );
                 }
 
-                component = Undo.AddComponent(gameObject, componentType);
-
-                // Ensure changes are saved
-                EditorUtility.SetDirty(gameObject);
-                if (PrefabUtility.IsPartOfAnyPrefab(gameObject))
+                // Defensive re-check to prevent duplicate additions (e.g., in batch operations)
+                var existing = gameObject.GetComponents(componentType);
+                if (existing.Length > 0)
                 {
-                    PrefabUtility.RecordPrefabInstancePropertyModifications(component);
+                    component = existing[0];
                 }
+                else
+                {
+                    component = Undo.AddComponent(gameObject, componentType);
 
-                McpLogger.LogInfo($"[MCP Unity] Added component '{componentName}' to GameObject '{gameObject.name}'");
+                    // Ensure changes are saved
+                    EditorUtility.SetDirty(gameObject);
+                    if (PrefabUtility.IsPartOfAnyPrefab(gameObject))
+                    {
+                        PrefabUtility.RecordPrefabInstancePropertyModifications(component);
+                    }
+
+                    McpLogger.LogInfo($"[MCP Unity] Added component '{componentName}' to GameObject '{gameObject.name}'");
+                }
             }
             // Update component fields
             if (componentData != null && componentData.Count > 0)
@@ -341,6 +353,117 @@ namespace McpUnity.Tools
                 );
             }
             
+            // Handle scene object references via instance ID (integer value)
+            if (typeof(UnityEngine.Object).IsAssignableFrom(targetType) && token.Type == JTokenType.Integer)
+            {
+                int id = token.ToObject<int>();
+                UnityEngine.Object obj = EditorUtility.InstanceIDToObject(id);
+                if (obj != null)
+                {
+                    // If target is GameObject, return directly or extract from component
+                    if (targetType == typeof(GameObject))
+                        return obj is GameObject go ? go : (obj is Component comp ? comp.gameObject : null);
+
+                    // If target is a Component type, try to get it from the resolved object
+                    if (typeof(Component).IsAssignableFrom(targetType))
+                    {
+                        if (targetType.IsAssignableFrom(obj.GetType()))
+                            return obj;
+                        if (obj is GameObject gameObj)
+                            return gameObj.GetComponent(targetType);
+                        if (obj is Component c)
+                            return c.gameObject.GetComponent(targetType);
+                    }
+
+                    // For other UnityEngine.Object types, return if assignable
+                    if (targetType.IsAssignableFrom(obj.GetType()))
+                        return obj;
+                }
+                McpLogger.LogWarning($"[MCP Unity] Could not resolve instance ID {id} to type {targetType.Name}");
+                return null;
+            }
+
+            // Handle scene object references via structured reference ({"instanceId": 123} or {"objectPath": "Path/To/Object"})
+            if (typeof(UnityEngine.Object).IsAssignableFrom(targetType) && token.Type == JTokenType.Object)
+            {
+                JObject refObj = (JObject)token;
+                // Skip if this looks like a Vector/Color/etc. (has x/y/z/r/g/b keys) — those are handled above
+                if (refObj.ContainsKey("instanceId") || refObj.ContainsKey("objectPath"))
+                {
+                    UnityEngine.Object resolvedObj = null;
+
+                    // 1) Try instanceId first
+                    if (refObj["instanceId"] != null && refObj["instanceId"].Type != JTokenType.Null)
+                    {
+                        int id = refObj["instanceId"].ToObject<int>();
+                        resolvedObj = EditorUtility.InstanceIDToObject(id);
+                    }
+
+                    // 2) Fallback to objectPath if instanceId failed or was not provided
+                    if (resolvedObj == null && refObj["objectPath"] != null && refObj["objectPath"].Type != JTokenType.Null)
+                    {
+                        string objPath = refObj["objectPath"].ToObject<string>();
+                        GameObject found = GameObject.Find(objPath);
+
+                        // Search across all loaded scenes
+                        if (found == null)
+                        {
+                            for (int i = 0; i < SceneManager.sceneCount && found == null; i++)
+                            {
+                                Scene scene = SceneManager.GetSceneAt(i);
+                                if (!scene.isLoaded) continue;
+                                foreach (GameObject root in scene.GetRootGameObjects())
+                                {
+                                    Transform t = root.transform.Find(objPath);
+                                    if (t == null && root.name == objPath.Split('/')[0])
+                                    {
+                                        // Try relative path from root
+                                        string relativePath = objPath.Contains("/")
+                                            ? objPath.Substring(objPath.IndexOf('/') + 1)
+                                            : null;
+                                        if (relativePath != null)
+                                            t = root.transform.Find(relativePath);
+                                        else if (root.name == objPath)
+                                            t = root.transform;
+                                    }
+                                    if (t != null)
+                                    {
+                                        found = t.gameObject;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        resolvedObj = found;
+                    }
+
+                    if (resolvedObj == null)
+                    {
+                        McpLogger.LogWarning($"[MCP Unity] Could not resolve scene object reference to type {targetType.Name}");
+                        return null;
+                    }
+
+                    // Resolve to the requested target type
+                    if (targetType == typeof(GameObject))
+                        return resolvedObj is GameObject g ? g : (resolvedObj is Component c ? c.gameObject : null);
+
+                    if (typeof(Component).IsAssignableFrom(targetType))
+                    {
+                        if (targetType.IsAssignableFrom(resolvedObj.GetType()))
+                            return resolvedObj;
+                        GameObject host = resolvedObj is GameObject go ? go : (resolvedObj as Component)?.gameObject;
+                        return host?.GetComponent(targetType);
+                    }
+
+                    // Cover UnityEngine.Object base type and other assignable types
+                    if (targetType.IsAssignableFrom(resolvedObj.GetType()))
+                        return resolvedObj;
+
+                    McpLogger.LogWarning($"[MCP Unity] Resolved object type {resolvedObj.GetType().Name} is not assignable to {targetType.Name}");
+                    return null;
+                }
+            }
+
             // Handle UnityEngine.Object derived types (Sprite, Material, Font, AudioClip, etc.)
             if (typeof(UnityEngine.Object).IsAssignableFrom(targetType) && token.Type == JTokenType.String)
             {
