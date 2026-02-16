@@ -1,6 +1,6 @@
 # Feature Design: Unity Skills 擴充
 
-> **狀態**：Phase 1 方案已確定，待實作
+> **狀態**：Phase 1 已完成，Phase 2 待實作
 > **建立日期**：2026-02-15
 > **相關模組**：`shared-ai-sop~/skills/`
 
@@ -29,7 +29,7 @@
 
 | Phase | 內容 | 優先級 | 狀態 |
 |-------|------|--------|------|
-| Phase 1 | [`unity-test-debug`](#phase-1-unity-test-debug)（新 skill） | P0 | 方案已確定 |
+| Phase 1 | [`unity-test-debug`](#phase-1-unity-test-debug)（新 skill） | P0 | ✅ 已完成 |
 | Phase 2 | [擴充 `unity-mcp-workflow`](#phase-2-擴充-unity-mcp-workflow)（Prefab Variant、Material 流程、Shader 引導、Scene 管理、Transform） | P1 | 討論完成 |
 | Phase 3 | [擴充 `unity-mcp-workflow`](#phase-3-擴充-unity-mcp-workflow-續)（Package 管理、Menu Item、ScriptableObject） | P2 | 討論完成 |
 
@@ -500,13 +500,13 @@ ScriptableObject 建立：
 
 ## 4. 任務清單
 
-- [ ] Phase 1：設計並實作 `unity-test-debug` skill
+- [x] Phase 1：設計並實作 `unity-test-debug` skill
   - [x] 確認核心規則與流程
   - [x] 方案比較與決策（方案 B：分層整合）
-  - [ ] 擴充 `unity-mcp-workflow`（新增修改後驗證規則 + EditMode 優先原則簡述 + 禁止事項）
-  - [ ] 撰寫 `unity-test-debug/SKILL.md`
-  - [ ] 撰寫 `unity-test-debug/claude-rule.md`
-  - [ ] 更新 `install-claude.sh` 註冊新 skill
+  - [x] 擴充 `unity-mcp-workflow`（新增修改後驗證規則 + EditMode 優先原則簡述 + 禁止事項）
+  - [x] 撰寫 `unity-test-debug/SKILL.md`
+  - [x] 撰寫 `unity-test-debug/claude-rule.md`
+  - [x] ~~更新 `install-claude.sh` 註冊新 skill~~ — 不需要，`install-claude.sh` 自動發現 `skills/*/claude-rule.md`
 - [ ] Phase 2：擴充 `unity-mcp-workflow`
   - [x] 確認擴充內容（Prefab Variant、Material 流程、Shader 引導、Scene 管理、Transform）
   - [x] 確認禁止事項（3 條 Material 相關）
