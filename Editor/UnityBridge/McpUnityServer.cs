@@ -490,6 +490,10 @@ namespace McpUnity.Unity
             // Register GetGameObjectResource
             GetGameObjectResource getGameObjectResource = new GetGameObjectResource();
             _resources.Add(getGameObjectResource.Name, getGameObjectResource);
+
+            // Register GetShadersResource
+            GetShadersResource getShadersResource = new GetShadersResource();
+            _resources.Add(getShadersResource.Name, getShadersResource);
         }
         
         /// <summary>

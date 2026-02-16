@@ -1,6 +1,6 @@
 # Feature Design: Unity Skills 擴充
 
-> **狀態**：Phase 1 已完成，Phase 2 待實作
+> **狀態**：Phase 1-2 已完成，Phase 3 待實作
 > **建立日期**：2026-02-15
 > **相關模組**：`shared-ai-sop~/skills/`
 
@@ -30,7 +30,7 @@
 | Phase | 內容 | 優先級 | 狀態 |
 |-------|------|--------|------|
 | Phase 1 | [`unity-test-debug`](#phase-1-unity-test-debug)（新 skill） | P0 | ✅ 已完成 |
-| Phase 2 | [擴充 `unity-mcp-workflow`](#phase-2-擴充-unity-mcp-workflow)（Prefab Variant、Material 流程、Shader 引導、Scene 管理、Transform） | P1 | 討論完成 |
+| Phase 2 | [擴充 `unity-mcp-workflow`](#phase-2-擴充-unity-mcp-workflow)（Prefab Variant、Material 流程、Shader 引導、Scene 管理、Transform） | P1 | ✅ 已完成 |
 | Phase 3 | [擴充 `unity-mcp-workflow`](#phase-3-擴充-unity-mcp-workflow-續)（Package 管理、Menu Item、ScriptableObject） | P2 | 討論完成 |
 
 ### Skill 引用關係（方案 B：分層整合）
@@ -507,13 +507,13 @@ ScriptableObject 建立：
   - [x] 撰寫 `unity-test-debug/SKILL.md`
   - [x] 撰寫 `unity-test-debug/claude-rule.md`
   - [x] ~~更新 `install-claude.sh` 註冊新 skill~~ — 不需要，`install-claude.sh` 自動發現 `skills/*/claude-rule.md`
-- [ ] Phase 2：擴充 `unity-mcp-workflow`
+- [x] Phase 2：擴充 `unity-mcp-workflow`
   - [x] 確認擴充內容（Prefab Variant、Material 流程、Shader 引導、Scene 管理、Transform）
   - [x] 確認禁止事項（3 條 Material 相關）
-  - [ ] 前置：擴充 `create_prefab` 支援 Prefab Variant（C# + TypeScript）
-  - [ ] 前置（建議）：新增 `unity://shaders` 資源
-  - [ ] 更新 `unity-mcp-workflow/SKILL.md`
-  - [ ] 更新 `unity-mcp-workflow/claude-rule.md`
+  - [x] 前置：擴充 `create_prefab` 支援 Prefab Variant（C# + TypeScript）
+  - [x] 前置（建議）：新增 `unity://shaders` 資源
+  - [x] 更新 `unity-mcp-workflow/SKILL.md`
+  - [x] 更新 `unity-mcp-workflow/claude-rule.md`
 - [ ] Phase 3：擴充 `unity-mcp-workflow`（續）
   - [x] 確認擴充內容（Package 管理、Menu Item、ScriptableObject）
   - [x] 確認禁止事項（3 條）

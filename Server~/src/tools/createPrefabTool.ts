@@ -6,13 +6,14 @@ import { Logger } from '../utils/logger.js';
 
 // Constants for the tool
 const toolName = 'create_prefab';
-const toolDescription = 'Creates a prefab with optional MonoBehaviour script and serialized field values';
+const toolDescription = 'Creates a prefab with optional MonoBehaviour script and serialized field values. Supports creating Prefab Variants by specifying a basePrefabPath.';
 
 // Parameter schema for the tool
 const paramsSchema = z.object({
   componentName: z.string().optional().describe('The name of the MonoBehaviour Component to add to the prefab (optional)'),
   prefabName: z.string().describe('The name of the prefab to create'),
-  fieldValues: z.record(z.any()).optional().describe('Optional JSON object of serialized field values to apply to the prefab')
+  fieldValues: z.record(z.any()).optional().describe('Optional JSON object of serialized field values to apply to the prefab'),
+  basePrefabPath: z.string().optional().describe('Asset path to a base prefab to create a Prefab Variant from (e.g., "Assets/Prefabs/Base.prefab"). When provided, the new prefab will be a Variant of the base prefab.')
 });
 
 /**
