@@ -27,11 +27,11 @@
 
 ## 2. Phase 總覽
 
-| Phase | Skill | 優先級 | 狀態 |
-|-------|-------|--------|------|
-| Phase 1 | [`unity-test-debug`](#phase-1-unity-test-debug) | P0 | 待設計 |
-| Phase 2 | [`unity-3d-scene-builder`](#phase-2-unity-3d-scene-builder) | P1 | 待設計 |
-| Phase 3 | [`unity-project-setup`](#phase-3-unity-project-setup) | P2 | 待設計 |
+| Phase | 內容 | 優先級 | 狀態 |
+|-------|------|--------|------|
+| Phase 1 | [`unity-test-debug`](#phase-1-unity-test-debug)（新 skill） | P0 | 方案已確定 |
+| Phase 2 | [擴充 `unity-mcp-workflow`](#phase-2-擴充-unity-mcp-workflow)（Prefab Variant、Material 流程、Shader 引導、Scene 管理、Transform） | P1 | 討論完成 |
+| Phase 3 | [擴充 `unity-mcp-workflow`](#phase-3-擴充-unity-mcp-workflow-續)（Package 管理、Menu Item、ScriptableObject） | P2 | 討論完成 |
 
 ### Skill 引用關係（方案 B：分層整合）
 
@@ -40,7 +40,7 @@ unity-mcp-workflow (共用基底，Phase 1 擴充)
 ├── [新增] 修改後驗證規則：改 C# → recompile_scripts → 確認編譯通過
 ├── [新增] EditMode 優先原則（簡述 + 指向 unity-test-debug 取得完整 checklist）
 ├── unity-ui-builder       (引用共用規則 + Figma/UI 專用，自動受益於驗證規則)
-├── unity-3d-scene-builder (引用共用規則 + 3D 專用，自動受益於驗證規則)
+├── (Phase 2 擴充：Prefab Variant、Material 流程、Scene 管理)
 └── unity-test-debug       (引用共用規則 + 完整測試/除錯迭代循環)
 ```
 
@@ -192,7 +192,7 @@ get_console_logs ──→ 有 warning/error？──→ 分析 → 修正
 | `unity-mcp-workflow` | **雙向**：(1) 引用其錯誤處理表、工具注意事項；(2) 擴充它，新增「修改後驗證規則」和「EditMode 優先原則」簡述 |
 | `test-engineer` | 引用：測試文件生成格式（`TestDoc_*.md`） |
 | `unity-ui-builder` | 間接受益：透過 `unity-mcp-workflow` 的新增驗證規則，建構涉及 C# 時會自動 recompile |
-| `unity-3d-scene-builder` | 間接受益：同上 |
+| Phase 2 擴充 | 直接：Prefab Variant、Material 流程、Scene 管理新增至 `unity-mcp-workflow` |
 
 ### `unity-mcp-workflow` 擴充內容（方案 B 具體變更）
 
@@ -235,173 +235,235 @@ Phase 1 所有討論事項已結案。可進入方案比較階段。
 
 ---
 
-## Phase 2: `unity-3d-scene-builder`
+## Phase 2: 擴充 `unity-mcp-workflow`
 
 ### 定位
 
-3D 場景建構引導，與 `unity-ui-builder`（2D UI）互補。涵蓋場景管理、3D 物件佈局、Material 視覺設計。
+> **背景**：原計劃為獨立 skill `unity-3d-scene-builder`，但經分析使用者實際工作流後決定合併。
+>
+> 實際手遊專案架構：僅 2 個極簡 Scene（GameStarter + Download），真正的遊戲內容全在 AssetBundle 的 Prefab 中。Scene 建構需求極低，獨立 skill 內容過薄，有價值的部分應直接擴充 `unity-mcp-workflow`。
 
-### 觸發條件
+將以下內容新增至 `unity-mcp-workflow`（純新增段落，不修改既有內容）：
 
-- 「建一個 3D 場景」「搭建環境」
-- 「放置物件到場景」「排列這些物件」
-- 「建立材質」「設定 shader」「改顏色」
-- 「管理場景」「建立新場景」「多場景編輯」
+### 擴充內容清單
 
-### 涵蓋的 MCP 工具與資源
+#### 1. Prefab Variant 工作流（新增段落）
 
-| 工具/資源 | 用途 |
-|-----------|------|
-| `create_scene` / `load_scene` / `save_scene` / `delete_scene` / `unload_scene` | 場景生命週期管理 |
-| `get_scene_info` | 查詢場景狀態 |
-| `update_gameobject` / `get_gameobject` / `delete_gameobject` | GameObject CRUD |
-| `move_gameobject` / `rotate_gameobject` / `scale_gameobject` / `set_transform` | Transform 操作 |
-| `duplicate_gameobject` / `reparent_gameobject` | 複製與重組階層 |
-| `create_material` / `modify_material` / `assign_material` / `get_material_info` | Material 全流程 |
-| `add_asset_to_scene` | 放置模型/Prefab 到場景 |
-| `batch_execute` | 批次操作 |
-| `unity://scenes_hierarchy` | 查詢場景階層 |
-| `unity://assets` | 查詢專案資源 |
+現有 `unity-mcp-workflow` 的 Prefab 操作僅涵蓋「新建 Prefab」和「修改既有 Prefab」，缺少 Prefab Variant 工作流。
 
-### 核心流程（草案）
+**新增內容（草案）：**
 
 ```
-第一階段：場景規劃
-    ├── 確認場景用途（遊戲關卡 / 測試場景 / Prototype）
-    ├── 規劃物件階層樹
-    └── 規劃 Material 清單
+C. Prefab Variant：
+   create_prefab(prefabName, basePrefab) 建立 Variant
+   → open_prefab_contents 開啟 Variant
+   → 修改差異屬性（override）
+   → save_prefab_contents 儲存
 
-第二階段：場景建立
-    ├── create_scene / load_scene
-    └── 建立根層級結構（Environment / Characters / Props / Lighting）
-
-第三階段：Material 準備
-    ├── create_material（指定 shader、顏色）
-    └── modify_material（調整屬性）
-
-第四階段：物件佈局
-    ├── update_gameobject 建立物件
-    ├── add_asset_to_scene 放置外部資源
-    ├── set_transform 設定位置/旋轉/縮放
-    ├── assign_material 指定材質
-    ├── duplicate_gameobject 批量佈置
-    └── reparent_gameobject 整理階層
-
-第五階段：Prefab 化
-    ├── 可複用物件 → save_as_prefab
-    └── add_asset_to_scene 放置更多實例
-
-第六階段：儲存
-    └── save_scene
+使用時機：多個物件共用基底結構但有屬性差異（如不同怪物、不同等級按鈕）。
+基底 Prefab 修改後，所有 Variant 自動繼承變更。
 ```
 
-### 關鍵規則（草案）
+#### 2. Material 設計流程（新增段落）
 
-1. **先查詢再操作**：引用 `unity-mcp-workflow` 核心規則。
-2. **階層結構規範**：建議使用語意化根節點（Environment、Props、Characters、UI、Managers）。
-3. **Transform 最佳實踐**：
-   - 優先用 `set_transform` 一次設定 position + rotation + scale
-   - world vs local space 選擇：放置用 world，子物件微調用 local
-   - 使用 `relative: true` 做增量調整
-4. **Material 工作流**：
-   - 先 `create_material` 存到 `Assets/Materials/`
-   - 再 `assign_material` 指定給物件
-   - 用 `get_material_info` 查詢 shader 可用屬性再修改
-5. **批量佈置**：用 `duplicate_gameobject` + `count` 批量建立，再逐一 `set_transform`。
-6. **場景管理**：
-   - 建立前用 `get_scene_info` 確認當前場景狀態
-   - dirty scene 先 `save_scene` 再 `load_scene` 切換
-   - Multi-scene：`load_scene` + `additive: true`
+現有 `unity-mcp-workflow` 僅在工具依賴關係列出 `create_material → assign_material`，缺乏完整 Material 設計引導。
 
-### 與其他 Skill 的關係
+**新增內容（草案）：**
 
-| Skill | 關係 |
-|-------|------|
-| `unity-mcp-workflow` | 引用：核心規則、batch_execute、Prefab 操作、錯誤處理、工具注意事項 |
-| `unity-ui-builder` | 互補：UI Builder 處理 2D UI，此 skill 處理 3D 場景 |
+```
+Material 工作流：
+1. get_material_info 查詢既有 Material 的 shader 屬性（先查再改）
+2. create_material 建立新 Material（存至 Assets/Materials/）
+   - 未指定 shader 時自動偵測 Render Pipeline（URP → Universal Render Pipeline/Lit）
+3. modify_material 調整屬性（顏色、金屬度、貼圖等）
+4. assign_material 指定給 GameObject（可指定 slot）
+5. batch_execute 批量 assign 同一 Material 給多個物件
+```
+
+#### 2.1 Shader 引導（新增段落）
+
+**Shader 使用層級：**
+
+| 方式 | 做法 | 適用場景 |
+|------|------|---------|
+| 引用既有 Shader | `create_material` 指定 shader 名稱（如 `"Shader Graphs/MyShader"`） | 專案已有 Shader Graph shader |
+| 寫 URP ShaderLab | AI 用 Write 工具寫 `.shader` 檔 → `recompile_scripts` → `create_material` 引用 | 需要自訂 shader 效果 |
+| 建立 Shader Graph | **不支援** — `.shadergraph` 為複雜 JSON 結構，應在 Unity Editor 中視覺化建立 | — |
+
+**Shader property 名稱差異（關鍵陷阱）：**
+
+| 屬性 | URP (Universal Render Pipeline/Lit) | Built-in (Standard) |
+|------|-------------------------------------|---------------------|
+| 基底顏色 | `_BaseColor` | `_Color` |
+| 基底貼圖 | `_BaseMap` | `_MainTex` |
+| 金屬度 | `_Metallic` | `_Metallic` |
+| 平滑度 | `_Smoothness` | `_Glossiness` |
+
+> 規則：修改 Material 前必須先用 `get_material_info` 確認 shader 可用屬性名稱，不可假設。
+
+**前置工具需求（建議）：**
+
+新增 `unity://shaders` 資源或擴充 `unity://assets` 支援 shader 篩選，讓 AI 能查詢專案中可用的 shader 清單。目前 AI 只能猜測 shader 名稱或靠使用者提供。
+
+#### 3. Scene 管理基本操作（新增段落）
+
+現有 `unity-mcp-workflow` 未涵蓋 Scene 生命週期管理。
+
+**新增內容（草案）：**
+
+```
+Scene 管理：
+- 建立前用 get_scene_info 確認當前場景狀態（名稱、dirty、已載入場景列表）
+- dirty scene 先 save_scene 再切換，避免遺失修改
+- create_scene 可用 addToBuildSettings: true 直接加入 Build Settings
+- Multi-scene 編輯：load_scene + additive: true
+- 卸載場景：unload_scene（saveIfDirty: true 避免遺失）
+```
+
+#### 4. Transform 最佳實踐（新增段落）
+
+現有 `unity-mcp-workflow` 的工具依賴關係列出 Transform 工具，但無使用引導。
+
+**新增內容（草案）：**
+
+```
+Transform 操作：
+- 優先用 set_transform 一次設定 position + rotation + scale（減少 API 呼叫）
+- world vs local space：放置物件用 world，子物件微調用 local
+- relative: true 做增量調整（如「往右移 2 單位」）
+- 批量佈置：duplicate_gameobject(count: N) → 逐一 set_transform
+```
+
+### 涉及的 MCP 工具
+
+| 工具 | 擴充內容 |
+|------|---------|
+| `create_material` / `modify_material` / `assign_material` / `get_material_info` | Material 設計流程 |
+| `create_scene` / `load_scene` / `save_scene` / `unload_scene` / `get_scene_info` | Scene 管理 |
+| `set_transform` / `move_gameobject` / `rotate_gameobject` / `scale_gameobject` | Transform 最佳實踐 |
+| `create_prefab`（**需擴充：Variant 支援**） | Prefab Variant 工作流 |
+| `unity://shaders`（**建議新增**） | 查詢可用 shader 清單 |
+
+### 前置任務：MCP 工具變更
+
+Phase 2 的 skill 擴充依賴以下 MCP 工具變更：
+
+#### 必要變更
+
+**`create_prefab` 支援 Prefab Variant**
+
+現有實作用 `PrefabUtility.SaveAsPrefabAsset` 建立全新 prefab。需新增：
+
+- 新增 `basePrefabPath` 參數（可選，string）
+- 有 `basePrefabPath` 時：`PrefabUtility.InstantiatePrefab(basePrefab)` → 套用修改 → `SaveAsPrefabAsset`（保留與 base 的連結，Unity 自動識別為 Variant）
+- 無 `basePrefabPath` 時：維持原有邏輯（建立獨立 prefab）
+- TypeScript 端同步更新 schema
+
+#### 建議變更
+
+**新增 `unity://shaders` 資源**
+
+讓 AI 能查詢專案中可用的 shader 清單（名稱 + 類型），避免猜測 shader 名稱。可延後至後續版本。
+
+### 禁止事項（新增至 `unity-mcp-workflow`）
+
+```
+- 不要在未用 get_material_info 查詢 shader 屬性前盲目 modify_material
+- 不要假設 shader property 名稱（URP 用 _BaseColor，Built-in 用 _Color，需先查詢）
+- 不要嘗試手寫 .shadergraph 檔案（結構過於複雜，應在 Unity Editor 中用 Shader Graph 視覺化建立）
+```
+
+### 已解決的討論事項
+
+- [x] ~~MCP 工具 `create_prefab` 是否支援建立 Prefab Variant？~~
+  → **不支援，需擴充**。新增 `basePrefabPath` 參數，列為 Phase 2 前置任務
+- [x] ~~Material 流程是否需要涵蓋 Shader Graph 相關操作？~~
+  → **是**。引用既有 Shader Graph shader + 撰寫 URP ShaderLab `.shader` 納入引導；手寫 `.shadergraph` 不支援
+- [x] ~~是否需要新增禁止事項？~~
+  → **是**。新增 3 條禁止事項（Material 查詢、shader property 名稱、Shader Graph 手寫）
 
 ### 待討論事項
 
-- [ ] 是否需要規範光照設定流程？（目前 MCP 工具不直接支援 Light 屬性，但可透過 `update_component` 操作）
-- [ ] 是否需要提供常見場景模板（如 Prototype 場景的標準結構）？
-- [ ] Terrain 操作是否納入？（需透過 `update_component` 操作 Terrain 組件）
+Phase 2 所有討論事項已結案。可進入方案比較階段。
 
 ---
 
-## Phase 3: `unity-project-setup`
+## Phase 3: 擴充 `unity-mcp-workflow`（續）
 
 ### 定位
 
-專案初始化與配置引導。涵蓋 Package 管理、Menu Item 執行、ScriptableObject 建立、Build Settings 場景管理。
+> **背景**：原計劃為獨立 skill `unity-project-setup`，但經分析後 Scene 管理已在 Phase 2 覆蓋，資料夾結構暫緩，剩餘內容（Package 管理、Menu Item、ScriptableObject）偏薄，不足以支撐獨立 skill。決定合併至 `unity-mcp-workflow`。
 
-> **注意**：資料夾結構規劃因需配合 Addressables / AssetBundle 打包策略，暫不納入本 skill 範圍。待策略確定後再擴充。
+將以下內容新增至 `unity-mcp-workflow`（純新增段落，不修改既有內容）：
 
-### 觸發條件
+### 擴充內容清單
 
-- 「設定專案」「初始化」
-- 「安裝 package」「加入 TextMeshPro」
-- 「執行選單功能」
-- 「建立 ScriptableObject」「建立配置資料」
-- 「設定 Build Settings」「加場景到 Build」
+#### 1. Package 管理（新增段落）
 
-### 涵蓋的 MCP 工具與資源
+現有 `unity-mcp-workflow` 未涵蓋 Package 安裝與管理流程。
 
-| 工具/資源 | 用途 |
-|-----------|------|
-| `add_package` | 安裝 Package（registry / github / disk） |
-| `execute_menu_item` | 執行 Unity 選單功能 |
-| `create_scriptable_object` | 建立 ScriptableObject 資產 |
-| `create_scene` | 建立場景（含 `addToBuildSettings`） |
-| `unity://packages` | 查詢已安裝 Package |
-| `unity://menu-items` | 查詢可用選單項目 |
-| `unity://assets` | 查詢專案資源 |
-
-### 核心流程（草案）
+**新增內容（草案）：**
 
 ```
-第一階段：專案狀態確認
-    ├── unity://packages → 列出已安裝 Package
-    ├── unity://assets → 了解現有資源結構
-    └── get_scene_info → 確認場景配置
-
-第二階段：Package 管理
-    ├── 確認需要安裝的 Package 清單
-    ├── add_package（source: registry / github / disk）
-    └── recompile_scripts → 確認無編譯錯誤
-
-第三階段：專案配置
-    ├── execute_menu_item → 執行必要的初始化選單（如 TMP Importer）
-    ├── create_scriptable_object → 建立配置資料
-    └── create_scene → 建立並加入 Build Settings
-
-第四階段：驗證
-    ├── recompile_scripts → 確認編譯正常
-    └── unity://packages → 確認 Package 安裝成功
+Package 管理：
+1. unity://packages 查詢已安裝 Package（先查再裝，避免重複）
+2. add_package 安裝 Package：
+   - registry：官方 Package（如 com.unity.textmeshpro）
+   - github：社群 Package（需 repository URL + 可選 branch / path）
+   - disk：本地 Package（需完整路徑）
+3. recompile_scripts 確認安裝後無編譯衝突
+4. unity://packages 確認安裝成功
 ```
 
-### 關鍵規則（草案）
+#### 2. Menu Item 執行（新增段落）
 
-1. **先查詢再安裝**：用 `unity://packages` 確認是否已安裝，避免重複。
-2. **Package 來源選擇**：
-   - `registry`：官方 Unity Package（如 `com.unity.textmeshpro`）
-   - `github`：社群 Package（需 repository URL + 可選 branch / path）
-   - `disk`：本地 Package（需完整路徑）
-3. **安裝後驗證**：每次 `add_package` 後 `recompile_scripts` 確認無衝突。
-4. **Menu Item 使用**：先用 `unity://menu-items` 查詢可用項目，確認路徑正確。
-5. **ScriptableObject**：需指定已存在的 C# 類別名（繼承 `ScriptableObject`），工具不會建立腳本。
+現有 `unity-mcp-workflow` 未涵蓋 Menu Item 使用引導。
 
-### 與其他 Skill 的關係
+**新增內容（草案）：**
 
-| Skill | 關係 |
-|-------|------|
-| `unity-mcp-workflow` | 引用：核心規則、錯誤處理 |
-| `unity-test-debug` | 銜接：專案設定完成後可進入測試驗證 |
+```
+Menu Item 執行：
+- 先用 unity://menu-items 查詢可用項目，確認路徑正確
+- execute_menu_item 執行（路徑格式如 "GameObject/Create Empty"）
+- 用途：觸發 Unity 內建或自訂選單功能（如 TMP Importer、Asset 匯入設定）
+```
 
-### 待討論事項
+#### 3. ScriptableObject 建立（新增段落）
 
-- [ ] 是否需要提供常用 Package 推薦清單？（如 TMP、Cinemachine、Input System）
-- [ ] 資料夾結構規劃待 Addressables / AssetBundle 策略確定後再納入
-- [ ] 是否需要涵蓋 Project Settings 的配置？（目前 MCP 工具不直接支援 PlayerSettings 等）
+現有 `unity-mcp-workflow` 未涵蓋 ScriptableObject 建立流程。
+
+**新增內容（草案）：**
+
+```
+ScriptableObject 建立：
+- create_scriptable_object 需指定已存在的 C# 類別名（繼承 ScriptableObject）
+- 工具不會建立 C# 腳本，類別必須先存在且編譯通過
+- 建立前先 recompile_scripts 確認類別可用
+```
+
+### 涉及的 MCP 工具
+
+| 工具/資源 | 擴充內容 |
+|-----------|---------|
+| `add_package` | Package 管理流程 |
+| `execute_menu_item` | Menu Item 執行引導 |
+| `create_scriptable_object` | ScriptableObject 建立流程 |
+| `unity://packages` | Package 查詢（先查再裝） |
+| `unity://menu-items` | Menu Item 查詢（先查再執行） |
+
+### 禁止事項（新增至 `unity-mcp-workflow`）
+
+```
+- 不要在未用 unity://packages 確認前重複安裝已有的 Package
+- 不要在未用 unity://menu-items 確認路徑前執行 execute_menu_item
+- 不要在 C# 類別未編譯通過前嘗試 create_scriptable_object
+```
+
+### 不納入項目
+
+- ~~常用 Package 推薦清單~~ → **不納入**。Package 需求因專案而異，提供推薦清單反而可能誤導 AI 安裝不需要的 Package。
+- ~~資料夾結構規劃~~ → **暫緩**。需配合 Addressables / AssetBundle 打包策略，待策略確定後再擴充。
+- ~~Project Settings 配置~~ → **不納入**。MCP 工具不直接支援 PlayerSettings 等，需新增工具後才有意義。
 
 ---
 
@@ -427,7 +489,12 @@ Phase 1 所有討論事項已結案。可進入方案比較階段。
 
 | 日期 | 決策 | 理由 |
 |------|------|------|
-| 2026-02-15 | 採用方案 B（分層整合） | 「修改 C# 後 recompile 驗證」是基本衛生規則，應在共用層生效，讓所有 Unity skill 受益 |
+| 2026-02-15 | Phase 1 採用方案 B（分層整合） | 「修改 C# 後 recompile 驗證」是基本衛生規則，應在共用層生效，讓所有 Unity skill 受益 |
+| 2026-02-16 | Phase 2 從獨立 skill 改為擴充 `unity-mcp-workflow` | 實際手遊專案僅 2 個極簡 Scene，內容以 Prefab 為載體，獨立 `unity-3d-scene-builder` skill 內容過薄，有價值的部分（Prefab Variant、Material 流程、Scene 管理、Transform）直接合併至共用基底 |
+| 2026-02-16 | `create_prefab` 需擴充支援 Prefab Variant | 新增 `basePrefabPath` 參數，列為 Phase 2 前置任務 |
+| 2026-02-16 | Shader 引導：引用既有 + 寫 ShaderLab，不支援手寫 .shadergraph | `.shadergraph` 結構過於複雜，AI 手寫極易出錯；引用既有 shader 和撰寫 `.shader` 文字檔為可行方案 |
+| 2026-02-16 | 新增 3 條 Material 相關禁止事項 | 避免 AI 盲目猜測 shader property 名稱導致錯誤 |
+| 2026-02-16 | Phase 3 從獨立 skill 改為擴充 `unity-mcp-workflow` | Scene 管理已在 Phase 2 覆蓋，資料夾結構暫緩，剩餘內容（Package 管理、Menu Item、ScriptableObject）偏薄，合併更合理 |
 
 ---
 
@@ -440,15 +507,17 @@ Phase 1 所有討論事項已結案。可進入方案比較階段。
   - [ ] 撰寫 `unity-test-debug/SKILL.md`
   - [ ] 撰寫 `unity-test-debug/claude-rule.md`
   - [ ] 更新 `install-claude.sh` 註冊新 skill
-- [ ] Phase 2：設計並實作 `unity-3d-scene-builder` skill
-  - [ ] 確認核心規則與流程
-  - [ ] 評估是否需要擴充 `unity-mcp-workflow` 的 3D 通用內容
-  - [ ] 撰寫 `SKILL.md`
-  - [ ] 撰寫 `claude-rule.md`
-  - [ ] 更新 `install-claude.sh` 註冊新 skill
-- [ ] Phase 3：設計並實作 `unity-project-setup` skill
-  - [ ] 確認核心規則與流程
-  - [ ] 撰寫 `SKILL.md`
-  - [ ] 撰寫 `claude-rule.md`
-  - [ ] 更新 `install-claude.sh` 註冊新 skill
+- [ ] Phase 2：擴充 `unity-mcp-workflow`
+  - [x] 確認擴充內容（Prefab Variant、Material 流程、Shader 引導、Scene 管理、Transform）
+  - [x] 確認禁止事項（3 條 Material 相關）
+  - [ ] 前置：擴充 `create_prefab` 支援 Prefab Variant（C# + TypeScript）
+  - [ ] 前置（建議）：新增 `unity://shaders` 資源
+  - [ ] 更新 `unity-mcp-workflow/SKILL.md`
+  - [ ] 更新 `unity-mcp-workflow/claude-rule.md`
+- [ ] Phase 3：擴充 `unity-mcp-workflow`（續）
+  - [x] 確認擴充內容（Package 管理、Menu Item、ScriptableObject）
+  - [x] 確認禁止事項（3 條）
+  - [x] 確認不納入項目（Package 推薦清單、資料夾結構、Project Settings）
+  - [ ] 更新 `unity-mcp-workflow/SKILL.md`
+  - [ ] 更新 `unity-mcp-workflow/claude-rule.md`
 - [ ] 整合測試：確認 3 個新 skill 的觸發條件不互相衝突
