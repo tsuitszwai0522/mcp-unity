@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
 using UnityEngine;
@@ -1072,29 +1073,54 @@ namespace McpUnity.Tools
 
         private void CreateInputFieldTMP(GameObject go, JObject data)
         {
-            Type tmpInputType = Type.GetType("TMPro.TMP_InputField, Unity.TextMeshPro");
-            if (tmpInputType == null)
+            // Use TMP_DefaultControls to create a fully-formed InputField with complete child hierarchy
+            GameObject tmpGO = TryCreateViaTMPDefaultControls("CreateInputField");
+            if (tmpGO == null)
             {
+                // Fallback to legacy if TMP_DefaultControls is not available
                 CreateInputField(go, data);
                 return;
             }
 
-            Image image = go.GetComponent<Image>();
-            if (image == null)
-            {
-                image = Undo.AddComponent<Image>(go);
-                image.color = Color.white;
-            }
+            // Transfer the complete hierarchy from the temp GO to our target GO
+            TransferTMPHierarchy(tmpGO, go);
 
-            Component tmpInput = go.GetComponent(tmpInputType);
-            if (tmpInput == null)
+            // Apply user-specified elementData
+            Type tmpInputType = Type.GetType("TMPro.TMP_InputField, Unity.TextMeshPro");
+            Component tmpInput = tmpInputType != null ? go.GetComponent(tmpInputType) : null;
+            if (tmpInput != null && data != null)
             {
-                tmpInput = Undo.AddComponent(go, tmpInputType);
-            }
+                string text = data["text"]?.ToObject<string>();
+                if (text != null)
+                {
+                    var textProp = tmpInputType.GetProperty("text");
+                    textProp?.SetValue(tmpInput, text);
+                }
 
-            // For TMP InputField, we need to create the viewport and text components
-            // This is complex due to TMP's structure - simplified version
-            // In production, you'd want to instantiate from a prefab
+                string placeholder = data["placeholder"]?.ToObject<string>();
+                if (placeholder != null)
+                {
+                    // Get the placeholder component and set its text
+                    var placeholderField = tmpInputType.GetProperty("placeholder");
+                    Component placeholderComp = placeholderField?.GetValue(tmpInput) as Component;
+                    if (placeholderComp != null)
+                    {
+                        var tmpTextType = Type.GetType("TMPro.TMP_Text, Unity.TextMeshPro");
+                        if (tmpTextType != null)
+                        {
+                            var tmpTextProp = tmpTextType.GetProperty("text");
+                            tmpTextProp?.SetValue(placeholderComp, placeholder);
+                        }
+                    }
+                }
+
+                bool? interactable = data["interactable"]?.ToObject<bool?>();
+                if (interactable.HasValue)
+                {
+                    var interactableProp = tmpInputType.GetProperty("interactable");
+                    interactableProp?.SetValue(tmpInput, interactable.Value);
+                }
+            }
 
             // Set default size
             RectTransform rect = go.GetComponent<RectTransform>();
@@ -1536,24 +1562,63 @@ namespace McpUnity.Tools
 
         private void CreateDropdownTMP(GameObject go, JObject data)
         {
-            Type tmpDropdownType = Type.GetType("TMPro.TMP_Dropdown, Unity.TextMeshPro");
-            if (tmpDropdownType == null)
+            // Use TMP_DefaultControls to create a fully-formed Dropdown with complete child hierarchy
+            GameObject tmpGO = TryCreateViaTMPDefaultControls("CreateDropdown");
+            if (tmpGO == null)
             {
+                // Fallback to legacy if TMP_DefaultControls is not available
                 CreateDropdown(go, data);
                 return;
             }
 
-            Image image = go.GetComponent<Image>();
-            if (image == null)
-            {
-                image = Undo.AddComponent<Image>(go);
-                image.color = Color.white;
-            }
+            // Transfer the complete hierarchy from the temp GO to our target GO
+            TransferTMPHierarchy(tmpGO, go);
 
-            Component tmpDropdown = go.GetComponent(tmpDropdownType);
-            if (tmpDropdown == null)
+            // Apply user-specified elementData
+            Type tmpDropdownType = Type.GetType("TMPro.TMP_Dropdown, Unity.TextMeshPro");
+            Component tmpDropdown = tmpDropdownType != null ? go.GetComponent(tmpDropdownType) : null;
+            if (tmpDropdown != null && data != null)
             {
-                tmpDropdown = Undo.AddComponent(go, tmpDropdownType);
+                // Apply options
+                JArray options = data["options"] as JArray;
+                if (options != null && options.Count > 0)
+                {
+                    // Clear default options and add user-specified ones
+                    var optionsProperty = tmpDropdownType.GetProperty("options");
+                    var optionsList = optionsProperty?.GetValue(tmpDropdown) as IList;
+                    if (optionsList != null)
+                    {
+                        optionsList.Clear();
+                        // Get the OptionData type (TMP_Dropdown.OptionData)
+                        Type optionDataType = tmpDropdownType.GetNestedType("OptionData");
+                        if (optionDataType != null)
+                        {
+                            foreach (var opt in options)
+                            {
+                                var optionData = Activator.CreateInstance(optionDataType, opt.ToObject<string>());
+                                optionsList.Add(optionData);
+                            }
+                        }
+                    }
+                }
+
+                int? value = data["value"]?.ToObject<int?>();
+                if (value.HasValue)
+                {
+                    var valueProp = tmpDropdownType.GetProperty("value");
+                    valueProp?.SetValue(tmpDropdown, value.Value);
+                }
+
+                bool? interactable = data["interactable"]?.ToObject<bool?>();
+                if (interactable.HasValue)
+                {
+                    var interactableProp = tmpDropdownType.GetProperty("interactable");
+                    interactableProp?.SetValue(tmpDropdown, interactable.Value);
+                }
+
+                // Refresh the displayed value
+                var refreshMethod = tmpDropdownType.GetMethod("RefreshShownValue");
+                refreshMethod?.Invoke(tmpDropdown, null);
             }
 
             // Set default size
@@ -1562,6 +1627,99 @@ namespace McpUnity.Tools
             {
                 rect.sizeDelta = new Vector2(160, 30);
             }
+        }
+
+        /// <summary>
+        /// Uses reflection to call TMP_DefaultControls static creation methods.
+        /// Returns a fully-formed GameObject hierarchy, or null if TMP is not available.
+        /// </summary>
+        /// <param name="methodName">The static method name (e.g. "CreateDropdown", "CreateInputField")</param>
+        /// <returns>The created GameObject with complete hierarchy, or null on failure</returns>
+        private static GameObject TryCreateViaTMPDefaultControls(string methodName)
+        {
+            try
+            {
+                Type defaultControlsType = Type.GetType("TMPro.TMP_DefaultControls, Unity.TextMeshPro");
+                if (defaultControlsType == null)
+                    return null;
+
+                Type resourcesType = defaultControlsType.GetNestedType("Resources");
+                if (resourcesType == null)
+                    return null;
+
+                object resources = Activator.CreateInstance(resourcesType);
+                MethodInfo method = defaultControlsType.GetMethod(methodName, BindingFlags.Public | BindingFlags.Static);
+                if (method == null)
+                    return null;
+
+                return method.Invoke(null, new[] { resources }) as GameObject;
+            }
+            catch (Exception ex)
+            {
+                McpLogger.LogWarning($"[MCP Unity] TMP_DefaultControls.{methodName} failed: {ex.Message}");
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Transfers all children and components from a TMP_DefaultControls-created temp GO
+        /// to the target GO, preserving internal component references via EditorUtility.CopySerialized.
+        /// </summary>
+        /// <param name="sourceGO">The temp GO created by TMP_DefaultControls (will be destroyed)</param>
+        /// <param name="targetGO">The target GO to receive children and components</param>
+        private static void TransferTMPHierarchy(GameObject sourceGO, GameObject targetGO)
+        {
+            // 1. Transfer all children from source to target
+            //    Children keep their instance IDs, so serialized references remain valid.
+            while (sourceGO.transform.childCount > 0)
+            {
+                Transform child = sourceGO.transform.GetChild(0);
+                Undo.RegisterCompleteObjectUndo(child.gameObject, "Transfer TMP child");
+                child.SetParent(targetGO.transform, false);
+            }
+
+            // 2. Copy components from source root to target root
+            //    Skip Transform (always exists) and any components already on target.
+            Component[] sourceComponents = sourceGO.GetComponents<Component>();
+            foreach (Component srcComp in sourceComponents)
+            {
+                if (srcComp is Transform)
+                    continue;
+
+                Type compType = srcComp.GetType();
+
+                // Add the component to target if it doesn't exist
+                Component dstComp = targetGO.GetComponent(compType);
+                if (dstComp == null)
+                {
+                    dstComp = Undo.AddComponent(targetGO, compType);
+                }
+
+                // Copy all serialized data (including object references to children)
+                EditorUtility.CopySerialized(srcComp, dstComp);
+            }
+
+            // 3. Fix self-references: targetGraphic on Selectable points to source's Image
+            //    After CopySerialized, it still references the source GO's Image (about to be destroyed).
+            //    Re-point it to the target GO's own Image.
+            var selectable = targetGO.GetComponent<Selectable>();
+            if (selectable != null)
+            {
+                Image targetImage = targetGO.GetComponent<Image>();
+                if (targetImage != null)
+                {
+                    selectable.targetGraphic = targetImage;
+                }
+            }
+
+            // 4. Register children for Undo
+            foreach (Transform child in targetGO.transform)
+            {
+                Undo.RegisterCreatedObjectUndo(child.gameObject, "Create TMP UI child");
+            }
+
+            // 5. Destroy the temp source GO
+            UnityEngine.Object.DestroyImmediate(sourceGO);
         }
 
         private void CreateScrollView(GameObject go, JObject data)

@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using System.Reflection;
+using McpUnity.Utils;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEngine;
@@ -199,7 +200,7 @@ namespace McpUnity.Tools
                 {
                     try
                     {
-                        object convertedValue = ConvertValue(value, field.FieldType);
+                        object convertedValue = SerializedFieldConverter.ConvertJTokenToValue(value, field.FieldType);
                         if (convertedValue != null || !field.FieldType.IsValueType)
                         {
                             field.SetValue(scriptableObject, convertedValue);
@@ -217,108 +218,6 @@ namespace McpUnity.Tools
             }
 
             EditorUtility.SetDirty(scriptableObject);
-        }
-
-        /// <summary>
-        /// Converts a JToken value to the specified target type
-        /// </summary>
-        private object ConvertValue(JToken value, Type targetType)
-        {
-            if (value == null || value.Type == JTokenType.Null)
-            {
-                return null;
-            }
-
-            // Handle common Unity types
-            if (targetType == typeof(string))
-            {
-                return value.ToObject<string>();
-            }
-            if (targetType == typeof(int))
-            {
-                return value.ToObject<int>();
-            }
-            if (targetType == typeof(float))
-            {
-                return value.ToObject<float>();
-            }
-            if (targetType == typeof(double))
-            {
-                return value.ToObject<double>();
-            }
-            if (targetType == typeof(bool))
-            {
-                return value.ToObject<bool>();
-            }
-            if (targetType == typeof(Vector2) && value is JObject v2)
-            {
-                return new Vector2(
-                    v2["x"]?.ToObject<float>() ?? 0f,
-                    v2["y"]?.ToObject<float>() ?? 0f
-                );
-            }
-            if (targetType == typeof(Vector3) && value is JObject v3)
-            {
-                return new Vector3(
-                    v3["x"]?.ToObject<float>() ?? 0f,
-                    v3["y"]?.ToObject<float>() ?? 0f,
-                    v3["z"]?.ToObject<float>() ?? 0f
-                );
-            }
-            if (targetType == typeof(Vector4) && value is JObject v4)
-            {
-                return new Vector4(
-                    v4["x"]?.ToObject<float>() ?? 0f,
-                    v4["y"]?.ToObject<float>() ?? 0f,
-                    v4["z"]?.ToObject<float>() ?? 0f,
-                    v4["w"]?.ToObject<float>() ?? 0f
-                );
-            }
-            if (targetType == typeof(Color) && value is JObject c)
-            {
-                return new Color(
-                    c["r"]?.ToObject<float>() ?? 0f,
-                    c["g"]?.ToObject<float>() ?? 0f,
-                    c["b"]?.ToObject<float>() ?? 0f,
-                    c["a"]?.ToObject<float>() ?? 1f
-                );
-            }
-            if (targetType.IsEnum)
-            {
-                string enumValue = value.ToObject<string>();
-                if (Enum.TryParse(targetType, enumValue, true, out object result))
-                {
-                    return result;
-                }
-                // Try parsing as int
-                if (int.TryParse(enumValue, out int intValue))
-                {
-                    return Enum.ToObject(targetType, intValue);
-                }
-            }
-            if (targetType.IsArray)
-            {
-                if (value is JArray array)
-                {
-                    Type elementType = targetType.GetElementType();
-                    Array arr = Array.CreateInstance(elementType, array.Count);
-                    for (int i = 0; i < array.Count; i++)
-                    {
-                        arr.SetValue(ConvertValue(array[i], elementType), i);
-                    }
-                    return arr;
-                }
-            }
-
-            // Fallback: try direct conversion
-            try
-            {
-                return value.ToObject(targetType);
-            }
-            catch
-            {
-                return null;
-            }
         }
 
         /// <summary>

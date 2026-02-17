@@ -5,7 +5,6 @@ using McpUnity.Unity;
 using McpUnity.Services;
 using McpUnity.Utils;
 using UnityEngine;
-using UnityEngine.SceneManagement;
 using UnityEditor;
 using Newtonsoft.Json.Linq;
 using ComponentResolver = McpUnity.Utils.ComponentTypeResolver;
@@ -245,7 +244,7 @@ namespace McpUnity.Tools
                     
                 if (fieldInfo != null)
                 {
-                    object value = ConvertJTokenToValue(fieldValue, fieldInfo.FieldType);
+                    object value = SerializedFieldConverter.ConvertJTokenToValue(fieldValue, fieldInfo.FieldType);
                     fieldInfo.SetValue(component, value);
                     continue;
                 }
@@ -256,7 +255,7 @@ namespace McpUnity.Tools
                 
                 if (propertyInfo != null)
                 {
-                    object value = ConvertJTokenToValue(fieldValue, propertyInfo.PropertyType);
+                    object value = SerializedFieldConverter.ConvertJTokenToValue(fieldValue, propertyInfo.PropertyType);
                     propertyInfo.SetValue(component, value);
                     continue;
                 }
@@ -266,270 +265,6 @@ namespace McpUnity.Tools
             }
 
             return fullSuccess;
-        }
-
-        /// <summary>
-        /// Convert a JToken to a value of the specified type
-        /// </summary>
-        /// <param name="token">The JToken to convert</param>
-        /// <param name="targetType">The target type to convert to</param>
-        /// <returns>The converted value</returns>
-        private object ConvertJTokenToValue(JToken token, Type targetType)
-        {
-            if (token == null)
-            {
-                return null;
-            }
-            
-            // Handle Unity Vector types
-            if (targetType == typeof(Vector2) && token.Type == JTokenType.Object)
-            {
-                JObject vector = (JObject)token;
-                return new Vector2(
-                    vector["x"]?.ToObject<float>() ?? 0f,
-                    vector["y"]?.ToObject<float>() ?? 0f
-                );
-            }
-            
-            if (targetType == typeof(Vector3) && token.Type == JTokenType.Object)
-            {
-                JObject vector = (JObject)token;
-                return new Vector3(
-                    vector["x"]?.ToObject<float>() ?? 0f,
-                    vector["y"]?.ToObject<float>() ?? 0f,
-                    vector["z"]?.ToObject<float>() ?? 0f
-                );
-            }
-            
-            if (targetType == typeof(Vector4) && token.Type == JTokenType.Object)
-            {
-                JObject vector = (JObject)token;
-                return new Vector4(
-                    vector["x"]?.ToObject<float>() ?? 0f,
-                    vector["y"]?.ToObject<float>() ?? 0f,
-                    vector["z"]?.ToObject<float>() ?? 0f,
-                    vector["w"]?.ToObject<float>() ?? 0f
-                );
-            }
-            
-            if (targetType == typeof(Quaternion) && token.Type == JTokenType.Object)
-            {
-                JObject quaternion = (JObject)token;
-                return new Quaternion(
-                    quaternion["x"]?.ToObject<float>() ?? 0f,
-                    quaternion["y"]?.ToObject<float>() ?? 0f,
-                    quaternion["z"]?.ToObject<float>() ?? 0f,
-                    quaternion["w"]?.ToObject<float>() ?? 1f
-                );
-            }
-            
-            if (targetType == typeof(Color) && token.Type == JTokenType.Object)
-            {
-                JObject color = (JObject)token;
-                return new Color(
-                    color["r"]?.ToObject<float>() ?? 0f,
-                    color["g"]?.ToObject<float>() ?? 0f,
-                    color["b"]?.ToObject<float>() ?? 0f,
-                    color["a"]?.ToObject<float>() ?? 1f
-                );
-            }
-            
-            if (targetType == typeof(Bounds) && token.Type == JTokenType.Object)
-            {
-                JObject bounds = (JObject)token;
-                Vector3 center = bounds["center"]?.ToObject<Vector3>() ?? Vector3.zero;
-                Vector3 size = bounds["size"]?.ToObject<Vector3>() ?? Vector3.one;
-                return new Bounds(center, size);
-            }
-            
-            if (targetType == typeof(Rect) && token.Type == JTokenType.Object)
-            {
-                JObject rect = (JObject)token;
-                return new Rect(
-                    rect["x"]?.ToObject<float>() ?? 0f,
-                    rect["y"]?.ToObject<float>() ?? 0f,
-                    rect["width"]?.ToObject<float>() ?? 0f,
-                    rect["height"]?.ToObject<float>() ?? 0f
-                );
-            }
-            
-            // Handle scene object references via instance ID (integer value)
-            if (typeof(UnityEngine.Object).IsAssignableFrom(targetType) && token.Type == JTokenType.Integer)
-            {
-                int id = token.ToObject<int>();
-                UnityEngine.Object obj = EditorUtility.InstanceIDToObject(id);
-                if (obj != null)
-                {
-                    // If target is GameObject, return directly or extract from component
-                    if (targetType == typeof(GameObject))
-                        return obj is GameObject go ? go : (obj is Component comp ? comp.gameObject : null);
-
-                    // If target is a Component type, try to get it from the resolved object
-                    if (typeof(Component).IsAssignableFrom(targetType))
-                    {
-                        if (targetType.IsAssignableFrom(obj.GetType()))
-                            return obj;
-                        if (obj is GameObject gameObj)
-                            return gameObj.GetComponent(targetType);
-                        if (obj is Component c)
-                            return c.gameObject.GetComponent(targetType);
-                    }
-
-                    // For other UnityEngine.Object types, return if assignable
-                    if (targetType.IsAssignableFrom(obj.GetType()))
-                        return obj;
-                }
-                McpLogger.LogWarning($"[MCP Unity] Could not resolve instance ID {id} to type {targetType.Name}");
-                return null;
-            }
-
-            // Handle scene object references via structured reference ({"instanceId": 123} or {"objectPath": "Path/To/Object"})
-            if (typeof(UnityEngine.Object).IsAssignableFrom(targetType) && token.Type == JTokenType.Object)
-            {
-                JObject refObj = (JObject)token;
-                // Skip if this looks like a Vector/Color/etc. (has x/y/z/r/g/b keys) — those are handled above
-                if (refObj.ContainsKey("instanceId") || refObj.ContainsKey("objectPath"))
-                {
-                    UnityEngine.Object resolvedObj = null;
-
-                    // 1) Try instanceId first
-                    if (refObj["instanceId"] != null && refObj["instanceId"].Type != JTokenType.Null)
-                    {
-                        int id = refObj["instanceId"].ToObject<int>();
-                        resolvedObj = EditorUtility.InstanceIDToObject(id);
-                    }
-
-                    // 2) Fallback to objectPath if instanceId failed or was not provided
-                    if (resolvedObj == null && refObj["objectPath"] != null && refObj["objectPath"].Type != JTokenType.Null)
-                    {
-                        string objPath = refObj["objectPath"].ToObject<string>();
-                        GameObject found = GameObject.Find(objPath);
-
-                        // Search across all loaded scenes
-                        if (found == null)
-                        {
-                            for (int i = 0; i < SceneManager.sceneCount && found == null; i++)
-                            {
-                                Scene scene = SceneManager.GetSceneAt(i);
-                                if (!scene.isLoaded) continue;
-                                foreach (GameObject root in scene.GetRootGameObjects())
-                                {
-                                    Transform t = root.transform.Find(objPath);
-                                    if (t == null && root.name == objPath.Split('/')[0])
-                                    {
-                                        // Try relative path from root
-                                        string relativePath = objPath.Contains("/")
-                                            ? objPath.Substring(objPath.IndexOf('/') + 1)
-                                            : null;
-                                        if (relativePath != null)
-                                            t = root.transform.Find(relativePath);
-                                        else if (root.name == objPath)
-                                            t = root.transform;
-                                    }
-                                    if (t != null)
-                                    {
-                                        found = t.gameObject;
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                        resolvedObj = found;
-                    }
-
-                    if (resolvedObj == null)
-                    {
-                        McpLogger.LogWarning($"[MCP Unity] Could not resolve scene object reference to type {targetType.Name}");
-                        return null;
-                    }
-
-                    // Resolve to the requested target type
-                    if (targetType == typeof(GameObject))
-                        return resolvedObj is GameObject g ? g : (resolvedObj is Component c ? c.gameObject : null);
-
-                    if (typeof(Component).IsAssignableFrom(targetType))
-                    {
-                        if (targetType.IsAssignableFrom(resolvedObj.GetType()))
-                            return resolvedObj;
-                        GameObject host = resolvedObj is GameObject go ? go : (resolvedObj as Component)?.gameObject;
-                        return host?.GetComponent(targetType);
-                    }
-
-                    // Cover UnityEngine.Object base type and other assignable types
-                    if (targetType.IsAssignableFrom(resolvedObj.GetType()))
-                        return resolvedObj;
-
-                    McpLogger.LogWarning($"[MCP Unity] Resolved object type {resolvedObj.GetType().Name} is not assignable to {targetType.Name}");
-                    return null;
-                }
-            }
-
-            // Handle UnityEngine.Object derived types (Sprite, Material, Font, AudioClip, etc.)
-            if (typeof(UnityEngine.Object).IsAssignableFrom(targetType) && token.Type == JTokenType.String)
-            {
-                string assetRef = token.ToObject<string>();
-                if (string.IsNullOrEmpty(assetRef))
-                {
-                    return null;
-                }
-
-                // Try as asset path first (e.g. "Assets/Sprites/tomato.png")
-                var asset = AssetDatabase.LoadAssetAtPath(assetRef, targetType);
-                if (asset != null)
-                {
-                    return asset;
-                }
-
-                // Try as GUID
-                string guidPath = AssetDatabase.GUIDToAssetPath(assetRef);
-                if (!string.IsNullOrEmpty(guidPath))
-                {
-                    asset = AssetDatabase.LoadAssetAtPath(guidPath, targetType);
-                    if (asset != null)
-                    {
-                        return asset;
-                    }
-                }
-
-                McpLogger.LogWarning($"[MCP Unity] Could not load asset of type {targetType.Name} from '{assetRef}'");
-                return null;
-            }
-            
-            // Handle enum types
-            if (targetType.IsEnum)
-            {
-                // If JToken is a string, try to parse as enum name
-                if (token.Type == JTokenType.String)
-                {
-                    string enumName = token.ToObject<string>();
-                    if (Enum.TryParse(targetType, enumName, true, out object result))
-                    {
-                        return result;
-                    }
-                    
-                    // If parsing fails, try to convert numeric value
-                    if (int.TryParse(enumName, out int enumValue))
-                    {
-                        return Enum.ToObject(targetType, enumValue);
-                    }
-                }
-                // If JToken is a number, convert directly to enum
-                else if (token.Type == JTokenType.Integer)
-                {
-                    return Enum.ToObject(targetType, token.ToObject<int>());
-                }
-            }
-            
-            // For other types, use JToken's ToObject method
-            try
-            {
-                return token.ToObject(targetType);
-            }
-            catch (Exception ex)
-            {
-                McpLogger.LogError($"[MCP Unity] Error converting value to type {targetType.Name}: {ex.Message}");
-                return null;
-            }
         }
     }
 }
