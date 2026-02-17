@@ -1,6 +1,6 @@
 # Feature Design: Unity Skills 擴充
 
-> **狀態**：Phase 1-2 已完成，Phase 3 待實作
+> **狀態**：Phase 1-3 已完成
 > **建立日期**：2026-02-15
 > **相關模組**：`shared-ai-sop~/skills/`
 
@@ -31,7 +31,7 @@
 |-------|------|--------|------|
 | Phase 1 | [`unity-test-debug`](#phase-1-unity-test-debug)（新 skill） | P0 | ✅ 已完成 |
 | Phase 2 | [擴充 `unity-mcp-workflow`](#phase-2-擴充-unity-mcp-workflow)（Prefab Variant、Material 流程、Shader 引導、Scene 管理、Transform） | P1 | ✅ 已完成 |
-| Phase 3 | [擴充 `unity-mcp-workflow`](#phase-3-擴充-unity-mcp-workflow-續)（Package 管理、Menu Item、ScriptableObject） | P2 | 討論完成 |
+| Phase 3 | [擴充 `unity-mcp-workflow`](#phase-3-擴充-unity-mcp-workflow-續)（Package 管理、Menu Item、ScriptableObject） | P2 | ✅ 已完成 |
 
 ### Skill 引用關係（方案 B：分層整合）
 
@@ -514,10 +514,10 @@ ScriptableObject 建立：
   - [x] 前置（建議）：新增 `unity://shaders` 資源
   - [x] 更新 `unity-mcp-workflow/SKILL.md`
   - [x] 更新 `unity-mcp-workflow/claude-rule.md`
-- [ ] Phase 3：擴充 `unity-mcp-workflow`（續）
+- [x] Phase 3：擴充 `unity-mcp-workflow`（續）
   - [x] 確認擴充內容（Package 管理、Menu Item、ScriptableObject）
   - [x] 確認禁止事項（3 條）
   - [x] 確認不納入項目（Package 推薦清單、資料夾結構、Project Settings）
-  - [ ] 更新 `unity-mcp-workflow/SKILL.md`
-  - [ ] 更新 `unity-mcp-workflow/claude-rule.md`
-- [ ] 整合測試：確認 3 個新 skill 的觸發條件不互相衝突
+  - [x] 更新 `unity-mcp-workflow/SKILL.md`
+  - [x] 更新 `unity-mcp-workflow/claude-rule.md`
+- [x] 整合測試：確認 3 個新 skill 的觸發條件不互相衝突
