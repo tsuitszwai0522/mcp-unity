@@ -71,6 +71,14 @@ description: 用於為專案中的不同子系統編寫單元測試或整合測�
 * **Asmdef 檢查**：Unity 測試資料夾需要有正確的 Assembly Definition。
 * **路徑正確性**：確保文件與代碼分別位於正確的目錄。
 
+## 與其他 Skill 的關係
+
+| Skill | 關係 |
+|-------|------|
+| `verification-loop` | **被路由**：verification-loop Phase 4 透過 `{{config.testStrategies}}` 路由至本 Skill 的測試策略 |
+| `unity-test-debug` | **委派**：Unity 專案的測試執行與除錯由 unity-test-debug 處理 |
+| `bug-fix-protocol` | **被引用**：修復完成後可委派本 Skill 補充測試 |
+
 ## 觸發時機 (When to use)
 * 使用者說：「幫我寫測試」
 * 使用者說：「這個類別需要單元測試」

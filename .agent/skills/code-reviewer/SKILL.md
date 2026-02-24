@@ -74,6 +74,14 @@ description: 當使用者要求對一份 Code Review Request (CRR) 或特定代�
 新增 `[Review Fix]` 標籤記錄本次修改內容，並在「關聯審查」區塊連結本審查報告。
 ```
 
+## 與其他 Skill 的關係
+
+| Skill | 關係 |
+|-------|------|
+| `code-review-generator` | **上游**：審查 code-review-generator 生成的 Request |
+| `implementation-tracker` | **銜接**：Refactor Prompt 完成後需更新 Tracker |
+| `verification-loop` | **建議**：Refactor 完成後建議執行驗證迴圈確認修改正確 |
+
 ## 觸發時機 (When to use)
 * 使用者說：「幫我 Review 這段代碼」
 * 使用者說：「請審查這個 Request」

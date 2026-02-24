@@ -33,6 +33,14 @@ description: Generate code review request document for PR submission. Use when u
 
 3. **通知使用者**：告知報告路徑。
 
+## 與其他 Skill 的關係
+
+| Skill | 關係 |
+|-------|------|
+| `verification-loop` | 前置：生成前建議先跑驗證迴圈 |
+| `code-reviewer` | 下游：生成的 Request 由 code-reviewer 審查 |
+| `feature-design-protocol` | 引用：檢查實作是否偏離原始設計 |
+
 ## 輸出規範
 
 | 項目 | 路徑 |

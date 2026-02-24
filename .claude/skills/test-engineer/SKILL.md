@@ -40,6 +40,14 @@ description: Generate test code and documentation. Use when user asks to write t
 |------|------|
 | 測試文檔 | `doc/test/TestDoc_{Date}_{Target}.md` |
 
+## 與其他 Skill 的關係
+
+| Skill | 關係 |
+|-------|------|
+| `verification-loop` | 被路由：Phase 4 透過 testStrategies 使用本 Skill 的測試策略 |
+| `unity-test-debug` | 委派：Unity 測試由 unity-test-debug 處理 |
+| `bug-fix-protocol` | 被引用：修復後可委派補充測試 |
+
 ## 禁止事項 (Don'ts)
 
 1. ❌ 在對話視窗顯示完整測試代碼

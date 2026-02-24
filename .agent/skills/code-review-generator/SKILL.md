@@ -44,6 +44,14 @@ description: 當使用者要求生成 Code Review Request、PR 描述或代碼�
 * **差異分析**：目前的實作 (Implementation) 是否偏離了原始設計？
     * 如果有偏離（例如改了架構、砍了功能），**必須**在此報告中列出，並詢問使用者是否需要更新 Requirement 文件。
 
+## 與其他 Skill 的關係
+
+| Skill | 關係 |
+|-------|------|
+| `verification-loop` | **前置**：生成 Review Request 前，建議先執行 verification-loop 確保代碼通過所有驗證 |
+| `code-reviewer` | **下游**：生成的 Review Request 由 code-reviewer 審查 |
+| `feature-design-protocol` | **引用**：檢查實作是否偏離 `doc/requirement/` 中的原始設計 |
+
 ## 觸發時機 (When to use)
 * 使用者說：「幫我生成 Code Review Request」
 * 使用者說：「準備提交 PR」

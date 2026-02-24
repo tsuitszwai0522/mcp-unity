@@ -50,7 +50,15 @@ description: 當使用者回報 Bug、錯誤 (Error)、異常行為 (Incorrect B
 當使用者明確表示「批准」或「修復它」 (Approve) 後：
 
 1.  **應用代碼**：根據報告中的方案修改原始碼。
-2.  **清理工作**：(選用) 建議使用者執行相關測試 (`test-engineer` skill) 以確保沒有 Regression。
+2.  **清理工作**：建議使用者執行 `verification-loop` 驗證修復結果（涵蓋 Build、Lint、Test、Security Scan），或至少執行 `test-engineer` 以確保沒有 Regression。
+
+## 與其他 Skill 的關係
+
+| Skill | 關係 |
+|-------|------|
+| `verification-loop` | **銜接**：修復完成後，建議執行 verification-loop 驗證修復結果 |
+| `test-engineer` | **引用**：修復後可委派 test-engineer 補充測試 |
+| `code-review-generator` | **下游**：修復並驗證後，可生成 Code Review Request |
 
 ## 觸發時機 (When to use)
 * 使用者說：「我發現一個 Bug...」

@@ -101,6 +101,7 @@ description: 當實作具有多階段任務清單的功能時，用於追蹤進�
 | `code-review-generator` | Review Request 可引用 Tracker 中的關鍵決策與修改清單 |
 | `code-reviewer` | 執行 Refactor Prompt 後，需更新 Tracker（觸發條件四） |
 | `bug-fix-protocol` | 若實作過程中發現 Bug，記錄於 Tracker 並觸發 Bug Fix 流程 |
+| `verification-loop` | Phase 完成後，建議執行 verification-loop 驗證實作結果 |
 
 ## 觸發時機 (When to use)
 

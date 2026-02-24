@@ -35,7 +35,15 @@ description: Execute bug fix analysis and documentation. Use when user reports a
 ### 第二階段：執行
 
 1. **依批准方案修復**：根據報告中的方案修改代碼。
-2. **建議測試**：提醒執行相關測試。
+2. **建議驗證**：建議執行 `verification-loop` 驗證修復結果，或至少執行 `test-engineer` 確保無 Regression。
+
+## 與其他 Skill 的關係
+
+| Skill | 關係 |
+|-------|------|
+| `verification-loop` | 銜接：修復後建議執行驗證迴圈 |
+| `test-engineer` | 引用：修復後可委派補充測試 |
+| `code-review-generator` | 下游：修復並驗證後可生成 Review Request |
 
 ## 輸出規範
 

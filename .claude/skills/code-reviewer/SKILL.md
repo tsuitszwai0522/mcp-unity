@@ -42,6 +42,14 @@ description: Review code and generate review response with improvement suggestio
 |------|------|
 | Review Response | `doc/codeReview/Response_{Date}_{Feature}.md` |
 
+## 與其他 Skill 的關係
+
+| Skill | 關係 |
+|-------|------|
+| `code-review-generator` | 上游：審查其生成的 Request |
+| `implementation-tracker` | 銜接：Refactor 完成後更新 Tracker |
+| `verification-loop` | 建議：Refactor 後執行驗證迴圈 |
+
 ## 禁止事項 (Don'ts)
 
 1. ❌ 在對話視窗輸出完整報告

@@ -59,6 +59,13 @@ description: Design new features with requirement clarification and solution com
 | 設計文件 | `doc/requirement/feature_{name}.md` |
 | 文件命名 | 使用 snake_case |
 
+## 與其他 Skill 的關係
+
+| Skill | 關係 |
+|-------|------|
+| `implementation-tracker` | 下游：設計批准後追蹤實作進度 |
+| `code-review-generator` | 下游：實作後引用設計文件做一致性檢查 |
+
 ## 禁止事項 (Don'ts)
 
 1. ❌ 在用戶 Approve 前修改專案代碼

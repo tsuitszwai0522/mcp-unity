@@ -7,14 +7,20 @@ description: 當使用者提供 Figma 設計稿並要求在 Unity 中建構對�
 
 此 Skill 用於規範從 Figma 設計稿到 Unity UGUI 的完整建構流程。透過 MCP Unity 工具組，將 Figma 的佈局、色彩、文字與元件結構精確還原為 Unity 場景中的 UI 階層。
 
-> **前置知識**：此 Skill 搭配 `unity-mcp-workflow` 使用。批次操作（`batch_execute`）、路徑格式、UI 建立順序、錯誤處理等通用規則請參考該 Skill。
+> **前置知識**：此 Skill 搭配 `unity-mcp-workflow` 使用。以下通用知識請參考該 Skill：
+> - UGUI 建構規則（Canvas 標準設定、Anchor Preset 選用表、色彩轉換）
+> - Layout Group 判斷規則（完整座標規律演算法）
+> - ScrollRect 結構規範（固定結構與建構步驟）
+> - Prefab 操作（新建與修改既有 Prefab 的完整流程）
+> - MCP 工具注意事項（11 項陷阱清單）
+> - 批次操作（`batch_execute`）、路徑格式、UI 建立順序、錯誤處理
 
 ## 核心規則 (Core Rules)
 
 1. **座標 1:1 映射**：Figma 的像素座標直接對應 Unity RectTransform 的 anchoredPosition，不做任何縮放換算。
 2. **計劃先行 (Plan First)**：必須先完成完整的建構計劃（含 Hierarchy Plan 階層樹 + 屬性表格），**呈現給使用者確認後**才能開始呼叫任何 MCP 建構工具。
-3. **Layout Group 自動判斷**：分析子元素排列方式，判斷是否適用 `HorizontalLayoutGroup`、`VerticalLayoutGroup` 或 `GridLayoutGroup`（詳見「Layout Group 判斷規則」）。
-4. **ScrollRect 判斷**：當使用 Layout Group 且子元素總尺寸超過容器可視範圍時，必須包一層 ScrollRect（詳見「ScrollRect 結構規範」）。
+3. **Layout Group 自動判斷**：分析子元素排列方式，判斷是否適用 Layout Group（詳見下方「Figma Layout Group 分析補充」與 `unity-mcp-workflow`「Layout Group 判斷規則」）。
+4. **ScrollRect 判斷**：當使用 Layout Group 且子元素總尺寸超過容器可視範圍時，必須包一層 ScrollRect（結構規範詳見 `unity-mcp-workflow`）。
 5. **批次優先 (Batch First)**：相關聯的 UI 元素必須使用 `batch_execute` 一次建立（詳見 `unity-mcp-workflow`）。
 6. **由外而內 (Outside-In)**：建構順序為 Canvas → 容器 → 區塊 → 子元素，確保父物件存在後才建立子物件。
 7. **每步驗證**：每個主要區塊完成後，使用 `get_gameobject` 或 `get_ui_element_info` 確認結構正確。
@@ -30,76 +36,15 @@ description: 當使用者提供 Figma 設計稿並要求在 Unity 中建構對�
 | 填滿父層 | anchorPreset: `stretch`, sizeDelta: (0, 0) | 四邊 offset 為 0 |
 | 水平填滿 | anchorPreset: `topStretch`, sizeDelta.y = 高度 | 常用於 NavBar、標題列 |
 
-### Anchor Preset 選用規則
+### Figma Layout Group 分析補充
 
-| 使用情境 | anchorPreset | pivot | 說明 |
-|----------|-------------|-------|------|
-| 從父層左上角絕對定位 | `topLeft` | (0, 1) | 最常用，直接對應 Figma 座標 |
-| 水平填滿的區塊 | `topStretch` | (0.5, 1) | NavBar、PageHeading 等全寬元素 |
-| 從父層填滿 | `stretch` | (0.5, 0.5) | View、Container 等容器 |
-| 置中元素 | `middleCenter` | (0.5, 0.5) | 主要畫面框架 |
-| 右對齊文字 | `topRight` | (1, 1) | 價格、數值等靠右元素 |
-| 垂直置中靠左 | `middleLeft` | (0, 0.5) | 左側內容 |
+在 Figma 分析階段，Layout Group 判斷**優先使用 Figma Auto Layout 屬性**：
 
-### 色彩轉換
+- 若節點有 `layoutMode: "HORIZONTAL"` → 直接對應 `HorizontalLayoutGroup`
+- 若節點有 `layoutMode: "VERTICAL"` → 直接對應 `VerticalLayoutGroup`
+- 提取 `itemSpacing` → `spacing`、`paddingLeft/Right/Top/Bottom` → `padding`
 
-Figma Hex → Unity RGB (0-1)：每個通道值除以 255。
-
-```
-#426B1F → (0x42/255, 0x6B/255, 0x1F/255) = (0.259, 0.420, 0.122)
-#FAFAF5 → (0.980, 0.980, 0.957)
-#E6E6E6 → (0.902, 0.902, 0.902)
-```
-
-### Layout Group 判斷規則
-
-**判斷順序**：
-
-1. **優先看 Figma Auto Layout**：若節點有 `layoutMode: "HORIZONTAL"` 或 `"VERTICAL"`，直接對應 Layout Group，並提取 `itemSpacing`、`padding` 等屬性。
-2. **Fallback — AI 分析座標規律**：若 Figma 沒有 Auto Layout，根據子元素位置/尺寸推斷：
-   - 子元素 Y 相同、X 等距排列 → `HorizontalLayoutGroup`
-   - 子元素 X 相同、Y 等距排列 → `VerticalLayoutGroup`
-   - 子元素呈網格排列（行列規律） → `GridLayoutGroup`
-   - 無規律 → 絕對定位，不使用 Layout Group
-
-### ScrollRect 結構規範
-
-當判定使用 Layout Group 且子元素總尺寸**超過**容器可視範圍時，必須使用以下固定結構：
-
-```
-{ScrollArea}              (ScrollRect 元件 + Image 元件，無背景圖時 alpha=0)
-  ├── Viewport            (RectMask2D 元件，stretch-fill)
-  │   └── Content         (Layout Group: Horizontal/Vertical/Grid)
-  │       ├── Child1
-  │       ├── Child2
-  │       └── ...
-  └── Scrollbar           (可選，僅當 Figma 設計中有 Scrollbar 時加入)
-```
-
-**建構步驟**：
-1. 建立外層 Panel 作為 ScrollRect 容器，加入 `ScrollRect` 元件與 `Image` 元件（無背景圖時設 `color.a = 0`）。
-2. 建立子物件 `Viewport`，加入 `RectMask2D` 元件，設為 stretch-fill。
-3. 建立子物件 `Content`，加入對應的 Layout Group（`VerticalLayoutGroup` / `HorizontalLayoutGroup` / `GridLayoutGroup`）。
-4. **Scrollbar（可選）**：若 Figma 設計中存在類似 Scrollbar 的 UI 元素，在 ScrollRect 下（與 Viewport 同層）建立 `Scrollbar`：
-   - 使用 `create_ui_element(elementType: "Scrollbar")`，設定 `direction`（垂直滾動用 `BottomToTop`，水平用 `LeftToRight`）。
-   - 垂直 Scrollbar：anchor `middleRight`，寬度對應 Figma 設計。
-   - 水平 Scrollbar：anchor `bottomStretch`，高度對應 Figma 設計。
-5. 使用 `update_component` 將 ScrollRect 的 `content` 指向 Content、`viewport` 指向 Viewport。若有 Scrollbar，將 `verticalScrollbar` 或 `horizontalScrollbar` 指向對應的 Scrollbar 物件。
-6. 在 Content 下建立子元素。
-
-**不需要 ScrollRect 的情況**：子元素總尺寸未超過容器 → 僅使用 Layout Group，不包 ScrollRect。
-
-### MCP 工具注意事項
-
-| 陷阱 | 說明 |
-|------|------|
-| Button 文字子物件 | `create_ui_element` 建立 Button 時，文字子物件名稱為 `Text`（非 `Text (TMP)`），使用 legacy `UnityEngine.UI.Text` 元件 |
-| Button 背景色 | `elementData.color` 設定的是 Button 的 Image 背景色，文字顏色需另外透過 `update_component` 修改 `Text` 子物件 |
-| Outline 元件名 | 使用 `Outline` 作為 componentName（非 `UnityEngine.UI.Outline`） |
-| TMP 元件名 | 使用 `TMPro.TextMeshProUGUI` 作為 componentName 來更新 TextMeshPro 屬性 |
-| Prefab 工作流 | 可複用元件須用 `save_as_prefab` 存為 Prefab（`Assets/Prefabs/{DesignName}/`），再用 `add_asset_to_scene` 放置實例，不可只用 duplicate |
-| Prefab Edit Mode | 修改**既有 Prefab** 內部結構（reparent、新增元件等）時，使用 `open_prefab_contents` → 修改（objectPath 以 Prefab root 名稱開頭）→ `save_prefab_contents`，所有實例自動同步。同一時間只能編輯一個 Prefab |
-| Asset Reference 設定 | `update_component` 的 `componentData` 支援以 asset path 字串設定 Sprite、Material、Font 等資源引用，例如 `{"sprite": "Assets/Sprites/{DesignName}/image.png"}`。也支援 GUID |
+**僅在節點無 Auto Layout 時**，才 fallback 到座標規律演算法（取子元素 x/y/w/h 計算 gap，詳見 `unity-mcp-workflow`「Layout Group 判斷規則」）。
 
 ## 執行流程 (Workflow)
 
@@ -113,13 +58,54 @@ Figma Hex → Unity RGB (0-1)：每個通道值除以 255。
    - 使用 `download_figma_images` 下載所有圖片與圖示。
    - 點陣圖（PNG）需包含 `imageRef`。
    - 向量圖（SVG）僅需 `nodeId` 與 `fileName`。
-   - 儲存至 `Assets/Images/` 目錄。
+   - 儲存至 `Assets/Sprites/{DesignName}/` 目錄。
 
 3. **分析設計結構**：
    - 識別 **可複用元件**（出現 2 次以上的相同結構）→ 標記為 Prefab 候選。
    - 記錄色彩表（Hex → Unity RGB）。
    - 記錄字型表（字體、字號、粗細）。
    - 建立完整的 UI 階層樹。
+
+4. **Layout Group 分析（強制）**：
+   - 優先檢查 Figma Auto Layout 屬性（`layoutMode`），直接對應 Layout Group。
+   - 無 Auto Layout 時，對每個擁有 ≥2 個同類子元素的父節點，執行座標規律演算法（詳見 `unity-mcp-workflow`）。
+   - 列出分析過程（取 x/y/w/h → 計算 gap → 判定結果），確保可驗證。
+   - 將判定結果（Layout 類型 + spacing）標注在階層樹對應節點上。
+   - 判定使用 Layout Group 後，評估子元素總尺寸是否超過容器可視範圍，若超過則標記需要 ScrollRect。
+
+### 第 1.5 階段：Sprite 匯入 (Sprite Import)
+
+1. **批量設定 Sprite Import Settings**：
+   - 使用 `batch_execute` + `import_texture_as_sprite` 將所有下載的圖片設定為 Sprite 類型：
+   ```json
+   {
+     "operations": [
+       {
+         "tool": "import_texture_as_sprite",
+         "params": { "assetPath": "Assets/Sprites/{DesignName}/image1.png" }
+       },
+       {
+         "tool": "import_texture_as_sprite",
+         "params": { "assetPath": "Assets/Sprites/{DesignName}/image2.png" }
+       }
+     ]
+   }
+   ```
+   - 預設參數：`spriteMode: "Single"`, `meshType: "FullRect"`, `compression: "None"`（適合 UI 用途）。
+
+2. **建立 SpriteAtlas（可選）**：
+   - 先透過 `ReadMcpResourceTool(uri: "unity://packages")` 確認 `com.unity.2d.sprite` package 已安裝。
+   - 若已安裝，使用 `create_sprite_atlas` 建立 SpriteAtlas：
+   ```json
+   {
+     "tool": "create_sprite_atlas",
+     "params": {
+       "atlasName": "{DesignName}",
+       "savePath": "Assets/SpriteAtlas/{DesignName}/{DesignName}.spriteatlas",
+       "folderPath": "Assets/Sprites/{DesignName}"
+     }
+   }
+   ```
 
 ### 第二階段：建構規劃 (Build Planning)
 
@@ -130,7 +116,7 @@ Figma Hex → Unity RGB (0-1)：每個通道值除以 255。
    標註每個節點的 elementType、anchorPreset、Layout Group 類型、ScrollRect 等資訊：
 
    ```
-   TestCanvas                    (Overlay, ScaleWithScreenSize, 參考解析度, Expand)
+   TestCanvas                    (Overlay, ScaleWithScreenSize, 1920×1080, Expand)
      └── View                    (stretch-fill)
          └── {DesignName}        (middleCenter, Figma 畫面尺寸)
              └── Container       (CanvasGroup, stretch-fill, 背景色)
@@ -154,8 +140,7 @@ Figma Hex → Unity RGB (0-1)：每個通道值除以 255。
 
 3. **確認 Prefab 策略**：
    - 先建構一個完整實例。
-   - 使用 `save_as_prefab` 將場景物件存為 Prefab。
-   - 使用 `add_asset_to_scene` 放置更多 Prefab 實例，用 `instanceId` 重新命名。
+   - 使用 `duplicate_gameobject` 複製為其他實例。
    - 用 `update_component` 更新各實例的差異資料（文字、顏色等）。
 
 4. **等待使用者確認**：將上述階層樹與屬性表格呈現給使用者，**獲得批准後**才進入第三階段。
@@ -173,7 +158,7 @@ Figma Hex → Unity RGB (0-1)：每個通道值除以 255。
      renderMode: ScreenSpaceOverlay
      scaler:
        uiScaleMode: ScaleWithScreenSize
-       referenceResolution: {x: 1920, y: 1080}  # 或依專案設定
+       referenceResolution: {x: 1920, y: 1080}  # 固定值，不可使用 Figma 畫面尺寸
        screenMatchMode: Expand
    ```
 
@@ -213,7 +198,7 @@ Figma Hex → Unity RGB (0-1)：每個通道值除以 255。
            "elementData": {
              "text": "...",
              "fontSize": 20,
-             "color": {"r": 0, "g": 0, "b": 0},
+             "color": {"r": 0, "g": 0, "b": 0, "a": 1},
              "alignment": "MiddleLeft"
            }
          }
@@ -238,78 +223,18 @@ Figma Hex → Unity RGB (0-1)：每個通道值除以 255。
 
 ### 第五階段：可複用元件 (Reusable Components)
 
-#### A. 新建 Prefab（首次建構）
+Prefab 的完整操作流程（新建與修改既有）詳見 `unity-mcp-workflow`「Prefab 操作」。
 
-1. **建構第一個實例**：完整建立所有子元素。
+**Figma 專案慣例**：
+- Prefab 存放路徑：`Assets/Prefabs/{DesignName}/`
+- 命名：以設計稿元件名稱為準（如 `ProductCard.prefab`）
 
-2. **存為 Prefab**：
-   使用 `save_as_prefab` 將場景中建好的實例存為 Prefab 資產，場景物件自動成為 Prefab 實例：
-   ```
-   save_as_prefab:
-     objectPath: "TestCanvas/View/.../ProductCard_Tomato"
-     savePath: "Assets/Prefabs/{DesignName}/ProductCard.prefab"
-   ```
-
-3. **放置更多實例**：
-   使用 `add_asset_to_scene` 放置 Prefab 實例，用回傳的 `instanceId` 逐一重新命名：
-   ```
-   add_asset_to_scene:
-     assetPath: "Assets/Prefabs/{DesignName}/ProductCard.prefab"
-     parentPath: "TestCanvas/View/.../Content"
-   → 回傳 instanceId: -27572
-
-   update_gameobject:
-     instanceId: -27572
-     gameObjectData: {name: "ProductCard_Ginger"}
-   ```
-
-4. **更新差異資料**：
-   使用 `batch_execute` 批次更新各實例的文字、顏色等：
-   ```json
-   {
-     "operations": [
-       {"tool": "update_component", "params": {
-         "objectPath": ".../ProductCard_Ginger/ProductName",
-         "componentName": "TMPro.TextMeshProUGUI",
-         "componentData": {"text": "新名稱"}
-       }}
-     ]
-   }
-   ```
-
-5. **驗證 localScale**：
-   確認所有實例 localScale 為 (1,1,1)，若異常則用 `scale_gameobject` 修正。
-
-#### B. 修改既有 Prefab（Prefab Edit Mode）
-
-當需要修改已存在的 Prefab 內部結構（如調整階層、新增元件、修改 RectTransform）時：
-
-1. **開啟 Prefab**：
-   ```
-   open_prefab_contents:
-     prefabPath: "Assets/Prefabs/{DesignName}/ProductCard.prefab"
-   → 回傳 rootName, rootInstanceId, children 階層
-   ```
-
-2. **修改結構**（objectPath 以 Prefab root 名稱開頭）：
-   ```
-   reparent_gameobject:
-     objectPath: "ProductCard/ProductImage"
-     newParent: "ProductCard/Container"
-
-   set_rect_transform:
-     objectPath: "ProductCard/Container/ProductImage"
-     anchorPreset: topLeft
-     ...
-   ```
-
-3. **儲存**：
-   ```
-   save_prefab_contents    → 儲存修改，所有場景實例自動同步
-   save_prefab_contents(discard: true)  → 放棄修改
-   ```
-
-> **注意**：同一時間只能編輯一個 Prefab。Prefab Edit Mode 使用隔離環境，`GameObject.Find()` 無法搜尋場景物件，但工具已內建 fallback 支援。
+**快速流程**：
+1. 在場景中建構第一個完整實例。
+2. `save_as_prefab` 存為 Prefab（路徑 `Assets/Prefabs/{DesignName}/`）。
+3. `add_asset_to_scene` 放置更多實例 + 用 `instanceId` 重新命名 + `update_component` 更新差異。
+4. 驗證所有實例 localScale 為 (1,1,1)。
+5. 修改既有 Prefab 內部結構時，使用 `open_prefab_contents` → 修改 → `save_prefab_contents`。
 
 ### 第六階段：儲存 (Save)
 
@@ -322,10 +247,15 @@ Figma Hex → Unity RGB (0-1)：每個通道值除以 255。
 - [ ] 使用者已確認/批准計劃
 
 ### 結構
-- [ ] Canvas 設定正確（ScaleWithScreenSize, 參考解析度, Expand）
+- [ ] Canvas 設定正確（ScaleWithScreenSize, 1920×1080, Expand）
 - [ ] View 容器 stretch-fill
 - [ ] 設計框架尺寸與 Figma 一致
 - [ ] Container 有 CanvasGroup
+
+### Layout Group 分析
+- [ ] 每個擁有 ≥2 個同類子元素的父節點已分析（優先 Auto Layout，fallback 座標演算法）
+- [ ] 分析過程已列出
+- [ ] 判定結果已標注在階層樹中
 
 ### Layout Group 與 ScrollRect
 - [ ] 規律排列的子元素已使用對應的 Layout Group
@@ -344,15 +274,19 @@ Figma Hex → Unity RGB (0-1)：每個通道值除以 255。
 - [ ] Button 文字顏色已單獨設定
 
 ### 可複用元件
-- [ ] 可複用元件已用 `save_as_prefab` 存為 Prefab，更多實例用 `add_asset_to_scene` 放置
+- [ ] 可複用元件已建立 Prefab（存放 `Assets/Prefabs/{DesignName}/`）
+- [ ] 重複結構已使用 duplicate/add_asset_to_scene 而非重新建立
 - [ ] 各實例的差異資料已更新
-- [ ] 位置已正確調整
+- [ ] 所有實例的 localScale 為 (1,1,1)
 - [ ] 若修改既有 Prefab，已使用 `open_prefab_contents` → 修改 → `save_prefab_contents` 流程
-- [ ] Prefab Edit Mode 結束後已呼叫 `save_prefab_contents`（儲存或放棄）
+
+### Sprite 匯入與指定
+- [ ] 所有下載圖片已透過 `import_texture_as_sprite` 設定為 Sprite 類型
+- [ ] SpriteAtlas 已建立（若 `com.unity.2d.sprite` 已安裝）
+- [ ] 所有 Image 元件已透過 `update_component` 指定對應的 Sprite
 
 ### 最終
 - [ ] 場景已儲存
-- [ ] 所有 Image 元件已透過 `update_component` 指定對應的 Sprite
 - [ ] 記錄需手動完成的項目（字型匯入等）
 
 ## 觸發時機 (When to use)
@@ -374,10 +308,15 @@ Figma Hex → Unity RGB (0-1)：每個通道值除以 255。
 7. ❌ 假設 Button 文字子物件為 TMP（實際為 legacy Text，名稱為 `Text`）
 8. ❌ 直接在 `elementData.color` 設定 Button 文字顏色（那是背景色）
 9. ❌ 規律排列的子元素不使用 Layout Group 而逐個絕對定位
-10. ❌ ScrollRect 結構不按規範（缺少 Viewport/RectMask2D 或 Content/LayoutGroup）
-11. ❌ 跳過場景儲存
-12. ❌ 直接修改場景中的 Prefab 實例結構（reparent 等），應使用 `open_prefab_contents` 編輯 Prefab 資產本身
-13. ❌ 在 Prefab Edit Mode 中忘記呼叫 `save_prefab_contents` 結束編輯
+10. ❌ 跳過 Layout Group 分析，僅憑「感覺」判斷是否需要 Layout Group
+11. ❌ ScrollRect 結構不按規範（缺少 Viewport/RectMask2D 或 Content/LayoutGroup）
+12. ❌ localScale 不為 (1,1,1) 而未修正
+13. ❌ 可複用元件只用 duplicate 而不建立 Prefab
+14. ❌ 跳過場景儲存
+15. ❌ 直接修改場景中的 Prefab 實例結構（應使用 `open_prefab_contents` 編輯 Prefab 資產）
+16. ❌ 在 Prefab Edit Mode 中忘記呼叫 `save_prefab_contents` 結束編輯
+17. ❌ 在 Canvas 下用 `update_gameobject` 建立 UI 物件（無 RectTransform，應使用 `create_ui_element`；工具會回傳警告提示）
+18. ❌ 組件加錯後 `delete_gameobject` 重建整個 GO，應改用 `remove_component` 移除錯誤組件
 
 ## 手動後續步驟 (Post-Implementation)
 
@@ -385,4 +324,3 @@ Figma Hex → Unity RGB (0-1)：每個通道值除以 255。
 
 1. **字型匯入**：匯入設計稿指定的字型（如 Inter、Newsreader），建立 TMP Font Asset。
 2. **Font Style**：TMP 的 Semi-Bold 等粗細需透過對應的 Font Asset 設定。
-

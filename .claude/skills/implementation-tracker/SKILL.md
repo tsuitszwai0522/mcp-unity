@@ -47,6 +47,16 @@ description: Track multi-phase feature implementation progress. Use when user st
 |------|------|
 | 追蹤文件 | `doc/requirement/feature_{name}_tracker.md` |
 
+## 與其他 Skill 的關係
+
+| Skill | 關係 |
+|-------|------|
+| `feature-design-protocol` | 依據設計文件的任務清單初始化 Tracker |
+| `code-review-generator` | Review Request 可引用 Tracker 中的關鍵決策 |
+| `code-reviewer` | 執行 Refactor Prompt 後需更新 Tracker |
+| `bug-fix-protocol` | 實作中發現 Bug 時觸發 Bug Fix 流程 |
+| `verification-loop` | Phase 完成後建議執行驗證迴圈 |
+
 ## 禁止事項 (Don'ts)
 
 1. ❌ 跳過「注意事項給下一階段」
