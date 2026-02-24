@@ -9,6 +9,23 @@ description: Build Unity UGUI from Figma designs using MCP Unity tools. Use when
 
 > 通用 UGUI 規則、Layout Group 演算法、ScrollRect 結構、Prefab 操作、完整 MCP 注意事項請參考 `unity-mcp-workflow`。
 
+## Figma MCP 資料來源策略
+
+支援兩組 Figma MCP 工具，可獨立或搭配使用：
+
+| MCP 來源 | 工具 | 用途 |
+|----------|------|------|
+| **Plugin MCP**（必備） | `get_figma_data`, `download_figma_images` | 原始結構與圖片 |
+| **Dev Mode MCP**（推薦） | `get_design_context`, `get_variable_defs`, `get_metadata`, `get_screenshot` | 語義上下文、Design Token、截圖 |
+
+**Dev Mode MCP 設定**：Figma Desktop → Preferences → 啟用 "Dev Mode MCP Server" → `claude mcp add --transport sse figma-dev-mode-mcp-server http://127.0.0.1:3845/sse`。若未設定，跳過相關步驟即可。
+
+**優先順序**（當 Dev Mode MCP 可用時）：
+- 色彩/字型/間距 → `get_variable_defs`（Design Token，最權威）
+- 佈局結構 → `get_figma_data` + `get_design_context`（語義補充）
+- 大型設計 → `get_metadata`（sparse XML）→ 再用 `get_design_context` 深入特定區塊
+- 視覺對照 → `get_screenshot` 作為 layout fidelity 基準
+
 ## 核心規則 (Core Rules)
 
 1. **座標 1:1 映射**：Figma 像素座標直接對應 Unity anchoredPosition（Y 軸取負）。
@@ -28,9 +45,12 @@ description: Build Unity UGUI from Figma designs using MCP Unity tools. Use when
 
 ### 第一階段：Figma 分析
 
-1. **取得設計資料**：用 `get_figma_data` 取得節點佈局。
+1. **取得設計資料**：用 `get_figma_data` 取得節點佈局。資料過大時改用 `get_metadata`（sparse XML）取得概覽。
+1b. **（Dev Mode MCP）語義化上下文**：使用者選取目標 frame → 用 `get_design_context` 取得樣式化佈局資訊，作為原始數據的語義補充。
+1c. **（Dev Mode MCP）Design Token**：用 `get_variable_defs` 取得設計系統 Variables/Styles → 直接作為色彩表/字型表的**權威來源**。若有 Figma Variables（如 `primary/500`），記錄 Token 名稱與實際值的對應。
+1d. **（Dev Mode MCP）截圖參考**：用 `get_screenshot` 截取 frame，作為 layout fidelity 對照基準。
 2. **下載圖片**：用 `download_figma_images` 下載所有圖片資源至 `Assets/Sprites/{DesignName}/`。
-3. **分析結構**：識別可複用元件、建立色彩表、字型表、階層樹。
+3. **分析結構**：識別可複用元件、建立色彩表（有 Design Token 時以 Token 為準）、字型表、階層樹。有 `get_design_context` 時用於交叉驗證結構判斷。
 4. **Layout Group 分析（強制）**：優先用 Figma Auto Layout；無則計算子元素 gap 推斷。列出計算過程，結果標注在階層樹中。若子元素超出容器 → 標記 ScrollRect。
 
 ### 第 1.5 階段：Sprite 匯入
