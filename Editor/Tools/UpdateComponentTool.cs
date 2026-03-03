@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using McpUnity.Unity;
@@ -129,9 +130,10 @@ namespace McpUnity.Tools
                 }
             }
             // Update component fields
+            List<string> updateWarnings = null;
             if (componentData != null && componentData.Count > 0)
             {
-                bool success = UpdateComponentData(component, componentData, out string errorMessage);
+                bool success = UpdateComponentData(component, componentData, out string errorMessage, out updateWarnings);
                 // If update failed, return error
                 if (!success)
                 {
@@ -144,16 +146,28 @@ namespace McpUnity.Tools
                 {
                     PrefabUtility.RecordPrefabInstancePropertyModifications(component);
                 }
-
             }
 
             // Create the response
-            return new JObject
+            string message = $"Successfully updated component '{componentName}' on GameObject '{gameObject.name}'";
+            if (updateWarnings != null && updateWarnings.Count > 0)
+            {
+                message += $" (with {updateWarnings.Count} warning(s))";
+            }
+
+            var response = new JObject
             {
                 ["success"] = true,
                 ["type"] = "text",
-                ["message"] = $"Successfully updated component '{componentName}' on GameObject '{gameObject.name}'"
+                ["message"] = message
             };
+
+            if (updateWarnings != null && updateWarnings.Count > 0)
+            {
+                response["warnings"] = new JArray(updateWarnings.ToArray());
+            }
+
+            return response;
         }
         
         /// <summary>
@@ -209,11 +223,14 @@ namespace McpUnity.Tools
         /// </summary>
         /// <param name="component">The component to update</param>
         /// <param name="componentData">The data to apply to the component</param>
+        /// <param name="errorMessage">Error message if update fails</param>
+        /// <param name="warnings">List of non-fatal warnings (e.g. null-resolved Object references)</param>
         /// <returns>True if the component was updated successfully</returns>
-        private bool UpdateComponentData(Component component, JObject componentData, out string errorMessage)
+        private bool UpdateComponentData(Component component, JObject componentData, out string errorMessage, out List<string> warnings)
         {
             errorMessage = "";
-            
+            warnings = new List<string>();
+
             if (component == null || componentData == null)
             {
                 errorMessage = "Component or component data is null";
@@ -225,43 +242,53 @@ namespace McpUnity.Tools
 
             // Record object for undo
             Undo.RecordObject(component, $"Update {componentType.Name} fields");
-            
+
             // Process each field or property in the component data
             foreach (var property in componentData.Properties())
             {
                 string fieldName = property.Name;
                 JToken fieldValue = property.Value;
-                
+
                 // Skip null values
                 if (string.IsNullOrEmpty(fieldName) || fieldValue.Type == JTokenType.Null)
                 {
                     continue;
                 }
-                
+
                 // Try to update field
-                FieldInfo fieldInfo = componentType.GetField(fieldName, 
+                FieldInfo fieldInfo = componentType.GetField(fieldName,
                     BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                    
+
                 if (fieldInfo != null)
                 {
                     object value = SerializedFieldConverter.ConvertJTokenToValue(fieldValue, fieldInfo.FieldType);
+                    if (value == null && fieldValue.Type != JTokenType.Null)
+                    {
+                        bool isObjectRef = typeof(UnityEngine.Object).IsAssignableFrom(fieldInfo.FieldType);
+                        warnings.Add($"Field '{fieldName}' ({fieldInfo.FieldType.Name}): input value could not be resolved{(isObjectRef ? " — ensure the instance ID, asset path, or object path is valid" : "")}");
+                    }
                     fieldInfo.SetValue(component, value);
                     continue;
                 }
-                
+
                 // Try to update property if not found as a field
-                PropertyInfo propertyInfo = componentType.GetProperty(fieldName, 
+                PropertyInfo propertyInfo = componentType.GetProperty(fieldName,
                     BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                
+
                 if (propertyInfo != null)
                 {
                     object value = SerializedFieldConverter.ConvertJTokenToValue(fieldValue, propertyInfo.PropertyType);
+                    if (value == null && fieldValue.Type != JTokenType.Null)
+                    {
+                        bool isObjectRef = typeof(UnityEngine.Object).IsAssignableFrom(propertyInfo.PropertyType);
+                        warnings.Add($"Property '{fieldName}' ({propertyInfo.PropertyType.Name}): input value could not be resolved{(isObjectRef ? " — ensure the instance ID, asset path, or object path is valid" : "")}");
+                    }
                     propertyInfo.SetValue(component, value);
                     continue;
                 }
-                
+
                 fullSuccess = false;
-                errorMessage = $"Field or Property  with name '{fieldName}' not found on component '{componentType.Name}'";
+                errorMessage = $"Field or Property with name '{fieldName}' not found on component '{componentType.Name}'";
             }
 
             return fullSuccess;

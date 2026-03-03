@@ -12,7 +12,8 @@ const openPrefabContentsToolName = 'open_prefab_contents';
 const openPrefabContentsToolDescription =
   'Loads a Prefab asset into an isolated editing environment using PrefabUtility.LoadPrefabContents(). ' +
   'While open, other tools (create_ui_element, reparent_gameobject, update_component, etc.) can modify the Prefab\'s internal structure. ' +
-  'Call save_prefab_contents to save changes or discard them.';
+  'Call save_prefab_contents to save changes or discard them. ' +
+  'Note: instanceIds returned are session-scoped and may change between sessions. Prefer using objectPath for stable references.';
 
 const openPrefabContentsParamsSchema = z.object({
   prefabPath: z.string().describe('The asset path to the Prefab (e.g., "Assets/Prefabs/MyPrefab.prefab")')
@@ -88,7 +89,11 @@ async function openPrefabContentsHandler(mcpUnity: McpUnity, params: any) {
 function formatHierarchy(children: any[], indent: string): string {
   let result = '';
   for (const child of children) {
-    result += `${indent}- ${child.name} (instanceId: ${child.instanceId})`;
+    result += `${indent}- ${child.name} (instanceId: ${child.instanceId}`;
+    if (child.path) {
+      result += `, path: "${child.path}"`;
+    }
+    result += ')';
     if (child.childCount > 0) {
       result += ` [${child.childCount} children]`;
     }

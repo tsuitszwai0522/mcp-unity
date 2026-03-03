@@ -405,7 +405,16 @@ namespace McpUnity.Resources
                 return new JObject { ["x"] = rect.x, ["y"] = rect.y, ["width"] = rect.width, ["height"] = rect.height };
 
             if (value is UnityEngine.Object unityObject)
-                return unityObject != null ? unityObject.name : null;
+            {
+                if (unityObject != null)
+                    return new JObject
+                    {
+                        ["name"] = unityObject.name,
+                        ["instanceId"] = unityObject.GetInstanceID(),
+                        ["type"] = unityObject.GetType().Name
+                    };
+                return JValue.CreateNull();
+            }
 
             // Handle arrays and lists with item limit
             if (value is System.Collections.IList list)
@@ -451,6 +460,34 @@ namespace McpUnity.Resources
             if (valueType.IsPrimitive || value is string || value is decimal)
             {
                 return JToken.FromObject(value);
+            }
+
+            // Expand [Serializable] classes and user-defined structs
+            if (valueType.GetCustomAttributes(typeof(SerializableAttribute), true).Length > 0
+                || (valueType.IsValueType && !valueType.IsPrimitive && !valueType.IsEnum))
+            {
+                JObject obj = new JObject();
+                FieldInfo[] fields = valueType.GetFields(
+                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+
+                foreach (FieldInfo field in fields)
+                {
+                    bool isSerializable = field.IsPublic
+                        || field.GetCustomAttributes(typeof(SerializeField), true).Length > 0;
+                    if (!isSerializable) continue;
+
+                    try
+                    {
+                        object fieldValue = field.GetValue(value);
+                        obj[field.Name] = SerializeValue(fieldValue, depth + 1, visited);
+                    }
+                    catch (Exception)
+                    {
+                        obj[field.Name] = "Unable to serialize";
+                    }
+                }
+
+                return obj;
             }
 
             // For complex types we don't recognize, return type name to avoid unsafe deep serialization

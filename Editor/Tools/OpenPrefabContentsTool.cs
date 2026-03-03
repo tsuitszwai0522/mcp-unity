@@ -65,15 +65,16 @@ namespace McpUnity.Tools
             {
                 GameObject root = PrefabEditingService.Open(prefabPath);
 
-                // Build hierarchy info
-                JArray children = BuildChildrenArray(root.transform);
+                // Build hierarchy info with paths
+                JArray children = BuildChildrenArray(root.transform, root.name);
 
                 return new JObject
                 {
                     ["success"] = true,
                     ["type"] = "text",
                     ["message"] = $"Opened Prefab contents for editing: '{prefabPath}'. " +
-                                  "Use other tools to modify the Prefab structure, then call save_prefab_contents to save.",
+                                  "Use other tools to modify the Prefab structure, then call save_prefab_contents to save. " +
+                                  "Note: instanceIds are session-scoped and will change between sessions — prefer using objectPath for stability.",
                     ["prefabPath"] = prefabPath,
                     ["rootInstanceId"] = root.GetInstanceID(),
                     ["rootName"] = root.name,
@@ -89,22 +90,24 @@ namespace McpUnity.Tools
             }
         }
 
-        private JArray BuildChildrenArray(Transform parent)
+        private JArray BuildChildrenArray(Transform parent, string parentPath)
         {
             var children = new JArray();
             for (int i = 0; i < parent.childCount; i++)
             {
                 Transform child = parent.GetChild(i);
+                string childPath = $"{parentPath}/{child.gameObject.name}";
                 var childObj = new JObject
                 {
                     ["instanceId"] = child.gameObject.GetInstanceID(),
                     ["name"] = child.gameObject.name,
+                    ["path"] = childPath,
                     ["childCount"] = child.childCount
                 };
 
                 if (child.childCount > 0)
                 {
-                    childObj["children"] = BuildChildrenArray(child);
+                    childObj["children"] = BuildChildrenArray(child, childPath);
                 }
 
                 children.Add(childObj);

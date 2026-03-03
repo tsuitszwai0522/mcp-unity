@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Reflection;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEngine;
@@ -180,6 +181,46 @@ namespace McpUnity.Utils
                     list.Add(ConvertJTokenToValue(jArray[i], elementType));
                 }
                 return list;
+            }
+
+            // --- [Serializable] class/struct: recursive field-level deserialization ---
+
+            if (token.Type == JTokenType.Object
+                && !typeof(UnityEngine.Object).IsAssignableFrom(targetType)
+                && (targetType.IsClass || (targetType.IsValueType && !targetType.IsPrimitive && !targetType.IsEnum))
+                && targetType != typeof(decimal)
+                && (targetType.GetCustomAttributes(typeof(SerializableAttribute), true).Length > 0
+                    || targetType.IsValueType))
+            {
+                try
+                {
+                    object instance = targetType.IsValueType
+                        ? Activator.CreateInstance(targetType)
+                        : Activator.CreateInstance(targetType, true);
+
+                    JObject obj = (JObject)token;
+                    FieldInfo[] fields = targetType.GetFields(
+                        BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+
+                    foreach (FieldInfo field in fields)
+                    {
+                        bool isSerializable = field.IsPublic
+                            || field.GetCustomAttributes(typeof(SerializeField), true).Length > 0;
+                        if (!isSerializable) continue;
+
+                        JToken fieldToken = obj[field.Name];
+                        if (fieldToken == null || fieldToken.Type == JTokenType.Null) continue;
+
+                        object fieldValue = ConvertJTokenToValue(fieldToken, field.FieldType);
+                        field.SetValue(instance, fieldValue);
+                    }
+
+                    return instance;
+                }
+                catch (Exception ex)
+                {
+                    McpLogger.LogWarning($"[MCP Unity] Failed recursive deserialization for {targetType.Name}, falling back to Newtonsoft: {ex.Message}");
+                }
             }
 
             // --- Fallback: Newtonsoft generic deserialization ---
