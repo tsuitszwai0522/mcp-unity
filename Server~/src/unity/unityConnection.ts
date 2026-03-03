@@ -69,6 +69,15 @@ const DEFAULT_CONFIG = {
 };
 
 /**
+ * How long a connection must remain open before we consider it "stable"
+ * and reset the reconnect backoff counter. Prevents infinite 1-second
+ * reconnect loops when multiple clients compete for the single Unity
+ * WebSocket slot — each successful connection would immediately reset
+ * the backoff, so competing clients never back off.
+ */
+const STABLE_CONNECTION_MS = 5000;
+
+/**
  * UnityConnection manages the WebSocket connection to Unity Editor
  * with automatic reconnection, exponential backoff, and heartbeat monitoring.
  *
@@ -94,6 +103,9 @@ export class UnityConnection extends EventEmitter {
   private heartbeatTimeoutTimer: NodeJS.Timeout | null = null;
   private lastPongTime: number = 0;
   private awaitingPong: boolean = false;
+
+  // Delayed backoff reset — only reset after connection proves stable
+  private reconnectResetTimer: NodeJS.Timeout | null = null;
 
   constructor(logger: Logger, config: UnityConnectionConfig) {
     super();
@@ -239,8 +251,10 @@ export class UnityConnection extends EventEmitter {
         clearTimeout(connectionTimeout);
         this.logger.info('WebSocket connected to Unity');
 
-        // Reset reconnection state on successful connection
-        this.reconnectAttempt = 0;
+        // Delay resetting reconnect backoff until connection proves stable.
+        // This prevents infinite 1-second reconnect loops when multiple
+        // clients compete for the single Unity WebSocket slot.
+        this.scheduleReconnectReset();
         this.isPlayModeReconnect = false;  // Clear Play mode flag
         this.lastPongTime = Date.now();
 
@@ -364,6 +378,32 @@ export class UnityConnection extends EventEmitter {
       this.reconnectTimer = null;
     }
     this.reconnectAttempt = 0;
+    this.cancelReconnectReset();
+  }
+
+  /**
+   * Schedule a delayed reset of the reconnect backoff counter.
+   * The counter only resets after the connection stays open for
+   * STABLE_CONNECTION_MS, so competing clients will see increasing
+   * backoff instead of a permanent 1-second loop.
+   */
+  private scheduleReconnectReset(): void {
+    this.cancelReconnectReset();
+    this.reconnectResetTimer = setTimeout(() => {
+      this.reconnectResetTimer = null;
+      this.reconnectAttempt = 0;
+      this.logger.debug('Connection stable — reconnect backoff reset');
+    }, STABLE_CONNECTION_MS);
+  }
+
+  /**
+   * Cancel pending reconnect backoff reset
+   */
+  private cancelReconnectReset(): void {
+    if (this.reconnectResetTimer) {
+      clearTimeout(this.reconnectResetTimer);
+      this.reconnectResetTimer = null;
+    }
   }
 
   /**
@@ -397,6 +437,7 @@ export class UnityConnection extends EventEmitter {
       this.heartbeatTimeoutTimer = null;
     }
     this.awaitingPong = false;
+    this.cancelReconnectReset();
   }
 
   /**
