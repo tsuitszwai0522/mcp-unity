@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEditor;
 using McpUnity.Unity;
+using McpUnity.Services;
 using Newtonsoft.Json.Linq;
 
 namespace McpUnity.Tools
@@ -437,7 +438,16 @@ namespace McpUnity.Tools
             }
             else if (!string.IsNullOrEmpty(objectPath))
             {
-                gameObject = GameObject.Find(objectPath);
+                // Prefer prefab contents when editing a prefab
+                if (PrefabEditingService.IsEditing)
+                {
+                    gameObject = PrefabEditingService.FindByPath(objectPath);
+                }
+                // Fall back to scene hierarchy
+                if (gameObject == null)
+                {
+                    gameObject = GameObject.Find(objectPath);
+                }
                 identifierInfo = $"path '{objectPath}'";
             }
             else

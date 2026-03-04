@@ -4,6 +4,7 @@ using UnityEngine.UI;
 using UnityEditor;
 using McpUnity.Utils; // For GameObjectHierarchyCreator and McpLogger
 using McpUnity.Unity; // For McpUnitySocketHandler
+using McpUnity.Services; // For PrefabEditingService
 using Newtonsoft.Json.Linq; // For JObject
 
 namespace McpUnity.Tools
@@ -51,8 +52,16 @@ namespace McpUnity.Tools
             }
             else if (!string.IsNullOrEmpty(objectPath))
             {
-                // Will create the GameObject if it doesn't exist
-                targetGameObject = GameObjectHierarchyCreator.FindOrCreateHierarchicalGameObject(objectPath);
+                // Prefer prefab contents when editing a prefab
+                if (PrefabEditingService.IsEditing)
+                {
+                    targetGameObject = PrefabEditingService.FindByPath(objectPath);
+                }
+                // Fall back to scene hierarchy (find or create)
+                if (targetGameObject == null)
+                {
+                    targetGameObject = GameObjectHierarchyCreator.FindOrCreateHierarchicalGameObject(objectPath);
+                }
                 identifierInfo = $"path '{objectPath}'";
             }
             else

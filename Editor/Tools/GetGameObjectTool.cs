@@ -57,12 +57,15 @@ namespace McpUnity.Tools
             }
             else
             {
-                // Otherwise, treat it as a name or hierarchical path
-                gameObject = GameObject.Find(idOrName);
-                // Fallback: search in Prefab edit mode contents
-                if (gameObject == null && PrefabEditingService.IsEditing)
+                // Prefer prefab contents when editing a prefab
+                if (PrefabEditingService.IsEditing)
                 {
                     gameObject = PrefabEditingService.FindByPath(idOrName);
+                }
+                // Fall back to scene hierarchy
+                if (gameObject == null)
+                {
+                    gameObject = GameObject.Find(idOrName);
                 }
             }
 

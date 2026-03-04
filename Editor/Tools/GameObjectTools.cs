@@ -32,16 +32,19 @@ namespace McpUnity.Tools
             }
             else if (!string.IsNullOrEmpty(objectPath))
             {
-                gameObject = GameObject.Find(objectPath);
-                if (gameObject == null)
-                {
-                    // Try finding by traversing hierarchy
-                    gameObject = FindGameObjectByPath(objectPath);
-                }
-                // Fallback: search in Prefab edit mode contents
-                if (gameObject == null && PrefabEditingService.IsEditing)
+                // Prefer prefab contents when editing a prefab
+                if (PrefabEditingService.IsEditing)
                 {
                     gameObject = PrefabEditingService.FindByPath(objectPath);
+                }
+                // Fall back to scene hierarchy
+                if (gameObject == null)
+                {
+                    gameObject = GameObject.Find(objectPath);
+                }
+                if (gameObject == null)
+                {
+                    gameObject = FindGameObjectByPath(objectPath);
                 }
                 identifierInfo = $"path '{objectPath}'";
             }
