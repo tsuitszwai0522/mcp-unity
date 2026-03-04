@@ -35,13 +35,28 @@ namespace McpUnity.Utils
                 Transform childTransform;
                 if (currentParent == null)
                 {
-                    GameObject rootObj = GameObject.Find(name);
-                    // Fallback: check Prefab edit mode root
-                    if (rootObj == null && PrefabEditingService.IsEditing
-                        && PrefabEditingService.PrefabRoot.name == name)
+                    GameObject rootObj = null;
+
+                    // When editing a prefab, prioritize the prefab editing context
+                    if (PrefabEditingService.IsEditing)
                     {
-                        rootObj = PrefabEditingService.PrefabRoot;
+                        if (PrefabEditingService.PrefabRoot.name == name)
+                        {
+                            rootObj = PrefabEditingService.PrefabRoot;
+                        }
+                        else
+                        {
+                            // Check direct children of prefab root
+                            Transform childOfRoot = PrefabEditingService.PrefabRoot.transform.Find(name);
+                            if (childOfRoot != null)
+                                rootObj = childOfRoot.gameObject;
+                        }
                     }
+
+                    // Fallback to scene search only if not found in prefab editing context
+                    if (rootObj == null)
+                        rootObj = GameObject.Find(name);
+
                     childTransform = rootObj?.transform;
                 }
                 else
