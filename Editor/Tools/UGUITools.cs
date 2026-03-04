@@ -73,7 +73,7 @@ namespace McpUnity.Tools
         /// </summary>
         public static EventSystem EnsureEventSystem()
         {
-            EventSystem eventSystem = UnityEngine.Object.FindObjectOfType<EventSystem>();
+            EventSystem eventSystem = UnityEngine.Object.FindFirstObjectByType<EventSystem>();
             if (eventSystem == null)
             {
                 GameObject eventSystemGO = new GameObject("EventSystem");
@@ -110,7 +110,7 @@ namespace McpUnity.Tools
             }
 
             // If not found, try to find any canvas
-            Canvas anyCanvas = UnityEngine.Object.FindObjectOfType<Canvas>();
+            Canvas anyCanvas = UnityEngine.Object.FindFirstObjectByType<Canvas>();
             if (anyCanvas != null)
                 return anyCanvas;
 
@@ -161,7 +161,7 @@ namespace McpUnity.Tools
 
             if (instanceId.HasValue)
             {
-                gameObject = EditorUtility.InstanceIDToObject(instanceId.Value) as GameObject;
+                gameObject = EditorUtility.EntityIdToObject(instanceId.Value) as GameObject;
                 identifier = $"instance ID {instanceId.Value}";
             }
             else if (!string.IsNullOrEmpty(objectPath))
