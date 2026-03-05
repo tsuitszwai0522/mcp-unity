@@ -456,6 +456,27 @@ namespace McpUnity.Unity
             SavePrefabContentsTool savePrefabContentsTool = new SavePrefabContentsTool();
             _tools.Add(savePrefabContentsTool.Name, savePrefabContentsTool);
 
+            // Register Screenshot Tools
+            ScreenshotGameViewTool screenshotGameViewTool = new ScreenshotGameViewTool();
+            _tools.Add(screenshotGameViewTool.Name, screenshotGameViewTool);
+
+            ScreenshotSceneViewTool screenshotSceneViewTool = new ScreenshotSceneViewTool();
+            _tools.Add(screenshotSceneViewTool.Name, screenshotSceneViewTool);
+
+            ScreenshotCameraTool screenshotCameraTool = new ScreenshotCameraTool();
+            _tools.Add(screenshotCameraTool.Name, screenshotCameraTool);
+
+            // Register Editor State Tools
+            GetEditorStateTool getEditorStateTool = new GetEditorStateTool();
+            _tools.Add(getEditorStateTool.Name, getEditorStateTool);
+
+            SetEditorStateTool setEditorStateTool = new SetEditorStateTool();
+            _tools.Add(setEditorStateTool.Name, setEditorStateTool);
+
+            // Register Get Selection Tool
+            GetSelectionTool getSelectionTool = new GetSelectionTool();
+            _tools.Add(getSelectionTool.Name, getSelectionTool);
+
             // Register BatchExecuteTool (must be registered last as it needs access to other tools)
             BatchExecuteTool batchExecuteTool = new BatchExecuteTool(this);
             _tools.Add(batchExecuteTool.Name, batchExecuteTool);
@@ -552,29 +573,57 @@ namespace McpUnity.Unity
         }
 
         /// <summary>
+        /// Checks if Domain Reload is disabled in Enter Play Mode Settings.
+        /// When disabled, the server can survive Play Mode transitions without stopping.
+        /// </summary>
+        private static bool IsDomainReloadDisabled()
+        {
+            return EditorSettings.enterPlayModeOptionsEnabled &&
+                   (EditorSettings.enterPlayModeOptions & EnterPlayModeOptions.DisableDomainReload) != 0;
+        }
+
+        /// <summary>
         /// Handles changes in Unity Editor's play mode state.
-        /// Stops the server when exiting Edit Mode if configured, and restarts it when entering Play Mode or returning to Edit Mode if auto-start is enabled.
+        /// Supports two paths:
+        /// - Domain Reload disabled: server stays alive (zero downtime)
+        /// - Domain Reload enabled: server stops, then auto-restarts after EnteredPlayMode
         /// </summary>
         /// <param name="state">The current play mode state change.</param>
         private static void OnPlayModeStateChanged(PlayModeStateChange state)
         {
             if (Application.isBatchMode || _instance == null) return;
-            
+
             switch (state)
             {
                 case PlayModeStateChange.ExitingEditMode:
-                    // About to enter Play Mode - use custom close code so clients use fast polling
-                    if (_instance.IsListening)
+                    if (IsDomainReloadDisabled())
                     {
+                        // Domain Reload disabled → server survives, zero downtime
+                        McpLogger.LogInfo("Play Mode: Domain Reload disabled, keeping MCP server alive");
+                    }
+                    else if (_instance.IsListening)
+                    {
+                        // Domain Reload enabled → must stop server before reload destroys it
                         _instance.StopServer(UnityCloseCode.PlayMode, "Unity entering Play mode");
                     }
                     break;
+
                 case PlayModeStateChange.EnteredPlayMode:
-                case PlayModeStateChange.ExitingPlayMode:
-                    // Server is disabled during play mode as domain reload will be triggered again when stopped.
+                    // After domain reload completes, restart server so tools work during Play Mode
+                    // If domain reload is disabled, server is still running (IsListening == true), so this is a no-op
+                    if (!_instance.IsListening && McpUnitySettings.Instance.AutoStartServer)
+                    {
+                        McpLogger.LogInfo("Play Mode: Restarting MCP server after domain reload");
+                        _instance.StartServer();
+                    }
                     break;
+
+                case PlayModeStateChange.ExitingPlayMode:
+                    // No action needed — OnBeforeAssemblyReload handles domain reload if enabled
+                    break;
+
                 case PlayModeStateChange.EnteredEditMode:
-                    // Returned to Edit Mode
+                    // Returned to Edit Mode — ensure server is running
                     if (!_instance.IsListening && McpUnitySettings.Instance.AutoStartServer)
                     {
                         _instance.StartServer();

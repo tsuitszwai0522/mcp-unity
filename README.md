@@ -183,6 +183,24 @@ The following tools are available for manipulating and querying Unity scenes and
 - `get_material_info`: Gets detailed information about a material including shader and all properties
   > **Example prompt:** "Show me all the properties of the 'PlayerMaterial'"
 
+- `screenshot_game_view`: Captures a screenshot from the Game View, reflecting what the player sees
+  > **Example prompt:** "Take a screenshot of the Game View so I can see the current state"
+
+- `screenshot_scene_view`: Captures a screenshot from the Scene View, reflecting the editor camera perspective
+  > **Example prompt:** "Capture the Scene View so I can check the object layout"
+
+- `screenshot_camera`: Captures a screenshot from a specific Camera in the scene
+  > **Example prompt:** "Take a screenshot from the Main Camera at 1920x1080"
+
+- `get_editor_state`: Gets the current Unity Editor state including play mode, compilation status, active scene, and build platform
+  > **Example prompt:** "Is Unity currently in Play Mode?"
+
+- `set_editor_state`: Controls Unity Editor play mode — play, pause, unpause, or stop
+  > **Example prompt:** "Enter Play Mode to test the game" or "Stop Play Mode and return to editing"
+
+- `get_selection`: Gets the currently selected objects in the Unity Editor (GameObjects in hierarchy and/or assets in Project window)
+  > **Example prompt:** "What objects do I currently have selected?"
+
 - `batch_execute`: Executes multiple tool operations in a single batch request, reducing round-trips and enabling atomic operations with optional rollback on failure
   > **Example prompt:** "Create 10 empty GameObjects named Enemy_1 through Enemy_10 in a single batch operation"
 

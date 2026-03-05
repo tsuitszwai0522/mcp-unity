@@ -881,16 +881,17 @@ const response = await mcpUnity.sendRequest({
 ## 12. 實作階段建議
 
 ### Phase 1：基礎設施 + 核心工具（最高價值，最低風險）
-- [ ] **Play Mode Server 持續連線**（功能六） ← 所有後續功能嘅前提
-  - [ ] 修改 `McpUnityServer.cs` 嘅 `OnPlayModeStateChanged`
-  - [ ] 新增 `IsDomainReloadDisabled()` helper
-  - [ ] 測試 domain reload 開啟/關閉兩個路徑
-- [ ] `screenshot_game_view`
-- [ ] `screenshot_scene_view`
-- [ ] `screenshot_camera`
-- [ ] `get_editor_state`
-- [ ] `set_editor_state`
-- [ ] `get_selection`
+- [x] **Play Mode Server 持續連線**（功能六） ← 所有後續功能嘅前提
+  - [x] 修改 `McpUnityServer.cs` 嘅 `OnPlayModeStateChanged`
+  - [x] 新增 `IsDomainReloadDisabled()` helper
+  - [x] 測試 Play Mode 持續連線（Edit→Play→Pause→Unpause→Stop 全循環通過）
+  - [ ] 測試 domain reload 開啟路徑（需手動開啟 Domain Reload 設定）
+- [x] `screenshot_game_view`
+- [x] `screenshot_scene_view`
+- [x] `screenshot_camera`
+- [x] `get_editor_state`
+- [x] `set_editor_state`
+- [x] `get_selection`
 
 ### Phase 2：資產與腳本管理（中等價值，低風險）
 - [ ] `manage_asset`

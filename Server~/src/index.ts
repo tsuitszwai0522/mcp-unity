@@ -31,6 +31,9 @@ import { registerCreateScriptableObjectTool } from './tools/createScriptableObje
 import { registerUpdateScriptableObjectTool } from './tools/updateScriptableObjectTool.js';
 import { registerImportTextureAsSpriteTool, registerCreateSpriteAtlasTool } from './tools/spriteTools.js';
 import { registerOpenPrefabContentsTool, registerSavePrefabContentsTool } from './tools/prefabEditTools.js';
+import { registerScreenshotTools } from './tools/screenshotTools.js';
+import { registerEditorStateTools } from './tools/editorStateTools.js';
+import { registerGetSelectionTool } from './tools/getSelectionTool.js';
 import { registerBatchExecuteTool } from './tools/batchExecuteTool.js';
 import { registerGetMenuItemsResource } from './resources/getMenuItemResource.js';
 import { registerGetConsoleLogsResource } from './resources/getConsoleLogsResource.js';
@@ -112,6 +115,15 @@ registerCreateSpriteAtlasTool(server, mcpUnity, toolLogger);
 // Register Prefab Edit Tools
 registerOpenPrefabContentsTool(server, mcpUnity, toolLogger);
 registerSavePrefabContentsTool(server, mcpUnity, toolLogger);
+
+// Register Screenshot Tools
+registerScreenshotTools(server, mcpUnity, toolLogger);
+
+// Register Editor State Tools
+registerEditorStateTools(server, mcpUnity, toolLogger);
+
+// Register Get Selection Tool
+registerGetSelectionTool(server, mcpUnity, toolLogger);
 
 // Register Batch Execute Tool (high-priority for performance)
 registerBatchExecuteTool(server, mcpUnity, toolLogger);
