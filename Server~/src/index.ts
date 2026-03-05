@@ -28,6 +28,7 @@ import { registerCreateMaterialTool, registerAssignMaterialTool, registerModifyM
 import { registerDuplicateGameObjectTool, registerDeleteGameObjectTool, registerReparentGameObjectTool } from './tools/gameObjectTools.js';
 import { registerUGUITools } from './tools/uguiTools.js';
 import { registerCreateScriptableObjectTool } from './tools/createScriptableObjectTool.js';
+import { registerUpdateScriptableObjectTool } from './tools/updateScriptableObjectTool.js';
 import { registerImportTextureAsSpriteTool, registerCreateSpriteAtlasTool } from './tools/spriteTools.js';
 import { registerOpenPrefabContentsTool, registerSavePrefabContentsTool } from './tools/prefabEditTools.js';
 import { registerBatchExecuteTool } from './tools/batchExecuteTool.js';
@@ -100,8 +101,9 @@ registerGetMaterialInfoTool(server, mcpUnity, toolLogger);
 // Register UGUI Tools
 registerUGUITools(server, mcpUnity, toolLogger);
 
-// Register ScriptableObject Tool
+// Register ScriptableObject Tools
 registerCreateScriptableObjectTool(server, mcpUnity, toolLogger);
+registerUpdateScriptableObjectTool(server, mcpUnity, toolLogger);
 
 // Register Sprite Tools
 registerImportTextureAsSpriteTool(server, mcpUnity, toolLogger);

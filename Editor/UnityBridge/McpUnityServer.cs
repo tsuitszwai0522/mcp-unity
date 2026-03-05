@@ -435,9 +435,12 @@ namespace McpUnity.Unity
             GetUIElementInfoTool getUIElementInfoTool = new GetUIElementInfoTool();
             _tools.Add(getUIElementInfoTool.Name, getUIElementInfoTool);
 
-            // Register CreateScriptableObjectTool
+            // Register ScriptableObject Tools
             CreateScriptableObjectTool createScriptableObjectTool = new CreateScriptableObjectTool();
             _tools.Add(createScriptableObjectTool.Name, createScriptableObjectTool);
+
+            UpdateScriptableObjectTool updateScriptableObjectTool = new UpdateScriptableObjectTool();
+            _tools.Add(updateScriptableObjectTool.Name, updateScriptableObjectTool);
 
             // Register Sprite Tools
             ImportTextureAsSpriteTool importTextureAsSpriteTool = new ImportTextureAsSpriteTool();

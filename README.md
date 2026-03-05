@@ -168,6 +168,9 @@ The following tools are available for manipulating and querying Unity scenes and
 - `create_scriptable_object`: Creates a ScriptableObject asset with optional field values and saves it to the project
   > **Example prompt:** "Create a GameSettings ScriptableObject at Assets/Settings/GameSettings.asset with maxHealth set to 100"
 
+- `update_scriptable_object`: Updates field values on an existing ScriptableObject asset in the project
+  > **Example prompt:** "Update the GameSettings asset at Assets/Settings/GameSettings.asset and set maxHealth to 200"
+
 - `create_material`: Creates a new material with specified shader and saves it to the project
   > **Example prompt:** "Create a red material called 'EnemyMaterial' using the URP Lit shader"
 

@@ -380,14 +380,14 @@ Hex → Unity RGB (0-1)：每個通道值除以 255。
 - **先查再執行**：Menu Item 路徑必須完全匹配，執行前先查詢確認
 - **用途範例**：觸發 Unity 內建功能（如建立 3D 物件）、Package 提供的選單功能（如 TMP Importer）、自訂選單項目
 
-## ScriptableObject 建立 (ScriptableObject Creation)
+## ScriptableObject 建立與更新 (ScriptableObject Creation & Update)
 
 ### 標準流程
 
 1. **確認類別存在**：目標 C# 類別必須繼承 `ScriptableObject` 且已編譯通過
 2. **編譯驗證**：`recompile_scripts` — 確認類別可用
 3. **建立資產**：`create_scriptable_object(typeName, savePath, fieldValues)` — `typeName` 為類別名（含命名空間），`savePath` 為資產路徑（如 `"Assets/Data/GameSettings.asset"`）
-4. **設定欄位值**：可在建立時透過 `fieldValues` 設定，或之後用 `update_component` 修改
+4. **設定欄位值**：可在建立時透過 `fieldValues` 設定，或之後用 `update_scriptable_object(assetPath, fieldValues)` 更新
 
 ### 注意事項
 
@@ -446,6 +446,10 @@ Hex → Unity RGB (0-1)：每個通道值除以 255。
      savePath: "Assets/Data/GameSettings.asset",
      fieldValues: { "maxPlayers": 4, "gameDuration": 300 }
    )
+3. 之後更新欄位 → update_scriptable_object(
+     assetPath: "Assets/Data/GameSettings.asset",
+     fieldValues: { "maxPlayers": 8 }
+   )
 ```
 
 ## 工具依賴關係 (Tool Dependencies)
@@ -473,7 +477,7 @@ unity://packages ──→ add_package ──→ recompile_scripts
 
 unity://menu-items ──→ execute_menu_item
 
-recompile_scripts ──→ create_scriptable_object
+recompile_scripts ──→ create_scriptable_object ──→ update_scriptable_object
 ```
 
 ## 錯誤處理 (Error Handling)

@@ -166,6 +166,9 @@ MCP Unityは、Unityの`Library/PackedCache`フォルダーをワークスペー
 - `create_scriptable_object`: ScriptableObjectアセットをオプションのフィールド値とともに作成し、プロジェクトに保存
   > **例:** "Assets/Settings/GameSettings.assetにmaxHealthを100に設定したGameSettings ScriptableObjectを作成"
 
+- `update_scriptable_object`: 既存のScriptableObjectアセットのフィールド値を更新
+  > **例:** "Assets/Settings/GameSettings.assetのGameSettingsのmaxHealthを200に更新"
+
 - `create_material`: 指定されたシェーダーで新しいマテリアルを作成し、プロジェクトに保存
   > **例:** "URP Litシェーダーを使用して'EnemyMaterial'という赤いマテリアルを作成"
 

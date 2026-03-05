@@ -125,9 +125,9 @@ Shader property 差異：URP `_BaseColor`/`_BaseMap`/`_Smoothness` vs Built-in `
 
 `ReadMcpResourceTool(uri: "unity://menu-items")` 查詢可用項目 → `execute_menu_item(menuPath)` 執行。路徑必須完全匹配（如 `"GameObject/Create Empty"`）。
 
-## ScriptableObject 建立
+## ScriptableObject 建立與更新
 
-C# 類別必須已存在且繼承 `ScriptableObject` → `recompile_scripts` 確認編譯 → `create_scriptable_object(typeName, savePath, fieldValues)`。`typeName` 需含命名空間（如 `"MyGame.GameSettings"`）。
+C# 類別必須已存在且繼承 `ScriptableObject` → `recompile_scripts` 確認編譯 → `create_scriptable_object(typeName, savePath, fieldValues)`。`typeName` 需含命名空間（如 `"MyGame.GameSettings"`）。更新已存在的 SO 欄位值用 `update_scriptable_object(assetPath, fieldValues)`。
 
 ## 工具依賴關係
 
@@ -141,6 +141,7 @@ update_gameobject → update_component / remove_component / move / rotate / scal
 unity://packages → add_package → recompile_scripts
 unity://menu-items → execute_menu_item
 recompile_scripts → create_scriptable_object
+create_scriptable_object → update_scriptable_object
 ```
 
 ## 錯誤處理
