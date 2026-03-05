@@ -8,10 +8,11 @@ description: Guide for using Unity MCP tools to manipulate Unity Editor. Use whe
 此規則為 Claude Code 使用 MCP Unity 工具操作 Unity Editor 的行為規範。
 
 > 所有可用工具與資源已由 MCP Server 提供定義，使用 `ListMcpResourcesTool` 可查詢可用資源。
+> **UI 建構流程**：若使用者要求建構完整的 UI 介面（Canvas + 多層 UI 元素），請使用 `unity-ui-builder`。本規則負責通用 MCP 工具操作。
 
 ## 觸發條件 (When to Activate)
 
-- 使用者要求在 Unity 中建立或修改 GameObject、UI、Material、Scene、Prefab 等
+- 使用者要求在 Unity 中建立或修改 GameObject、Material、Scene、Prefab 等
 - 安裝 Package、執行 Menu Item、建立 ScriptableObject 資產
 - 任何涉及 Unity Editor 操作的請求
 
@@ -20,39 +21,9 @@ description: Guide for using Unity MCP tools to manipulate Unity Editor. Use whe
 1. **先查詢再操作**：修改前先用 `get_scenes_hierarchy` 或 `get_gameobject` 確認現有結構。
 2. **批次優先**：多個獨立操作使用 `batch_execute`（上限 100，支援 `atomic: true` 回滾）。
 3. **路徑格式**：GameObject 用 `Parent/Child`，Asset 必須以 `Assets/` 開頭。
-4. **UI 建立順序**：Canvas → Container → UI 元素 → Layout 組件。
-5. **善用 instanceId**：`get_gameobject` 回傳的 instanceId 比路徑更可靠。
-6. **修改後驗證**：改 C# → `recompile_scripts` → 確認編譯通過 → 才能繼續後續操作。
-7. **EditMode 優先**：預設用 EditMode 測試。PlayMode 僅限生命週期/Coroutine/Physics/場景載入，需通過 Pre-flight Checklist。完整指引見 `unity-test-debug`。
-
-## UGUI 建構規則
-
-### Canvas 標準設定
-
-`create_canvas`: ScreenSpaceOverlay, ScaleWithScreenSize, referenceResolution **1920×1080**, screenMatchMode **Expand**。標準階層：`TestCanvas → View(stretch-fill) → Container`。
-
-### Anchor Preset 選用表
-
-| 使用情境 | anchorPreset | pivot |
-|----------|-------------|-------|
-| 左上角絕對定位 | `topLeft` | (0, 1) |
-| 水平填滿 | `topStretch` | (0.5, 1) |
-| 填滿父層 | `stretch` | (0.5, 0.5) |
-| 置中 | `middleCenter` | (0.5, 0.5) |
-| 右對齊 | `topRight` | (1, 1) |
-| 垂直置中靠左 | `middleLeft` | (0, 0.5) |
-
-### 色彩轉換
-
-Hex → Unity RGB (0-1)：每通道除以 255。`#426B1F` → `(0.259, 0.420, 0.122)`。
-
-### Layout Group 判斷
-
-對每個擁有 ≥2 個同類子元素的父節點：優先使用 Auto Layout 屬性（`layoutMode`）直接對應；若無，取所有子元素 `(x, y, w, h)`，計算相鄰元素 gap — x 相同 + w 相同 + gap 相等 → `VerticalLayoutGroup`；y 相同 + gap 相等 → `HorizontalLayoutGroup`；多行多列規律 → `GridLayoutGroup`；皆不符 → 絕對定位。
-
-### ScrollRect 結構
-
-子元素總尺寸超過容器時，使用固定結構：`ScrollRect+Image(a=0) → Viewport(RectMask2D, stretch-fill) → Content(LayoutGroup) → Children`。用 `update_component` 將 ScrollRect 的 `content` 指向 Content、`viewport` 指向 Viewport。可選加入 Scrollbar（與 Viewport 同層）。
+4. **善用 instanceId**：`get_gameobject` 回傳的 instanceId 比路徑更可靠。
+5. **修改後驗證**：改 C# → `recompile_scripts` → 確認編譯通過 → 才能繼續後續操作。
+6. **EditMode 優先**：預設用 EditMode 測試。PlayMode 僅限生命週期/Coroutine/Physics/場景載入，需通過 Pre-flight Checklist。完整指引見 `unity-test-debug`。
 
 ## Prefab 操作
 
@@ -66,24 +37,34 @@ Hex → Unity RGB (0-1)：每通道除以 255。`#426B1F` → `(0.259, 0.420, 0.
 
 | 陷阱 | 說明 |
 |------|------|
-| CanvasScaler | referenceResolution 固定 1920×1080 + Expand |
-| Button 文字 | 子物件名 `Text`，元件 `UnityEngine.UI.Text`，非 TMP |
-| Button 背景 | `elementData.color` 是 Image 背景色，非文字色 |
 | Outline | componentName 為 `Outline`（非 `UnityEngine.UI.Outline`） |
-| TMP 元件名 | componentName 為 `TMPro.TextMeshProUGUI` |
-| TMP alpha | 建立 TMP 時 `color` 未指定 `a` 預設為 1（不透明），需半透明時才需明確帶 `a` |
-| Viewport alpha | ScrollRect Viewport Image alpha 必須為 1，Mask stencil 才能正常運作 |
-| localScale | 所有 UI 元素 localScale 保持 (1,1,1) |
 | Prefab 工作流 | 可複用元件用 `save_as_prefab` 存 Prefab → `add_asset_to_scene` 放實例，不可只 duplicate |
 | Prefab Edit Mode | 修改既有 Prefab：`open_prefab_contents` → 修改 → `save_prefab_contents`，實例自動同步 |
 | Asset Reference | `update_component` 支援 asset path 設定 Sprite/Material/Font，如 `{"sprite": "Assets/Sprites/image.png"}` |
 | 命名空間元件名 | `componentName` 支援短名、完整名、assembly-qualified 三種格式，工具自動解析 |
 | Scene 物件引用 | `componentData` 支援 asset 引用（path 字串）和 scene 物件引用（instance ID 整數值、`{"instanceId": N}` 或 `{"objectPath": "..."}` 結構） |
 | remove_component | 使用 `remove_component` 移除組件（支援 Undo），無法移除 Transform |
-| UI 物件建議用 create_ui_element | Canvas 下用 `update_gameobject` 建立的 GO 會自動加 RectTransform，但不含 CanvasRenderer 等 UI 元件。完整 UI 物件仍建議用 `create_ui_element` |
 | Material 先查再改 | 修改前必須 `get_material_info` 確認 shader 屬性名，不可盲猜 |
 | Shader property 差異 | URP: `_BaseColor`/`_BaseMap`/`_Smoothness`；Built-in: `_Color`/`_MainTex`/`_Glossiness` |
 | Shader Graph | `.shadergraph` 是二進位格式，不可手寫，只能透過 Unity Editor GUI |
+| `get_gameobject` 深層掃描 | `includeChildren: true` 深層階層可能超過 100k 字元。用 `maxDepth: 0~2` 限制，或先 `maxDepth: 1` 取概覽再逐層展開 |
+| 新建 .cs 需 Refresh | `recompile_scripts` 報 "type not found" 時，先 `execute_menu_item("Assets/Refresh")` 再重新編譯 |
+| 外部寫入檔案需 Refresh | 用 curl/Bash 下載或寫入檔案到 Assets/ 後，必須先 `execute_menu_item("Assets/Refresh")` 才能用 MCP 工具操作（如 `import_texture_as_sprite`），否則報 "asset not found" |
+| 清除場景物件引用 | `{"field": null}` **無效**，必須用 `{"field": 0}` 清為 null |
+| SpriteAtlas platform override | MCP 無法設定 platform override，需手動編輯 `.spriteatlasv2.meta` 的 `platformSettings` 欄位（`overridden: 1`） |
+| MCP 連線中斷 | 長時間操作後可能 timeout。程式碼先 commit、場景定期 `save_scene`、中斷後重試 |
+
+## Figma → Unity 素材匯入工作流
+
+1. **取得素材 URL**：`get_design_context(nodeId, fileKey)` → 回傳圖片 URL（有效期 7 天）
+2. **下載到 Assets**：`curl -sL "{url}" -o "Assets/.../filename.png"`（可並行多個 `curl &`）
+3. **刷新 AssetDatabase**：`execute_menu_item("Assets/Refresh")` — **必做，否則後續工具找不到檔案**
+4. **設定 Sprite 類型**：`import_texture_as_sprite(assetPath)` — 用 `batch_execute` 批量處理
+5. **建立 SpriteAtlas**：手寫 `.spriteatlasv2` YAML（packables 引用 Sprites 資料夾 GUID）
+6. **設定 Platform Override**：手動編輯 `.spriteatlasv2.meta`，加入 Android/iOS `platformSettings`（MCP 不支援此操作）
+7. **最終 Refresh**：`execute_menu_item("Assets/Refresh")`
+
+參考範本：`Assets/ProjectT/AddressablesAssets/Env/Battlefield/Forest2/SpriteAtlas/Forest2Atlas.spriteatlasv2`
 
 ## Material 工作流
 
@@ -160,22 +141,22 @@ create_scriptable_object → update_scriptable_object
 
 ## 禁止事項 (Don'ts)
 
-1. 不要在沒有 Canvas 的情況下建立 UI 元素
-2. 不要忘記 Asset 路徑的 `Assets/` 前綴
-3. 不要一次執行大量獨立操作而不使用 `batch_execute`
-4. 不要假設物件存在，先查詢確認
-5. 不要忽略 instanceId
-6. 不要手動設定 localScale 為非 (1,1,1) 的值
-7. 不要用 `create_prefab` 建場景物件的 Prefab（應用 `save_as_prefab`）
-8. 不要直接修改場景中 Prefab 實例結構（應用 `open_prefab_contents`）
-9. 不要在 Prefab Edit Mode 中忘記 `save_prefab_contents`
-10. 不要建構 ScrollRect 時不按規範結構
-11. 不要在 Canvas 下用 `update_gameobject` 建立 UI 物件（應用 `create_ui_element`；工具會回傳警告）
-12. 不要忽略 `update_gameobject` 回傳的 Canvas/RectTransform 警告訊息
-13. 不要修改 C# 後不執行 `recompile_scripts` 驗證編譯結果
-14. 不要在未用 `get_material_info` 查詢 shader 屬性前盲目 `modify_material`
-15. 不要假設 shader property 名稱（URP 用 `_BaseColor`，Built-in 用 `_Color`，需先查詢）
-16. 不要嘗試手寫 `.shadergraph` 檔案（二進位格式，只能 GUI 操作）
-17. 不要在未用 `unity://packages` 確認前重複安裝已有的 Package
-18. 不要在未用 `unity://menu-items` 確認路徑前執行 `execute_menu_item`
-19. 不要在 C# 類別未編譯通過前嘗試 `create_scriptable_object`
+1. 不要忘記 Asset 路徑的 `Assets/` 前綴
+2. 不要一次執行大量獨立操作而不使用 `batch_execute`
+3. 不要假設物件存在，先查詢確認
+4. 不要忽略 instanceId
+5. 不要用 `create_prefab` 建場景物件的 Prefab（應用 `save_as_prefab`）
+6. 不要直接修改場景中 Prefab 實例結構（應用 `open_prefab_contents`）
+7. 不要在 Prefab Edit Mode 中忘記 `save_prefab_contents`
+8. 不要修改 C# 後不執行 `recompile_scripts` 驗證編譯結果
+9. 不要在未用 `get_material_info` 查詢 shader 屬性前盲目 `modify_material`
+10. 不要假設 shader property 名稱（URP 用 `_BaseColor`，Built-in 用 `_Color`，需先查詢）
+11. 不要嘗試手寫 `.shadergraph` 檔案（二進位格式，只能 GUI 操作）
+12. 不要在未用 `unity://packages` 確認前重複安裝已有的 Package
+13. 不要在未用 `unity://menu-items` 確認路徑前執行 `execute_menu_item`
+14. 不要在 C# 類別未編譯通過前嘗試 `create_scriptable_object`
+
+## 主動學習 (Active Learning)
+
+- **操作前**：讀取 `doc/lessons/unity-mcp-lessons.md`，避免重蹈已知問題。
+- **操作後**：判斷本次操作是否產生新經驗（踩坑、發現隱藏行為、確認可行做法、找到更好方法），若「是」→ 依 `unity-mcp-learning` 協議追加記錄；若「否」→ 不做任何事。

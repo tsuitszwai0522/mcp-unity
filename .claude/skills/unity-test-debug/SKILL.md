@@ -45,6 +45,11 @@ description: Guide for Unity test execution and debug iteration. Use when user w
                      get_console_logs → warning/error？→ 修正
                            ↓
                          完成 ✓
+
+PlayMode 分支（MCP 會斷線）：
+  run_tests (PlayMode) → 預期斷線 → 等待重連
+    → get_console_logs 確認完成
+    → 讀取 TestResults.xml 驗證結果
 ```
 
 ## EditMode vs PlayMode 差異
@@ -66,6 +71,22 @@ description: Guide for Unity test execution and debug iteration. Use when user w
 | Coroutine | 需 MonoBehaviour 驅動 |
 | Physics | 需 Physics engine loop |
 | 場景載入 + UI 互動 | 需完整 runtime |
+
+## PlayMode MCP 斷線問題
+
+**已知限制**：透過 MCP `run_tests` 執行 PlayMode 測試時，Unity 進入 Play Mode 會導致 MCP WebSocket 斷線，`run_tests` 回傳 `Connection failed: Unknown error`。
+
+**正確處理流程**：
+
+1. 呼叫 `run_tests(testMode: "PlayMode", ...)`，預期會收到連線錯誤（這是正常的）。
+2. **不要重試** `run_tests`——測試已經在 Unity 內執行中。
+3. 等待 MCP 重連（Unity 退出 Play Mode 後自動恢復，通常 10~30 秒）。
+4. 重連後用 `get_console_logs` 確認測試完成。
+5. 讀取測試結果 XML（路徑會出現在 console log 中，格式：`Saving results to: /path/to/TestResults.xml`）。
+
+**注意**：
+- CLI batch mode (`-runTests -batchmode`) 在 Unity Editor 已開啟時無法使用（project lock）。
+- 不要因為斷線就改用 EditMode——如果測試需要 PlayMode，就用 PlayMode。
 
 ## PlayMode Pre-flight Checklist
 
@@ -103,3 +124,8 @@ description: Guide for Unity test execution and debug iteration. Use when user w
 5. 不要在 PlayMode `.asmdef` 引用 `*.Editor` assembly
 6. 不要 `get_console_logs` 預設開 `includeStackTrace`
 7. 不要連續 3 次失敗後繼續盲目重試
+
+## 主動學習 (Active Learning)
+
+- **操作前**：讀取 `doc/lessons/unity-mcp-lessons.md`，避免重蹈已知問題。
+- **操作後**：判斷本次操作是否產生新經驗（踩坑、發現隱藏行為、確認可行做法、找到更好方法），若「是」→ 依 `unity-mcp-learning` 協議追加記錄；若「否」→ 不做任何事。

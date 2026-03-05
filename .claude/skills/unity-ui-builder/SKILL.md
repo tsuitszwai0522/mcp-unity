@@ -1,17 +1,138 @@
 ---
 name: unity-ui-builder
-description: Build Unity UGUI from Figma designs using MCP Unity tools. Use when user provides a Figma design and wants to recreate it in Unity, or asks to build UI with MCP tools.
+description: Build Unity UGUI using MCP Unity tools. Use when user wants to build UI in Unity from any source: Figma designs, text descriptions, wireframes, screenshots, or specifications.
 ---
 
 # Unity UI Builder for Claude Code
 
-此規則為 Claude Code 透過 MCP Unity 工具將 Figma 設計稿建構為 Unity UGUI 的行為規範。
+此規則為 Claude Code 透過 MCP Unity 工具建構 Unity UGUI 的行為規範。支援多種設計輸入：Figma 設計稿、文字描述、wireframe、截圖、規格表。
 
-> 通用 UGUI 規則、Layout Group 演算法、ScrollRect 結構、Prefab 操作、完整 MCP 注意事項請參考 `unity-mcp-workflow`。
+> 通用 MCP 工具注意事項（Prefab 工作流、Asset Reference、Scene 物件引用、Material 等）請參考 `unity-mcp-workflow`。
 
-## Figma MCP 資料來源策略
+## 觸發條件 (When to Activate)
 
-支援兩組 Figma MCP 工具，可獨立或搭配使用：
+- 使用者提供 Figma 連結要求建構 UI（→ Figma 模式）
+- 使用者口頭描述想要的 UI（→ 描述模式）
+- 使用者提供 wireframe / 截圖（→ 視覺參考模式）
+- 使用者提供 UI 規格表（→ 規格模式）
+- 使用者說「建 UI」、「做一個介面」、「建構 UI」、「Figma 轉 Unity」
+
+## 核心規則 (Core Rules)
+
+1. **計劃先行**：必須先完成建構計劃（階層樹 + 屬性表格），**呈現給使用者確認後**才能呼叫任何 MCP 建構工具。
+2. **Layout Group 強制分析**：對每個擁有 ≥2 個同類子元素的父節點執行判斷。Figma 模式優先看 Auto Layout（`layoutMode`）直接對應；否則用座標規律演算法推斷（x 相同 + w 相同 + gap 相等 → Vertical；y 相同 + gap 相等 → Horizontal；多行多列 → Grid；皆不符 → 絕對定位）。
+3. **ScrollRect 判斷**：Layout Group 子元素總尺寸超過容器時，包一層 ScrollRect（結構：`ScrollRect+Image(a=0) → Viewport(RectMask2D, stretch-fill) → Content(LayoutGroup) → Children`）。用 `update_component` 接線 `content`/`viewport`。可選加 Scrollbar。
+4. **批次優先**：使用 `batch_execute` 批次建立相關元素，單次上限 100 個操作。
+5. **由外而內**：建構順序 Canvas → 容器 → 區塊 → 子元素 → Layout 組件。
+6. **每步驗證**：每個區塊完成後用 `get_gameobject` 或 `get_ui_element_info` 確認。
+
+## UGUI 建構規則
+
+### Canvas 標準設定
+
+`create_canvas`: ScreenSpaceOverlay, ScaleWithScreenSize, referenceResolution **1920×1080**, screenMatchMode **Expand**。標準階層：`TestCanvas → View(stretch-fill) → Container`。
+
+### Anchor Preset 選用表
+
+| 使用情境 | anchorPreset | pivot |
+|----------|-------------|-------|
+| 左上角絕對定位 | `topLeft` | (0, 1) |
+| 水平填滿 | `topStretch` | (0.5, 1) |
+| 填滿父層 | `stretch` | (0.5, 0.5) |
+| 置中 | `middleCenter` | (0.5, 0.5) |
+| 右對齊 | `topRight` | (1, 1) |
+| 垂直置中靠左 | `middleLeft` | (0, 0.5) |
+
+### 色彩轉換
+
+Hex → Unity RGB (0-1)：每通道除以 255。`#426B1F` → `(0.259, 0.420, 0.122)`。
+
+## MCP 工具注意事項 — UI 專屬
+
+| 陷阱 | 說明 |
+|------|------|
+| CanvasScaler | referenceResolution 固定 1920×1080 + Expand，不可用設計畫面尺寸 |
+| Button 文字 | 子物件名 `Text`，元件 `UnityEngine.UI.Text`，非 TMP |
+| Button 背景 | `elementData.color` 是 Image 背景色，非文字色 |
+| TMP 元件名 | componentName 為 `TMPro.TextMeshProUGUI` |
+| TMP alpha | 建立 TMP 時 `color` 未指定 `a` 預設為 1（不透明），需半透明時才需明確帶 `a` |
+| Viewport alpha | ScrollRect Viewport Image alpha 必須為 1，Mask stencil 才能正常運作。`showMaskGraphic: false` 隱藏 Image |
+| localScale | 所有 UI 元素 localScale 保持 (1,1,1) |
+| UI 物件用 create_ui_element | Canvas 下用 `update_gameobject` 建立的 GO 不含 CanvasRenderer 等 UI 元件，應用 `create_ui_element` |
+
+## 執行流程 (Workflow)
+
+### 第一階段：設計輸入分析
+
+根據輸入源分支：
+
+**A. Figma 模式**（使用者提供 Figma 連結）：
+1. `get_figma_data` 取得節點佈局。資料過大時改用 `get_metadata`（sparse XML）取得概覽。
+1b.（Dev Mode MCP）`get_design_context` 取得語義化佈局資訊。
+1c.（Dev Mode MCP）`get_variable_defs` 取得 Design Token → 色彩表/字型表的**權威來源**。
+1d.（Dev Mode MCP）`get_screenshot` 截取 frame，作為 layout fidelity 基準。
+2. `download_figma_images` 下載圖片至 `Assets/Sprites/{DesignName}/`。
+3. 分析結構：識別可複用元件、建立色彩表/字型表/階層樹。
+4. Layout Group 分析（強制）：優先用 Figma Auto Layout；無則計算子元素 gap 推斷。結果標注在階層樹中。若子元素超出容器 → 標記 ScrollRect。
+
+**B. 描述模式**（使用者口頭描述）：
+1. 從描述中提取 UI 結構需求。
+2. 確認不明確的部分（元素數量、排列方式、色彩偏好、尺寸需求、是否滾動）。
+3. 建立初步階層結構。
+4. Layout Group 分析（強制）。
+
+**C. 視覺參考模式**（截圖 / wireframe）：
+1. 分析圖片中的 UI 元素與佈局。
+2. 推斷色彩、尺寸、間距。
+3. 建立階層結構。
+4. Layout Group 分析（強制）。
+
+**D. 規格模式**（結構化規格表）：
+1. 直接解析規格中的元素定義。
+2. 轉換為階層結構。
+3. Layout Group 分析（強制）。
+
+### 第 1.5 階段：Sprite 匯入（僅 Figma 模式）
+
+1. 用 `batch_execute` + `import_texture_as_sprite` 將所有下載圖片設為 Sprite 類型（預設 `spriteMode: "Single"`, `meshType: "FullRect"`, `compression: "None"`）。
+2. 透過 `unity://packages` 確認 `com.unity.2d.sprite` 已安裝後，用 `create_sprite_atlas` 建立 SpriteAtlas（可選）。
+
+### 第二階段：建構規劃（強制門檻）
+
+1. **撰寫 Hierarchy Plan（階層樹）**：標註 elementType、anchorPreset、Layout Group、ScrollRect。
+2. **輸出屬性表格**：每個元素的 Layout/ScrollRect/備註。
+3. **確認 Prefab 策略**：標記重複元件，規劃 duplicate + update 流程。
+4. **等待使用者確認**：獲得批准後才進入建構階段。
+
+### 第三階段：Canvas 建構
+
+1. **檢查 TestCanvas**：用 `ReadMcpResourceTool(uri: "unity://scenes_hierarchy")` 確認是否存在。
+2. **建立 TestCanvas**（僅在不存在時）：`create_canvas(objectPath: "TestCanvas")`，ScreenSpaceOverlay，ScaleWithScreenSize，referenceResolution **1920×1080**，screenMatchMode **Expand**。
+3. **View**：`TestCanvas/View`，stretch-fill 容器。
+4. **設計框架**：middleCenter，尺寸對應設計畫面。
+5. **Container**：stretch-fill，CanvasGroup，背景色。
+
+> 所有 UI 元素均建立在 `TestCanvas/View/` 之下。
+
+### 第四階段：區塊建構
+
+逐區塊建構，每個區塊使用 `batch_execute`：
+- 全寬區塊：`topStretch` + 高度
+- 絕對定位：`topLeft` + pivot (0,1) + 設計座標（Figma 模式 Y 取負）
+- 右對齊：`topRight` + pivot (1,1) + 負 X offset
+- **Sprite 指定**（有圖片時）：用 `update_component` 將 Sprite 指定給 Image。
+
+### 第五階段：可複用元件
+
+Prefab 完整操作流程詳見 `unity-mcp-workflow`「Prefab 操作」。Prefab 存放路徑：`Assets/Prefabs/{DesignName}/`。
+
+### 第六階段：儲存
+
+使用 `save_scene` 儲存場景。
+
+## Figma 專屬參考
+
+### Figma MCP 資料來源策略
 
 | MCP 來源 | 工具 | 用途 |
 |----------|------|------|
@@ -26,92 +147,25 @@ description: Build Unity UGUI from Figma designs using MCP Unity tools. Use when
 - 大型設計 → `get_metadata`（sparse XML）→ 再用 `get_design_context` 深入特定區塊
 - 視覺對照 → `get_screenshot` 作為 layout fidelity 基準
 
-## 核心規則 (Core Rules)
+### Figma → Unity 座標對應
 
-1. **座標 1:1 映射**：Figma 像素座標直接對應 Unity anchoredPosition（Y 軸取負）。
-2. **計劃先行**：必須先完成建構計劃（階層樹 + 屬性表格），**呈現給使用者確認後**才能呼叫任何 MCP 建構工具。
-3. **Layout Group 強制分析**：對每個擁有 ≥2 個同類子元素的父節點，優先看 Figma Auto Layout（`layoutMode`）直接對應；若無，用座標規律演算法推斷（詳見 `unity-mcp-workflow`）。
-4. **ScrollRect 判斷**：Layout Group 子元素總尺寸超過容器時，包一層 ScrollRect（結構詳見 `unity-mcp-workflow`）。若 Figma 有 Scrollbar UI，在 ScrollRect 下（與 Viewport 同層）加入 `Scrollbar`，並將 ScrollRect 的 `verticalScrollbar`/`horizontalScrollbar` 指向它。
-5. **批次優先**：使用 `batch_execute` 批次建立相關元素，單次上限 100 個操作。
-6. **由外而內**：建構順序 Canvas → 容器 → 區塊 → 子元素。
+| Figma 屬性 | Unity 屬性 | 說明 |
+|------------|-----------|------|
+| X, Y (父層左上角) | anchoredPosition (x, -y) | Y 軸翻轉 |
+| Width, Height | sizeDelta (w, h) | 直接對應 |
+| 填滿父層 | `stretch`, sizeDelta (0, 0) | 四邊 offset 為 0 |
+| 水平填滿 | `topStretch`, sizeDelta.y = h | NavBar/標題列 |
 
-## 觸發條件 (When to Activate)
+### Figma Layout Group 補充
 
-- 使用者提供 Figma 連結或設計稿，要求建構 Unity UI
-- 使用者說「Figma 轉 Unity」、「用 MCP 建 UI」
-- 使用者說「在 Unity 裡重現這個設計」
-
-## 執行流程 (Workflow)
-
-### 第一階段：Figma 分析
-
-1. **取得設計資料**：用 `get_figma_data` 取得節點佈局。資料過大時改用 `get_metadata`（sparse XML）取得概覽。
-1b. **（Dev Mode MCP）語義化上下文**：使用者選取目標 frame → 用 `get_design_context` 取得樣式化佈局資訊，作為原始數據的語義補充。
-1c. **（Dev Mode MCP）Design Token**：用 `get_variable_defs` 取得設計系統 Variables/Styles → 直接作為色彩表/字型表的**權威來源**。若有 Figma Variables（如 `primary/500`），記錄 Token 名稱與實際值的對應。
-1d. **（Dev Mode MCP）截圖參考**：用 `get_screenshot` 截取 frame，作為 layout fidelity 對照基準。
-2. **下載圖片**：用 `download_figma_images` 下載所有圖片資源至 `Assets/Sprites/{DesignName}/`。
-3. **分析結構**：識別可複用元件、建立色彩表（有 Design Token 時以 Token 為準）、字型表、階層樹。有 `get_design_context` 時用於交叉驗證結構判斷。
-4. **Layout Group 分析（強制）**：優先用 Figma Auto Layout；無則計算子元素 gap 推斷。列出計算過程，結果標注在階層樹中。若子元素超出容器 → 標記 ScrollRect。
-
-### 第 1.5 階段：Sprite 匯入
-
-1. **批量設定 Sprite**：用 `batch_execute` + `import_texture_as_sprite` 將所有下載圖片設為 Sprite 類型（預設 `spriteMode: "Single"`, `meshType: "FullRect"`, `compression: "None"`）。
-2. **建立 SpriteAtlas（可選）**：透過 `unity://packages` 確認 `com.unity.2d.sprite` 已安裝後，用 `create_sprite_atlas` 建立 SpriteAtlas。
-
-### 第二階段：建構規劃（強制門檻）
-
-1. **撰寫 Hierarchy Plan（階層樹）**：標註 elementType、anchorPreset、Layout Group、ScrollRect。
-2. **輸出屬性表格**：每個元素的 Layout/ScrollRect/備註。
-3. **確認 Prefab 策略**：標記重複元件，規劃 duplicate + update 流程。
-4. **等待使用者確認**：獲得批准後才進入建構階段。
-
-### 第三階段：Canvas 建構
-
-1. **檢查 TestCanvas**：用 `ReadMcpResourceTool(uri: "unity://scenes_hierarchy")` 確認是否存在。
-2. **建立 TestCanvas**（僅在不存在時）：`create_canvas(objectPath: "TestCanvas")`，ScreenSpaceOverlay，ScaleWithScreenSize，referenceResolution **1920×1080**，screenMatchMode **Expand**。注意：referenceResolution 固定 1920×1080，不可使用 Figma 畫面尺寸。
-3. **View**：`TestCanvas/View`，stretch-fill 容器。
-4. **設計框架**：middleCenter，尺寸對應 Figma 畫面。
-5. **Container**：stretch-fill，CanvasGroup，背景色。
-
-> 所有 UI 元素均建立在 `TestCanvas/View/` 之下。
-
-### 第四階段：區塊建構
-
-逐區塊建構，每個區塊使用 `batch_execute`：
-- 全寬區塊：`topStretch` + 高度
-- 絕對定位：`topLeft` + pivot (0,1) + Figma 座標（Y 取負）
-- 右對齊：`topRight` + pivot (1,1) + 負 X offset
-- **Sprite 指定**：用 `update_component` 將 Sprite 指定給 Image（`{"sprite": "Assets/Sprites/{DesignName}/image.png"}`）。
-
-### 第五階段：可複用元件
-
-Prefab 完整操作流程詳見 `unity-mcp-workflow`「Prefab 操作」。Figma 專案 Prefab 存放路徑：`Assets/Prefabs/{DesignName}/`。
-
-### 第六階段：儲存
-
-使用 `save_scene` 儲存場景。
-
-## 快速參考（關鍵注意事項）
-
-| 項目 | 規則 |
-|------|------|
-| Y 軸 | Figma Y 正值 → Unity anchoredPosition Y 負值 |
-| Anchor 定位 | `topLeft` + pivot (0,1) 最常用，直接映射 Figma 座標 |
-| Hex 轉 RGB | 每通道除以 255（如 #42 = 0x42/255 = 0.259） |
-| TMP alpha | 建立 TMP 時 `color` 未指定 `a` 預設為 1（不透明），需半透明時才需明確帶 `a` |
-| Button 文字 | 子物件名 `Text`，元件 `UnityEngine.UI.Text`，非 TMP |
-| CanvasScaler | referenceResolution 固定 1920×1080 + Expand，不可用 Figma 畫面尺寸 |
-| Viewport alpha | ScrollRect Viewport Image alpha 必須為 1 |
-| localScale | 所有 UI 元素 localScale 保持 (1,1,1) |
-
-> 完整注意事項（11 項）請參考 `unity-mcp-workflow`「MCP 工具注意事項」。
+Auto Layout 直接對應：`HORIZONTAL` → HorizontalLayoutGroup，`VERTICAL` → VerticalLayoutGroup。提取 `itemSpacing` → `spacing`、`padding`。無 Auto Layout 時 fallback 到座標規律演算法。
 
 ## 禁止事項 (Don'ts)
 
 1. ❌ 未經使用者確認計劃就開始建構
-2. ❌ 未分析 Figma 結構就開始建構
+2. ❌ 未分析設計輸入就開始建構
 3. ❌ 不使用 `batch_execute` 逐個建立元素
-4. ❌ 忘記 Y 軸翻轉
+4. ❌ Figma 模式忘記 Y 軸翻轉
 5. ❌ 假設 Button 文字為 TMP
 6. ❌ 規律排列子元素不使用 Layout Group
 7. ❌ 跳過 Layout Group 分析，僅憑「感覺」判斷
@@ -123,3 +177,11 @@ Prefab 完整操作流程詳見 `unity-mcp-workflow`「Prefab 操作」。Figma 
 13. ❌ Prefab Edit Mode 中忘記 `save_prefab_contents`
 14. ❌ 在 Canvas 下用 `update_gameobject` 建立 UI 物件（應用 `create_ui_element`；工具會回傳警告）
 15. ❌ 組件加錯後 `delete_gameobject` 重建整個 GO（應改用 `remove_component`）
+16. ❌ 在沒有 Canvas 的情況下建立 UI 元素
+17. ❌ 手動設定 localScale 為非 (1,1,1) 的值
+18. ❌ 忽略 Canvas/RectTransform 警告訊息
+
+## 主動學習 (Active Learning)
+
+- **操作前**：讀取 `doc/lessons/unity-mcp-lessons.md`，避免重蹈已知問題。
+- **操作後**：判斷本次操作是否產生新經驗（踩坑、發現隱藏行為、確認可行做法、找到更好方法），若「是」→ 依 `unity-mcp-learning` 協議追加記錄；若「否」→ 不做任何事。

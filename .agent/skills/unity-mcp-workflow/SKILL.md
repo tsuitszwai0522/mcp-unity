@@ -13,14 +13,15 @@ description: Guide for using Unity MCP tools to manipulate Unity Editor. Use whe
 
 當使用者說出以下類型的請求時，啟動此流程：
 - 「幫我在 Unity 建立...」
-- 「新增一個 GameObject / UI / Material / Scene」
+- 「新增一個 GameObject / Material / Scene」
 - 「修改場景中的物件」
 - 「建立一個 Prefab / ScriptableObject」
-- 「幫我設定 UI 介面」
 - 「安裝 XXX Package」「加入套件」
 - 「執行 XXX 選單」「用 Menu Item 觸發」
 - 「建立一個 ScriptableObject 資產」
 - 任何涉及 Unity Editor 操作的請求
+
+> **UI 建構流程**：若使用者要求建構完整的 UI 介面（Canvas + 多層 UI 元素），請使用 `unity-ui-builder`。本 Skill 負責通用 MCP 工具操作。
 
 ## 最佳實踐 (Best Practices)
 
@@ -40,148 +41,22 @@ description: Guide for using Unity MCP tools to manipulate Unity Editor. Use whe
 - **GameObject 路徑**：`Parent/Child/Grandchild`
 - **Asset 路徑**：`Assets/Folder/File.extension`（必須以 `Assets/` 開頭）
 
-### 4. UI 建立順序
-
-1. Canvas（必須先有）
-2. Panel / Container
-3. UI 元素（Button、Text 等）
-4. Layout 組件
-
-### 5. Material 建立
+### 4. Material 建立
 
 - 自動偵測 Render Pipeline（URP 用 `Universal Render Pipeline/Lit`，Built-in 用 `Standard`）
 - 使用 `color` 參數快速設定基本顏色
 
-### 6. 善用 instanceId
+### 5. 善用 instanceId
 
 `get_gameobject` 回傳的 `instanceId` 比路徑更可靠，優先使用。
 
-### 7. 修改後驗證規則
+### 6. 修改後驗證規則
 
 修改 C# 代碼後，必須執行 `recompile_scripts` 確認編譯通過，才能繼續後續操作（跑測試、建立 ScriptableObject 等）。若編譯失敗，優先讀取錯誤訊息修正，不可跳過。
 
-### 8. EditMode 優先原則
+### 7. EditMode 優先原則
 
 撰寫 Unity 測試時預設使用 EditMode。PlayMode 僅在需要 MonoBehaviour 生命週期、Coroutine、Physics、場景載入時使用，且必須通過 Pre-flight Checklist。完整測試與除錯指引參見 `unity-test-debug`。
-
-## UGUI 建構規則 (UGUI Build Rules)
-
-### Canvas 標準設定
-
-建立 UI 時使用以下固定設定：
-
-```
-create_canvas:
-  objectPath: "TestCanvas"
-  renderMode: ScreenSpaceOverlay
-  scaler:
-    uiScaleMode: ScaleWithScreenSize
-    referenceResolution: {x: 1920, y: 1080}  # 固定值
-    screenMatchMode: Expand
-```
-
-標準階層結構：
-
-```
-TestCanvas                    (Overlay, ScaleWithScreenSize, 1920×1080, Expand)
-  └── View                    (stretch-fill, 透明背景)
-      └── Container           (stretch-fill 或 middleCenter + 指定尺寸)
-```
-
-### Anchor Preset 選用表
-
-| 使用情境 | anchorPreset | pivot |
-|----------|-------------|-------|
-| 從父層左上角絕對定位 | `topLeft` | (0, 1) |
-| 水平填滿的區塊（NavBar、標題列） | `topStretch` | (0.5, 1) |
-| 填滿父層（容器） | `stretch` | (0.5, 0.5) |
-| 置中元素 | `middleCenter` | (0.5, 0.5) |
-| 右對齊元素 | `topRight` | (1, 1) |
-| 垂直置中靠左 | `middleLeft` | (0, 0.5) |
-
-### 色彩轉換
-
-Hex → Unity RGB (0-1)：每個通道值除以 255。
-
-```
-#426B1F → (0x42/255, 0x6B/255, 0x1F/255) = (0.259, 0.420, 0.122)
-#FAFAF5 → (0.980, 0.980, 0.957)
-#E6E6E6 → (0.902, 0.902, 0.902)
-```
-
-### Layout Group 判斷規則
-
-> **強制要求**：對**每個擁有 ≥2 個同類子元素的父節點**執行以下判斷流程。
-
-**判斷順序**：
-
-1. **優先看 Auto Layout 屬性**：若節點有 `layoutMode: "HORIZONTAL"` 或 `"VERTICAL"`（如 Figma Auto Layout），直接對應 Layout Group，並提取 `itemSpacing`、`padding` 等屬性。
-
-2. **Fallback — 座標規律演算法**（無 Auto Layout 時必須執行）：
-
-   對每個擁有 ≥2 個同類型子元素的父節點，取所有子元素的 `(x, y, w, h)`，依序計算：
-
-   **步驟 A — 檢查垂直排列（VerticalLayoutGroup）**：
-   ```
-   若所有子元素 x 相同（或差距 ≤2px）且 w 相同：
-     計算 gap = y[i+1] - y[i] - h[i]（對每對相鄰元素）
-     若所有 gap 相等 → VerticalLayoutGroup, spacing = gap
-   ```
-
-   **步驟 B — 檢查水平排列（HorizontalLayoutGroup）**：
-   ```
-   若所有子元素 y 相同（或差距 ≤2px）：
-     計算 gap = x[i+1] - x[i] - w[i]（對每對相鄰元素）
-     若所有 gap 相等 → HorizontalLayoutGroup, spacing = gap
-   ```
-
-   **步驟 C — 檢查網格排列（GridLayoutGroup）**：
-   ```
-   若子元素呈多行多列規律排列（行內 y 相同、列內 x 相同）
-     → GridLayoutGroup, cellSize = (w, h), spacing = (gapX, gapY)
-   ```
-
-   **步驟 D — 無規律**：以上皆不符 → 絕對定位，不使用 Layout Group。
-
-   **示例**：
-   ```
-   子元素座標：
-     Item1: x=96, y=301, w=821, h=159
-     Item2: x=96, y=491, w=821, h=159
-     Item3: x=96, y=681, w=821, h=159
-
-   步驟 A：x 全為 96 ✓, w 全為 821 ✓
-     gap1 = 491 - 301 - 159 = 31
-     gap2 = 681 - 491 - 159 = 31
-     gap 相等 → VerticalLayoutGroup, spacing=31
-   ```
-
-### ScrollRect 結構規範
-
-當判定使用 Layout Group 且子元素總尺寸**超過**容器可視範圍時，必須使用以下固定結構：
-
-```
-{ScrollArea}              (ScrollRect 元件 + Image 元件，無背景圖時 alpha=0)
-  ├── Viewport            (RectMask2D 元件，stretch-fill)
-  │   └── Content         (Layout Group: Horizontal/Vertical/Grid)
-  │       ├── Child1
-  │       ├── Child2
-  │       └── ...
-  └── Scrollbar           (可選，僅當設計中有 Scrollbar 時加入)
-```
-
-**建構步驟**：
-1. 建立外層 Panel 作為 ScrollRect 容器，加入 `ScrollRect` 元件與 `Image` 元件（無背景圖時設 `color.a = 0`）。
-2. 建立子物件 `Viewport`，加入 `RectMask2D` 元件，設為 stretch-fill。
-3. 建立子物件 `Content`，加入對應的 Layout Group。
-4. **Scrollbar（可選）**：若設計中存在 Scrollbar，在 ScrollRect 下（與 Viewport 同層）建立 `Scrollbar`：
-   - 使用 `create_ui_element(elementType: "Scrollbar")`，設定 `direction`（垂直用 `BottomToTop`，水平用 `LeftToRight`）。
-   - 垂直 Scrollbar：anchor `middleRight`，寬度對應設計。
-   - 水平 Scrollbar：anchor `bottomStretch`，高度對應設計。
-5. 使用 `update_component` 將 ScrollRect 的 `content` 指向 Content、`viewport` 指向 Viewport。若有 Scrollbar，將 `verticalScrollbar` 或 `horizontalScrollbar` 指向對應物件。
-6. 在 Content 下建立子元素。
-
-**不需要 ScrollRect 的情況**：子元素總尺寸未超過容器 → 僅使用 Layout Group，不包 ScrollRect。
 
 ## Prefab 操作 (Prefab Operations)
 
@@ -273,24 +148,20 @@ Hex → Unity RGB (0-1)：每個通道值除以 255。
 
 | 陷阱 | 說明 |
 |------|------|
-| CanvasScaler | referenceResolution 固定 **1920×1080** + screenMatchMode **Expand**，不可使用設計畫面尺寸作為 referenceResolution |
-| Button 文字子物件 | `create_ui_element` 建立 Button 時，文字子物件名稱為 `Text`（非 `Text (TMP)`），使用 legacy `UnityEngine.UI.Text` 元件 |
-| Button 背景色 | `elementData.color` 設定的是 Button 的 Image 背景色，文字顏色需另外透過 `update_component` 修改 `Text` 子物件 |
 | Outline 元件名 | 使用 `Outline` 作為 componentName（非 `UnityEngine.UI.Outline`） |
-| TMP 元件名 | 使用 `TMPro.TextMeshProUGUI` 作為 componentName 來更新 TextMeshPro 屬性 |
-| TMP 顏色 alpha | `create_ui_element` 建立 TextMeshPro 時，`elementData.color` 未指定 `a` 時預設為 1（不透明）。若需半透明文字，需明確帶 `a` 值 |
-| ScrollRect Viewport alpha | Viewport 的 Image alpha 必須為 **1**（不可為 0），Mask 需要 stencil buffer 正常寫入才能顯示子元素。`showMaskGraphic: false` 會隱藏 Image 本身 |
-| localScale | 所有 UI 元素的 localScale 必須保持 **(1,1,1)**，不可因 CanvasScaler 變更或其他操作而偏移 |
 | Prefab 工作流 | 可複用元件必須用 `save_as_prefab` 將場景中建好的實例存為 Prefab，再用 `add_asset_to_scene` 放置更多實例，不可只用 `duplicate_gameobject` |
 | Prefab Edit Mode | 修改**既有 Prefab** 內部結構時，使用 `open_prefab_contents` → 修改 → `save_prefab_contents`。objectPath 以 Prefab root 名稱開頭。同一時間只能編輯一個 Prefab |
 | Asset Reference 設定 | `update_component` 的 `componentData` 支援以 asset path 字串設定 Sprite、Material、Font 等資源引用，例如 `{"sprite": "Assets/Sprites/image.png"}`。也支援 GUID |
 | 命名空間元件名 | `componentName` 支援短名（`Outline`）、完整名（`TMPro.TextMeshProUGUI`）、assembly-qualified（`"Namespace.ClassName, Assembly-CSharp"`）三種格式，工具會自動解析。若解析失敗才會回報 "Component type not found" |
 | Scene 物件引用 | `update_component` 支援 asset 引用（asset path 字串）和 scene 內物件引用。場景物件可用 instance ID 整數值（如 `{"target": 12345}`）或結構化引用（`{"target": {"instanceId": 12345}}` / `{"target": {"objectPath": "Path/To/Object"}}`）。結構化引用支援 instanceId 失敗自動 fallback 到 objectPath |
 | remove_component | 使用 `remove_component` 移除組件（支援 Undo）。無法移除 Transform 元件。componentName 格式同 `update_component` |
-| UI 物件建議用 create_ui_element | 在 Canvas 下用 `update_gameobject`（objectPath 指向不存在路徑）建立的 GO 會自動加上 RectTransform，但不含 CanvasRenderer 和其他 UI 元件。完整 UI 物件（Button、Text 等）仍建議用 `create_ui_element` 建立 |
 | Material 先查再改 | 修改 Material 前必須先用 `get_material_info` 確認 shader 類型和屬性名稱，不可盲猜 |
 | Shader property 差異 | URP 用 `_BaseColor`，Built-in 用 `_Color`；metallic/smoothness 等屬性名稱也不同，必須先查詢 |
 | Shader Graph 不可手寫 | `.shadergraph` 是 Unity 專屬二進位格式，不可用程式碼建立或修改，只能透過 Unity Editor 的 Shader Graph 視覺化介面操作 |
+| `get_gameobject` 深層掃描 token 爆炸 | `includeChildren: true` 搭配深層階層（例如整個 Panel）會回傳超過 100k 字元，結果被轉存至檔案而非直接回傳。**必須**用 `maxDepth: 0~2` 限制深度；若需查詢大型階層，先用 `maxDepth: 1` 取 childSummary 再逐層展開，或用 `jq` 查詢轉存的 JSON 檔案 |
+| 新建 .cs 需 `Assets/Refresh` | 新建的 C# 檔案未被 Unity 自動偵測時，`recompile_scripts` 會報 "type not found"。**先執行** `execute_menu_item("Assets/Refresh")` 讓 Unity 產生 `.meta` 並重新掃描，再呼叫 `recompile_scripts` |
+| 清除場景物件引用 | `update_component` 中 `{"field": null}` **無效**，必須用 `{"field": 0}` 才能將場景物件引用清為 null |
+| MCP 連線中斷 | 長時間連續操作（尤其大量 `get_gameobject` / `batch_execute`）後可能發生 timeout。**最佳實踐**：程式碼修改先 commit 再做場景接線；場景接線過程中定期 `save_scene`；中斷後重試通常可恢復 |
 
 ## Material 工作流 (Material Workflow)
 
@@ -408,6 +279,8 @@ Hex → Unity RGB (0-1)：每個通道值除以 255。
 4. 加入 Layout → add_layout_component(layoutType: "VerticalLayoutGroup")
 ```
 
+> **完整 UI 建構流程**（含 Canvas 標準設定、Anchor Preset、Layout Group 判斷、ScrollRect 規範）請使用 `unity-ui-builder`。
+
 ### 範例 2：建立帶 Material 的物件
 
 ```
@@ -496,22 +369,22 @@ recompile_scripts ──→ create_scriptable_object ──→ update_scriptable
 
 ## 禁止事項 (Don'ts)
 
-1. 不要在沒有 Canvas 的情況下建立 UI 元素
-2. 不要忘記 Asset 路徑的 `Assets/` 前綴
-3. 不要一次執行大量獨立操作而不使用 `batch_execute`
-4. 不要假設物件存在，先查詢確認
-5. 不要忽略 `get_gameobject` 回傳的 instanceId，它比路徑更可靠
-6. 不要手動設定 localScale 為非 (1,1,1) 的值
-7. 不要用 `create_prefab` 企圖從場景物件建立 Prefab（它只建空 Prefab，應使用 `save_as_prefab`）
-8. 不要直接修改場景中 Prefab 實例的結構，應使用 `open_prefab_contents` 編輯 Prefab 資產
-9. 不要在 Prefab Edit Mode 中忘記呼叫 `save_prefab_contents` 結束編輯
-10. 不要建構 ScrollRect 時不按「ScrollRect+Image → Viewport+RectMask2D → Content+LayoutGroup」規範
-11. 不要在 Canvas 下用 `update_gameobject` 建立 UI 物件（它不會加 RectTransform，應使用 `create_ui_element`；工具會回傳警告提示）
-12. 不要忽略 `update_gameobject` 回傳的 Canvas/RectTransform 警告訊息
-13. 不要修改 C# 後不執行 `recompile_scripts` 驗證編譯結果
-14. 不要在未用 `get_material_info` 查詢 shader 屬性前盲目 `modify_material`
-15. 不要假設 shader property 名稱（URP 用 `_BaseColor`，Built-in 用 `_Color`，需先查詢）
-16. 不要嘗試手寫 `.shadergraph` 檔案（二進位格式，只能透過 Unity Editor GUI 操作）
-17. 不要在未用 `unity://packages` 確認前重複安裝已有的 Package
-18. 不要在未用 `unity://menu-items` 確認路徑前執行 `execute_menu_item`
-19. 不要在 C# 類別未編譯通過前嘗試 `create_scriptable_object`
+1. 不要忘記 Asset 路徑的 `Assets/` 前綴
+2. 不要一次執行大量獨立操作而不使用 `batch_execute`
+3. 不要假設物件存在，先查詢確認
+4. 不要忽略 `get_gameobject` 回傳的 instanceId，它比路徑更可靠
+5. 不要用 `create_prefab` 企圖從場景物件建立 Prefab（它只建空 Prefab，應使用 `save_as_prefab`）
+6. 不要直接修改場景中 Prefab 實例的結構，應使用 `open_prefab_contents` 編輯 Prefab 資產
+7. 不要在 Prefab Edit Mode 中忘記呼叫 `save_prefab_contents` 結束編輯
+8. 不要修改 C# 後不執行 `recompile_scripts` 驗證編譯結果
+9. 不要在未用 `get_material_info` 查詢 shader 屬性前盲目 `modify_material`
+10. 不要假設 shader property 名稱（URP 用 `_BaseColor`，Built-in 用 `_Color`，需先查詢）
+11. 不要嘗試手寫 `.shadergraph` 檔案（二進位格式，只能透過 Unity Editor GUI 操作）
+12. 不要在未用 `unity://packages` 確認前重複安裝已有的 Package
+13. 不要在未用 `unity://menu-items` 確認路徑前執行 `execute_menu_item`
+14. 不要在 C# 類別未編譯通過前嘗試 `create_scriptable_object`
+
+## 主動學習 (Active Learning)
+
+- **操作前**：讀取 `doc/lessons/unity-mcp-lessons.md`，避免重蹈已知問題。
+- **操作後**：判斷本次操作是否產生新經驗（踩坑、發現隱藏行為、確認可行做法、找到更好方法），若「是」→ 依 `unity-mcp-learning` 協議追加記錄；若「否」→ 不做任何事。
