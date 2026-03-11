@@ -9,7 +9,7 @@
 
 ### 1.1 前置需求
 
-- Unity 2022.3+ (建議 Unity 6)
+- Unity 2022.3+
 - Node.js 18+
 - npm 9+
 

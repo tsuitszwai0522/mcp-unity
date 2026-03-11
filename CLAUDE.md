@@ -127,6 +127,6 @@ Same pattern as tools:
 
 ## Requirements
 
-- Unity 2022.3+ (Unity 6 recommended)
+- Unity 2022.3+
 - Node.js 18+
 - npm 9+
