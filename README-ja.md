@@ -181,6 +181,15 @@ MCP Unityは、Unityの`Library/PackedCache`フォルダーをワークスペー
 - `get_material_info`: シェーダーとすべてのプロパティを含むマテリアルの詳細情報を取得
   > **例:** "'PlayerMaterial'のすべてのプロパティを表示"
 
+- `set_sibling_index`: 親内のGameObjectの兄弟インデックス（描画順序）を設定、UI要素のレイヤリングに便利
+  > **例:** "StartButtonを兄弟の最初の位置に移動"
+
+- `read_serialized_fields`: UnityのSerializedProperty APIを使用してコンポーネントのシリアライズフィールドを読み取り。シリアライズ名（`m_Color`）とプロパティ名（`color`）の両方に対応
+  > **例:** "MyButtonのImageコンポーネントからcolorとraycastTargetフィールドを読み取り"
+
+- `write_serialized_fields`: UnityのSerializedProperty APIを使用してコンポーネントのシリアライズフィールドに書き込み。Unity組み込みコンポーネントフィールド（`m_Color`、`m_Sprite`等）に最適
+  > **例:** "MyButtonのImage colorを赤に設定し、raycast targetを無効化"
+
 - `batch_execute`: 単一のバッチリクエストで複数のツール操作を実行し、ラウンドトリップを削減しアトミック操作を可能にする（失敗時のロールバックオプション付き）
   > **例:** "単一のバッチ操作でEnemy_1からEnemy_10という名前の10個の空のGameObjectを作成"
 

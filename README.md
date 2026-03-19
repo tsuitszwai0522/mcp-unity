@@ -201,6 +201,15 @@ The following tools are available for manipulating and querying Unity scenes and
 - `get_selection`: Gets the currently selected objects in the Unity Editor (GameObjects in hierarchy and/or assets in Project window)
   > **Example prompt:** "What objects do I currently have selected?"
 
+- `set_sibling_index`: Sets the sibling index (render order) of a GameObject within its parent, useful for controlling UI element layering
+  > **Example prompt:** "Move the StartButton to the first position among its siblings"
+
+- `read_serialized_fields`: Reads serialized fields from a component using Unity's SerializedProperty API. Accepts both serialized names (`m_Color`) and property names (`color`)
+  > **Example prompt:** "Read the color and raycastTarget fields from the Image component on MyButton"
+
+- `write_serialized_fields`: Writes serialized fields on a component using Unity's SerializedProperty API. Best for Unity built-in component fields (`m_Color`, `m_Sprite`, etc.)
+  > **Example prompt:** "Set the Image color to red and disable raycast target on MyButton"
+
 - `batch_execute`: Executes multiple tool operations in a single batch request, reducing round-trips and enabling atomic operations with optional rollback on failure
   > **Example prompt:** "Create 10 empty GameObjects named Enemy_1 through Enemy_10 in a single batch operation"
 
