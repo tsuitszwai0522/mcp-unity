@@ -7,7 +7,9 @@ import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 
 // Constants for the tool
 const toolName = 'update_component';
-const toolDescription = 'Updates component fields on a GameObject or adds it to the GameObject if it does not contain the component';
+const toolDescription = `Updates component fields on a GameObject, or adds the component if missing.
+Best for: adding new components, setting fields by C# property/field name.
+For Unity built-in serialized fields (m_Color, m_Sprite, m_FontSize), prefer write_serialized_fields.`;
 const paramsSchema = z.object({
   instanceId: z.number().optional().describe('The instance ID of the GameObject to update'),
   objectPath: z.string().optional().describe('The path of the GameObject in the hierarchy to update (alternative to instanceId)'),

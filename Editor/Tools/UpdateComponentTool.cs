@@ -245,6 +245,9 @@ namespace McpUnity.Tools
             // Record object for undo
             Undo.RecordObject(component, $"Update {componentType.Name} fields");
 
+            // Cache SerializedObjects to avoid re-creating per field in TrySetViaSerializedProperty
+            var serializedObjects = new Dictionary<Component, SerializedObject>();
+
             // Process each field or property in the component data
             foreach (var property in componentData.Properties())
             {
@@ -289,11 +292,47 @@ namespace McpUnity.Tools
                     continue;
                 }
 
+                // Fallback: try SerializedProperty which handles both serialized names (m_Color)
+                // and property names (color) through Unity's serialization system
+                if (TrySetViaSerializedProperty(component, fieldName, fieldValue, warnings, serializedObjects))
+                {
+                    continue;
+                }
+
                 fullSuccess = false;
                 errorMessage = $"Field or Property with name '{fieldName}' not found on component '{componentType.Name}'";
             }
 
+            // Apply any cached SerializedObjects
+            foreach (var kvp in serializedObjects)
+            {
+                kvp.Value.ApplyModifiedProperties();
+            }
+
             return fullSuccess;
         }
+
+        /// <summary>
+        /// Try to set a field via Unity's SerializedProperty system.
+        /// This handles both serialized names (m_Color, m_Sprite) and their property equivalents.
+        /// Uses a cache to avoid re-creating SerializedObject per field.
+        /// </summary>
+        private bool TrySetViaSerializedProperty(Component component, string fieldName, JToken fieldValue, List<string> warnings, Dictionary<Component, SerializedObject> cache)
+        {
+            if (!cache.TryGetValue(component, out var serializedObject))
+            {
+                serializedObject = new SerializedObject(component);
+                cache[component] = serializedObject;
+            }
+
+            SerializedProperty prop = SerializedPropertyHelper.FindProperty(serializedObject, fieldName);
+            if (prop == null)
+            {
+                return false;
+            }
+
+            return SerializedPropertyHelper.SetValue(prop, fieldValue, warnings, fieldName);
+        }
+
     }
 }

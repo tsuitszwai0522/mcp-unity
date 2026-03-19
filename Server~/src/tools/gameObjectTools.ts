@@ -189,6 +189,83 @@ export function registerReparentGameObjectTool(server: McpServer, mcpUnity: McpU
   );
 }
 
+// ============================================================================
+// Set Sibling Index Tool
+// ============================================================================
+
+const setSiblingIndexToolName = 'set_sibling_index';
+const setSiblingIndexToolDescription = 'Sets the sibling index of a GameObject, controlling its order among siblings. Affects UI rendering order (higher index = rendered on top).';
+const setSiblingIndexParamsSchema = z.object({
+  instanceId: z.number().optional().describe('The instance ID of the GameObject'),
+  objectPath: z.string().optional().describe('The path of the GameObject in the hierarchy (alternative to instanceId)'),
+  siblingIndex: z.number().int().describe('The target sibling index. 0 = first, -1 or large value = last.'),
+});
+
+/**
+ * Creates and registers the Set Sibling Index tool with the MCP server
+ */
+export function registerSetSiblingIndexTool(server: McpServer, mcpUnity: McpUnity, logger: Logger) {
+  logger.info(`Registering tool: ${setSiblingIndexToolName}`);
+
+  server.tool(
+    setSiblingIndexToolName,
+    setSiblingIndexToolDescription,
+    setSiblingIndexParamsSchema.shape,
+    async (params: any) => {
+      try {
+        logger.info(`Executing tool: ${setSiblingIndexToolName}`, params);
+        const result = await setSiblingIndexHandler(mcpUnity, params);
+        logger.info(`Tool execution successful: ${setSiblingIndexToolName}`);
+        return result;
+      } catch (error) {
+        logger.error(`Tool execution failed: ${setSiblingIndexToolName}`, error);
+        throw error;
+      }
+    }
+  );
+}
+
+async function setSiblingIndexHandler(mcpUnity: McpUnity, params: any): Promise<CallToolResult> {
+  // Validate parameters - require either instanceId or objectPath
+  if ((params.instanceId === undefined || params.instanceId === null) &&
+      (!params.objectPath || params.objectPath.trim() === '')) {
+    throw new McpUnityError(
+      ErrorType.VALIDATION,
+      "Either 'instanceId' or 'objectPath' must be provided"
+    );
+  }
+
+  if (params.siblingIndex === undefined || params.siblingIndex === null) {
+    throw new McpUnityError(
+      ErrorType.VALIDATION,
+      "'siblingIndex' must be provided"
+    );
+  }
+
+  const response = await mcpUnity.sendRequest({
+    method: setSiblingIndexToolName,
+    params: {
+      instanceId: params.instanceId,
+      objectPath: params.objectPath,
+      siblingIndex: params.siblingIndex,
+    }
+  });
+
+  if (!response.success) {
+    throw new McpUnityError(
+      ErrorType.TOOL_EXECUTION,
+      response.message || 'Failed to set sibling index'
+    );
+  }
+
+  return {
+    content: [{
+      type: response.type || 'text',
+      text: response.message || 'Successfully set sibling index'
+    }]
+  };
+}
+
 async function reparentHandler(mcpUnity: McpUnity, params: any): Promise<CallToolResult> {
   // Validate parameters - require either instanceId or objectPath
   if ((params.instanceId === undefined || params.instanceId === null) &&

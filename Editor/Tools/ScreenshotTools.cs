@@ -1,9 +1,11 @@
 using System;
+using System.Threading.Tasks;
 using UnityEditor;
 using UnityEngine;
 using Newtonsoft.Json.Linq;
 using McpUnity.Unity;
 using McpUnity.Utils;
+using McpUnity.Services;
 
 namespace McpUnity.Tools
 {
@@ -94,9 +96,10 @@ namespace McpUnity.Tools
         {
             Name = "screenshot_scene_view";
             Description = "Captures a screenshot from the Scene View, reflecting the editor camera perspective";
+            IsAsync = true;
         }
 
-        public override JObject Execute(JObject parameters)
+        public override void ExecuteAsync(JObject parameters, TaskCompletionSource<JObject> tcs)
         {
             try
             {
@@ -106,29 +109,71 @@ namespace McpUnity.Tools
                 SceneView sceneView = SceneView.lastActiveSceneView;
                 if (sceneView == null)
                 {
-                    return McpUnitySocketHandler.CreateErrorResponse(
+                    tcs.TrySetResult(McpUnitySocketHandler.CreateErrorResponse(
                         "No active Scene View found. Please open a Scene View window.",
                         "tool_execution_error"
-                    );
+                    ));
+                    return;
                 }
 
-                Camera sceneCamera = sceneView.camera;
-                if (sceneCamera == null)
+                bool needsDelayedCapture = false;
+
+                // When in prefab editing mode, auto-focus the scene view on the prefab root
+                if (PrefabEditingService.IsEditing && PrefabEditingService.PrefabRoot != null)
                 {
-                    return McpUnitySocketHandler.CreateErrorResponse(
-                        "Scene View camera is not available.",
-                        "tool_execution_error"
-                    );
+                    Selection.activeGameObject = PrefabEditingService.PrefabRoot;
+                    sceneView.FrameSelected();
+                    sceneView.Repaint();
+                    needsDelayedCapture = true;
                 }
 
-                return ScreenshotHelper.CaptureFromCamera(sceneCamera, width, height, "Scene View");
+                if (needsDelayedCapture)
+                {
+                    // Delay one frame to allow Repaint to complete before capturing
+                    EditorApplication.delayCall += () =>
+                    {
+                        try
+                        {
+                            Camera sceneCamera = sceneView.camera;
+                            if (sceneCamera == null)
+                            {
+                                tcs.TrySetResult(McpUnitySocketHandler.CreateErrorResponse(
+                                    "Scene View camera is not available.",
+                                    "tool_execution_error"
+                                ));
+                                return;
+                            }
+                            tcs.TrySetResult(ScreenshotHelper.CaptureFromCamera(sceneCamera, width, height, "Scene View"));
+                        }
+                        catch (Exception ex)
+                        {
+                            tcs.TrySetResult(McpUnitySocketHandler.CreateErrorResponse(
+                                $"Error capturing Scene View screenshot: {ex.Message}",
+                                "tool_execution_error"
+                            ));
+                        }
+                    };
+                }
+                else
+                {
+                    Camera sceneCamera = sceneView.camera;
+                    if (sceneCamera == null)
+                    {
+                        tcs.TrySetResult(McpUnitySocketHandler.CreateErrorResponse(
+                            "Scene View camera is not available.",
+                            "tool_execution_error"
+                        ));
+                        return;
+                    }
+                    tcs.TrySetResult(ScreenshotHelper.CaptureFromCamera(sceneCamera, width, height, "Scene View"));
+                }
             }
             catch (Exception ex)
             {
-                return McpUnitySocketHandler.CreateErrorResponse(
+                tcs.TrySetResult(McpUnitySocketHandler.CreateErrorResponse(
                     $"Error capturing Scene View screenshot: {ex.Message}",
                     "tool_execution_error"
-                );
+                ));
             }
         }
     }

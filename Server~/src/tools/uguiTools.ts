@@ -150,6 +150,7 @@ const elementTypeEnum = z.enum([
 const createUIElementParamsSchema = z.object({
   objectPath: z.string().describe("Path for the UI element (e.g., 'Canvas/Panel/Button')"),
   elementType: elementTypeEnum.describe("Type of UI element to create"),
+  requireCanvas: z.boolean().default(true).describe("If true (default), requires a Canvas in the parent hierarchy. Set to false for prefab editing mode where Canvas may not exist."),
   rectTransform: rectTransformSchema.optional().describe("RectTransform settings"),
   elementData: z.object({
     text: z.string().optional().describe("Text content (for Text, Button, Toggle, InputField)"),

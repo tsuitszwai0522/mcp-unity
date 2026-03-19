@@ -25,7 +25,7 @@ import { registerRecompileScriptsTool } from './tools/recompileScriptsTool.js';
 import { registerGetGameObjectTool } from './tools/getGameObjectTool.js';
 import { registerTransformTools } from './tools/transformTools.js';
 import { registerCreateMaterialTool, registerAssignMaterialTool, registerModifyMaterialTool, registerGetMaterialInfoTool } from './tools/materialTools.js';
-import { registerDuplicateGameObjectTool, registerDeleteGameObjectTool, registerReparentGameObjectTool } from './tools/gameObjectTools.js';
+import { registerDuplicateGameObjectTool, registerDeleteGameObjectTool, registerReparentGameObjectTool, registerSetSiblingIndexTool } from './tools/gameObjectTools.js';
 import { registerUGUITools } from './tools/uguiTools.js';
 import { registerCreateScriptableObjectTool } from './tools/createScriptableObjectTool.js';
 import { registerUpdateScriptableObjectTool } from './tools/updateScriptableObjectTool.js';
@@ -34,6 +34,7 @@ import { registerOpenPrefabContentsTool, registerSavePrefabContentsTool } from '
 import { registerScreenshotTools } from './tools/screenshotTools.js';
 import { registerEditorStateTools } from './tools/editorStateTools.js';
 import { registerGetSelectionTool } from './tools/getSelectionTool.js';
+import { registerReadSerializedFieldsTool, registerWriteSerializedFieldsTool } from './tools/serializedFieldTools.js';
 import { registerBatchExecuteTool } from './tools/batchExecuteTool.js';
 import { registerGetMenuItemsResource } from './resources/getMenuItemResource.js';
 import { registerGetConsoleLogsResource } from './resources/getConsoleLogsResource.js';
@@ -94,6 +95,7 @@ registerTransformTools(server, mcpUnity, toolLogger);
 registerDuplicateGameObjectTool(server, mcpUnity, toolLogger);
 registerDeleteGameObjectTool(server, mcpUnity, toolLogger);
 registerReparentGameObjectTool(server, mcpUnity, toolLogger);
+registerSetSiblingIndexTool(server, mcpUnity, toolLogger);
 
 // Register Material Tools
 registerCreateMaterialTool(server, mcpUnity, toolLogger);
@@ -124,6 +126,10 @@ registerEditorStateTools(server, mcpUnity, toolLogger);
 
 // Register Get Selection Tool
 registerGetSelectionTool(server, mcpUnity, toolLogger);
+
+// Register Serialized Field Tools
+registerReadSerializedFieldsTool(server, mcpUnity, toolLogger);
+registerWriteSerializedFieldsTool(server, mcpUnity, toolLogger);
 
 // Register Batch Execute Tool (high-priority for performance)
 registerBatchExecuteTool(server, mcpUnity, toolLogger);

@@ -393,6 +393,10 @@ namespace McpUnity.Unity
             ReparentGameObjectTool reparentGameObjectTool = new ReparentGameObjectTool();
             _tools.Add(reparentGameObjectTool.Name, reparentGameObjectTool);
 
+            // Register SetSiblingIndexTool
+            SetSiblingIndexTool setSiblingIndexTool = new SetSiblingIndexTool();
+            _tools.Add(setSiblingIndexTool.Name, setSiblingIndexTool);
+
             // Register Transform Tools
             MoveGameObjectTool moveGameObjectTool = new MoveGameObjectTool();
             _tools.Add(moveGameObjectTool.Name, moveGameObjectTool);
@@ -476,6 +480,13 @@ namespace McpUnity.Unity
             // Register Get Selection Tool
             GetSelectionTool getSelectionTool = new GetSelectionTool();
             _tools.Add(getSelectionTool.Name, getSelectionTool);
+
+            // Register Serialized Field Tools
+            ReadSerializedFieldsTool readSerializedFieldsTool = new ReadSerializedFieldsTool();
+            _tools.Add(readSerializedFieldsTool.Name, readSerializedFieldsTool);
+
+            WriteSerializedFieldsTool writeSerializedFieldsTool = new WriteSerializedFieldsTool();
+            _tools.Add(writeSerializedFieldsTool.Name, writeSerializedFieldsTool);
 
             // Register BatchExecuteTool (must be registered last as it needs access to other tools)
             BatchExecuteTool batchExecuteTool = new BatchExecuteTool(this);

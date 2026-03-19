@@ -530,6 +530,7 @@ namespace McpUnity.Tools
                 string elementType = parameters["elementType"]?.ToObject<string>();
                 JObject rectTransformParams = parameters["rectTransform"] as JObject;
                 JObject elementData = parameters["elementData"] as JObject;
+                bool requireCanvas = parameters["requireCanvas"]?.ToObject<bool?>() ?? true;
 
                 // Validate required parameters
                 if (string.IsNullOrEmpty(objectPath))
@@ -551,46 +552,57 @@ namespace McpUnity.Tools
                 // Create or find the GameObject
                 GameObject elementGO = GameObjectHierarchyCreator.FindOrCreateHierarchicalGameObject(objectPath);
 
-                // Ensure parent has a Canvas (required for UI elements)
-                Canvas parentCanvas = elementGO.GetComponentInParent<Canvas>();
-                if (parentCanvas == null)
+                if (requireCanvas)
                 {
-                    // Find or create a canvas as parent
-                    string[] pathParts = objectPath.Split('/');
-                    if (pathParts.Length > 1)
-                    {
-                        // Check if first part is a canvas
-                        GameObject rootObj = GameObject.Find(pathParts[0]);
-                        if (rootObj != null && rootObj.GetComponent<Canvas>() == null)
-                        {
-                            // Add Canvas to root
-                            Undo.RecordObject(rootObj, "Add Canvas");
-                            Canvas newCanvas = Undo.AddComponent<Canvas>(rootObj);
-                            newCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
-                            Undo.AddComponent<CanvasScaler>(rootObj);
-                            Undo.AddComponent<GraphicRaycaster>(rootObj);
-                            UGUIToolUtils.EnsureEventSystem();
-                            parentCanvas = newCanvas;
-                        }
-                        else if (rootObj != null)
-                        {
-                            parentCanvas = rootObj.GetComponent<Canvas>();
-                        }
-                    }
-
+                    // Ensure parent has a Canvas (required for UI elements)
+                    Canvas parentCanvas = elementGO.GetComponentInParent<Canvas>();
                     if (parentCanvas == null)
                     {
-                        return McpUnitySocketHandler.CreateErrorResponse(
-                            "UI elements must be children of a Canvas. No Canvas found in parent hierarchy.",
-                            "canvas_error"
-                        );
+                        // Find or create a canvas as parent
+                        string[] pathParts = objectPath.Split('/');
+                        if (pathParts.Length > 1)
+                        {
+                            // Check if first part is a canvas
+                            GameObject rootObj = GameObject.Find(pathParts[0]);
+                            if (rootObj != null && rootObj.GetComponent<Canvas>() == null)
+                            {
+                                // Add Canvas to root
+                                Undo.RecordObject(rootObj, "Add Canvas");
+                                Canvas newCanvas = Undo.AddComponent<Canvas>(rootObj);
+                                newCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
+                                Undo.AddComponent<CanvasScaler>(rootObj);
+                                Undo.AddComponent<GraphicRaycaster>(rootObj);
+                                UGUIToolUtils.EnsureEventSystem();
+                                parentCanvas = newCanvas;
+                            }
+                            else if (rootObj != null)
+                            {
+                                parentCanvas = rootObj.GetComponent<Canvas>();
+                            }
+                        }
+
+                        if (parentCanvas == null)
+                        {
+                            return McpUnitySocketHandler.CreateErrorResponse(
+                                "UI elements must be children of a Canvas. No Canvas found in parent hierarchy. Use requireCanvas=false for prefab editing.",
+                                "canvas_error"
+                            );
+                        }
                     }
                 }
 
-                // Ensure RectTransform exists
+                // Ensure RectTransform exists (always needed for UI elements)
                 RectTransform rectTransform = elementGO.GetComponent<RectTransform>();
                 if (rectTransform == null)
                 {
+                    // When not requiring Canvas (e.g., prefab editing), manually add RectTransform
+                    if (!requireCanvas)
+                    {
+                        // Destroy existing Transform and replace with RectTransform
+                        // Unity auto-adds RectTransform when adding a UI component below,
+                        // but we need to ensure parent hierarchy also has RectTransforms
+                        EnsureRectTransformHierarchy(elementGO);
+                    }
                     // RectTransform is automatically added when we add a UI component
                     // but we need to ensure the object has one for positioning
                 }
@@ -765,6 +777,38 @@ namespace McpUnity.Tools
             if (sizeDelta != null)
             {
                 rect.sizeDelta = UGUIToolUtils.ParseVector2(sizeDelta, rect.sizeDelta);
+            }
+        }
+
+        /// <summary>
+        /// Ensures the GameObject and its ancestors have RectTransform components.
+        /// Used when creating UI elements without a Canvas (e.g., in prefab editing mode).
+        /// </summary>
+        private void EnsureRectTransformHierarchy(GameObject go)
+        {
+            // Collect ancestors that need RectTransform (bottom-up), then add top-down
+            var needsRect = new List<GameObject>();
+            Transform current = go.transform;
+            while (current != null)
+            {
+                if (current.GetComponent<RectTransform>() == null)
+                {
+                    needsRect.Add(current.gameObject);
+                }
+                current = current.parent;
+            }
+
+            // Add RectTransform top-down (parent first) to ensure hierarchy consistency.
+            // Adding RectTransform to a GameObject replaces its Transform automatically.
+            needsRect.Reverse();
+            foreach (var obj in needsRect)
+            {
+                // In prefab editing mode, Undo.AddComponent may not work reliably
+                // in the isolated LoadPrefabContents environment (same issue as reparent)
+                if (PrefabEditingService.IsEditing)
+                    obj.AddComponent<RectTransform>();
+                else
+                    Undo.AddComponent<RectTransform>(obj);
             }
         }
 

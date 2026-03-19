@@ -146,13 +146,21 @@ async function batchExecuteHandler(
     }
   }
 
-  // Add individual results if there are failures or detailed info
+  // Add individual results with instanceIds and key data for each operation
   if (response.results && response.results.length > 0) {
-    const failures = response.results.filter(r => !r.success);
-    if (failures.length > 0) {
-      resultText += '\n\nFailed operations:';
-      for (const failure of failures) {
-        resultText += `\n  - [${failure.id}] ${failure.error || 'Unknown error'}`;
+    resultText += '\n\nOperation results:';
+    for (const res of response.results) {
+      if (res.success && res.result) {
+        const instanceId = res.result.instanceId;
+        const path = res.result.path || res.result.newPath;
+        const name = res.result.name;
+        let detail = `[${res.id}] OK`;
+        if (instanceId !== undefined) detail += ` instanceId=${instanceId}`;
+        if (name) detail += ` name="${name}"`;
+        if (path) detail += ` path="${path}"`;
+        resultText += `\n  - ${detail}`;
+      } else if (!res.success) {
+        resultText += `\n  - [${res.id}] FAILED: ${res.error || 'Unknown error'}`;
       }
     }
   }
@@ -170,6 +178,11 @@ async function batchExecuteHandler(
     content: [{
       type: 'text',
       text: resultText
-    }]
+    }],
+    // Include structured results data so callers can programmatically access instanceIds
+    data: {
+      results: response.results,
+      summary: response.summary
+    }
   };
 }

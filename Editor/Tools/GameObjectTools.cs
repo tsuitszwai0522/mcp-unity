@@ -416,15 +416,28 @@ namespace McpUnity.Tools
             }
 
             // Perform reparenting
-            Undo.SetTransformParent(targetObject.transform, newParentTransform, "Reparent GameObject");
-
-            if (!worldPositionStays)
+            // In prefab editing mode (LoadPrefabContents), use SetParent directly
+            // because Undo.SetTransformParent can lose children in isolated prefab editing
+            if (PrefabEditingService.IsEditing)
             {
-                // Reset local position when worldPositionStays is false
-                Undo.RecordObject(targetObject.transform, "Reset Local Position");
-                targetObject.transform.localPosition = Vector3.zero;
-                targetObject.transform.localRotation = Quaternion.identity;
-                targetObject.transform.localScale = Vector3.one;
+                targetObject.transform.SetParent(newParentTransform, worldPositionStays);
+                if (!worldPositionStays)
+                {
+                    targetObject.transform.localPosition = Vector3.zero;
+                    targetObject.transform.localRotation = Quaternion.identity;
+                    targetObject.transform.localScale = Vector3.one;
+                }
+            }
+            else
+            {
+                Undo.SetTransformParent(targetObject.transform, newParentTransform, "Reparent GameObject");
+                if (!worldPositionStays)
+                {
+                    Undo.RecordObject(targetObject.transform, "Reset Local Position");
+                    targetObject.transform.localPosition = Vector3.zero;
+                    targetObject.transform.localRotation = Quaternion.identity;
+                    targetObject.transform.localScale = Vector3.one;
+                }
             }
 
             string newPath = GameObjectToolUtils.GetGameObjectPath(targetObject);
@@ -444,6 +457,62 @@ namespace McpUnity.Tools
                 ["oldPath"] = oldPath,
                 ["newPath"] = newPath,
                 ["changed"] = true
+            };
+        }
+    }
+
+    /// <summary>
+    /// Tool for setting the sibling index of a GameObject, controlling render/hierarchy order
+    /// </summary>
+    public class SetSiblingIndexTool : McpToolBase
+    {
+        public SetSiblingIndexTool()
+        {
+            Name = "set_sibling_index";
+            Description = "Sets the sibling index of a GameObject, controlling its order among siblings. Affects UI rendering order (higher index = rendered on top).";
+            IsAsync = false;
+        }
+
+        public override JObject Execute(JObject parameters)
+        {
+            int? instanceId = parameters["instanceId"]?.ToObject<int?>();
+            string objectPath = parameters["objectPath"]?.ToObject<string>();
+            int? siblingIndex = parameters["siblingIndex"]?.ToObject<int?>();
+
+            // Find target GameObject
+            JObject error = GameObjectToolUtils.FindGameObject(instanceId, objectPath, out GameObject targetObject, out string identifierInfo);
+            if (error != null) return error;
+
+            if (!siblingIndex.HasValue)
+            {
+                return McpUnitySocketHandler.CreateErrorResponse(
+                    "Required parameter 'siblingIndex' not provided.",
+                    "validation_error"
+                );
+            }
+
+            int oldIndex = targetObject.transform.GetSiblingIndex();
+            int siblingCount = targetObject.transform.parent != null
+                ? targetObject.transform.parent.childCount
+                : UnityEngine.SceneManagement.SceneManager.GetActiveScene().GetRootGameObjects().Length;
+
+            Undo.RecordObject(targetObject.transform, "Set Sibling Index");
+            targetObject.transform.SetSiblingIndex(siblingIndex.Value);
+
+            int newIndex = targetObject.transform.GetSiblingIndex();
+            EditorUtility.SetDirty(targetObject);
+
+            return new JObject
+            {
+                ["success"] = true,
+                ["type"] = "text",
+                ["message"] = $"Successfully set sibling index of '{targetObject.name}' from {oldIndex} to {newIndex} (of {siblingCount} siblings).",
+                ["instanceId"] = targetObject.GetInstanceID(),
+                ["name"] = targetObject.name,
+                ["path"] = GameObjectToolUtils.GetGameObjectPath(targetObject),
+                ["oldSiblingIndex"] = oldIndex,
+                ["newSiblingIndex"] = newIndex,
+                ["siblingCount"] = siblingCount
             };
         }
     }
