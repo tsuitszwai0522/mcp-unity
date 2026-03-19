@@ -1,6 +1,6 @@
 ---
 name: verification-loop
-description: Six-phase verification loop after code changes (Build → Type Check → Lint → Test → Security Scan → Diff Review). Use when user says "verify", "check before commit", or after completing code modifications.
+description: Seven-phase verification loop after code changes (Build → Type Check → Lint → Test → Security Scan → Spec Completeness → Diff Review). Use when user says "verify", "check before commit", or after completing code modifications.
 ---
 
 # Verification Loop for Claude Code
@@ -71,6 +71,15 @@ description: Six-phase verification loop after code changes (Build → Type Chec
 - C# / .NET：不安全反序列化、SQL 拼接、`Process.Start`
 - Node/React：`eval()`、`innerHTML`、未驗證 `req.body`、`child_process.exec` 拼接
 
+### Phase 5b: Spec Completeness Check (需求完整性檢查)
+對照需求文件，驗證實作是否完整覆蓋所有功能點。
+- **前置動作**：讀取 `doc/requirement/` 中對應的設計文件。若無則以 commit message / PR 描述為基準。完全沒有需求來源時 SKIP。
+- **Enum 全值檢查**：變更中所有 enum 的「定義值數量 vs switch/match case 數量」。
+- **功能點逐項勾選**：對照設計文件的 Task List，確認本 Phase 功能點是否已實作。
+- **狀態/分支覆蓋**：條件分支、狀態機轉換、錯誤處理路徑是否都有對應代碼？
+- **Test 覆蓋比對**：每個已實作功能點是否有至少一個 test case？
+- **失敗條件**：任何 Spec Item 未實作 → FAIL，觸發 Fail Fast。
+
 ### Phase 6: Diff Review
 - `git diff --stat` 確認變更範圍
 - 意外變更偵測
@@ -90,6 +99,7 @@ description: Six-phase verification loop after code changes (Build → Type Chec
 | Lint | PASS/FAIL/SKIP | ... |
 | Test | PASS/FAIL/SKIP | X passed, Y failed |
 | Security | PASS/WARN | ... |
+| Spec Completeness | PASS/FAIL/SKIP | X/Y items covered |
 | Diff Review | PASS/WARN | ... |
 ```
 

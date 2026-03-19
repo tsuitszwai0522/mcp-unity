@@ -158,6 +158,24 @@ description: ALL Figma-related UI operations use this Skill. Includes extracting
 
 **注意**：每次 Pull 後再 Push，應重新生成 HTML preview。結構性變更累積後建議重整 Prefab。
 
+## 截圖視覺參考（強制規則）
+
+> **在調整 UI 位置、尺寸、佈局時，必須以 Figma 截圖作為視覺參考，禁止僅憑座標數據盲算。**
+
+### 何時取得截圖
+
+| 時機 | 動作 |
+|------|------|
+| **提取 Design Spec 時** | `get_design_context` 已含截圖；若需更大範圍，額外呼叫 `get_screenshot` 取得父節點或全 UI 一覽 |
+| **調整 UI 位置/尺寸前** | 必須先取得 Figma 截圖，確認元素間的相對位置與層級關係 |
+| **套用變更後** | 用 `screenshot_game_view` 或 `screenshot_scene_view` 截取 Unity 畫面，與 Figma 截圖視覺比對 |
+
+### 截圖使用原則
+
+1. **先看圖再算數**：從截圖觀察元素的相對佈局（上下左右關係），再從座標數據計算精確位置
+2. **取全覽截圖**：單一組件截圖不足以判斷整體佈局，應同時取得包含周圍元素的上層節點截圖
+3. **迭代比對**：每次修改後重新截取 Unity 畫面，與 Figma 截圖並排比對，直到視覺一致
+
 ## 禁止事項
 
 1. ❌ 未經使用者確認差異報告就執行更新
@@ -169,3 +187,4 @@ description: ALL Figma-related UI operations use this Skill. Includes extracting
 7. ❌ 未停止本地伺服器就結束
 8. ❌ 複用上一輪 HTML preview 進行新一輪 Push
 9. ❌ 忽略不支援的變更而不告知使用者
+10. ❌ **僅憑座標數據調整 UI 位置，未參考 Figma 截圖做視覺比對**
