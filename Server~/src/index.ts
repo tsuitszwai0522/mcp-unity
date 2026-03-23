@@ -37,6 +37,7 @@ import { registerGetSelectionTool } from './tools/getSelectionTool.js';
 import { registerReadSerializedFieldsTool, registerWriteSerializedFieldsTool } from './tools/serializedFieldTools.js';
 import { registerUIAutomationTools } from './tools/uiAutomationTools.js';
 import { registerBatchExecuteTool } from './tools/batchExecuteTool.js';
+import { registerDynamicTools } from './tools/dynamicTools.js';
 import { registerGetMenuItemsResource } from './resources/getMenuItemResource.js';
 import { registerGetConsoleLogsResource } from './resources/getConsoleLogsResource.js';
 import { registerGetHierarchyResource } from './resources/getScenesHierarchyResource.js';
@@ -168,7 +169,17 @@ async function startServer() {
     
     // Start Unity Bridge connection with client name in headers
     await mcpUnity.start(clientName);
-    
+
+    // Discover and register external tools from Unity
+    try {
+      const dynamicCount = await registerDynamicTools(server, mcpUnity, toolLogger);
+      if (dynamicCount > 0) {
+        serverLogger.info(`Registered ${dynamicCount} external tool(s) from Unity`);
+      }
+    } catch (error) {
+      serverLogger.warn('Failed to register dynamic tools (non-fatal)', error);
+    }
+
   } catch (error) {
     serverLogger.error('Failed to start server', error);
     process.exit(1);

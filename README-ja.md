@@ -53,6 +53,14 @@ MCP Unityは、Unityの`Library/PackedCache`フォルダーをワークスペー
 - Unityパッケージのより良いオートコンプリートと型情報が有効化
 - AIコーディングアシスタントがプロジェクトの依存関係を理解するのに役立つ
 
+### Play Mode透過的再接続
+
+Play Modeの開始・終了時、UnityはDomain Reloadを行いWebSocketが一時的に切断されます。MCP Unityはこれを透過的に処理します — `set_editor_state("play"/"stop")`は自動的に再接続を待ち、単一の呼び出しで検証済みの結果を返します。手動でのリトライは不要です。
+
+### 外部ツールプラグインシステム
+
+外部プロジェクトは**mcp-unityパッケージを変更せずに**カスタムMCPツールを登録できます。独自のアセンブリで`McpToolBase`を継承するC#クラスを作成するだけで、起動時にアセンブリスキャンにより自動検出され、Node.js側で動的に登録されます。
+
 ### MCPサーバーツール
 
 - `execute_menu_item`: Unityメニュー項目（MenuItem属性でタグ付けされた関数）を実行

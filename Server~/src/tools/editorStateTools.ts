@@ -74,12 +74,14 @@ export function registerEditorStateTools(server: McpServer, mcpUnity: McpUnity, 
     setStateDescription,
     setStateParamsSchema.shape,
     async (params: any) => {
+      const action = params.action;
+
       try {
         logger.info(`Executing tool: ${setStateName}`, params);
         const response = await mcpUnity.sendRequest({
           method: setStateName,
-          params
-        });
+          params,
+        }, { queueIfDisconnected: false });
 
         if (!response.success) {
           throw new McpUnityError(
@@ -99,6 +101,40 @@ export function registerEditorStateTools(server: McpServer, mcpUnity: McpUnity, 
           }
         };
       } catch (error) {
+        // play/stop triggers Domain Reload → expected disconnection
+        if (action === 'play' || action === 'stop') {
+          logger.info(`Expected disconnection during '${action}', waiting for reconnection...`);
+
+          try {
+            await mcpUnity.waitForConnection(30000);
+
+            // Verify state after reconnection
+            const verifyResponse = await mcpUnity.sendRequest({
+              method: getStateName,
+              params: {}
+            });
+
+            if (verifyResponse.success) {
+              logger.info(`Tool execution successful: ${setStateName} (after reconnection)`);
+              return {
+                content: [{
+                  type: 'text' as const,
+                  text: `Editor state action '${action}' executed successfully`
+                }],
+                data: {
+                  state: verifyResponse.state
+                }
+              };
+            }
+          } catch (reconnectError) {
+            logger.error(`Reconnection failed after '${action}'`, reconnectError);
+            throw new McpUnityError(
+              ErrorType.CONNECTION,
+              `Action '${action}' sent but lost connection: ${reconnectError instanceof Error ? reconnectError.message : String(reconnectError)}`
+            );
+          }
+        }
+
         logger.error(`Tool execution failed: ${setStateName}`, error);
         throw error;
       }

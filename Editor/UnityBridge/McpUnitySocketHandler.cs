@@ -49,7 +49,38 @@ namespace McpUnity.Unity
                 }
             };
         }
-        
+
+        /// <summary>
+        /// Handle list_tools request — returns external (non-built-in) tools for dynamic registration.
+        /// </summary>
+        private JObject HandleListTools()
+        {
+            var mcpAssembly = typeof(McpToolBase).Assembly;
+            var tools = new JArray();
+
+            foreach (var kvp in _server.Tools)
+            {
+                // Only return external tools — built-in tools are hardcoded on Node.js side
+                if (kvp.Value.GetType().Assembly == mcpAssembly)
+                    continue;
+
+                tools.Add(new JObject
+                {
+                    ["name"] = kvp.Value.Name,
+                    ["description"] = kvp.Value.Description,
+                    ["parameterSchema"] = kvp.Value.ParameterSchema,
+                    ["isAsync"] = kvp.Value.IsAsync
+                });
+            }
+
+            return new JObject
+            {
+                ["success"] = true,
+                ["tools"] = tools,
+                ["count"] = tools.Count
+            };
+        }
+
         /// <summary>
         /// Handle incoming messages from WebSocket clients
         /// </summary>
@@ -80,6 +111,10 @@ namespace McpUnity.Unity
                 if (string.IsNullOrEmpty(method))
                 {
                     tcs.SetResult(CreateErrorResponse("Missing method in request", "invalid_request"));
+                }
+                else if (method == "list_tools")
+                {
+                    tcs.SetResult(HandleListTools());
                 }
                 else if (_server.TryGetTool(method, out var tool))
                 {

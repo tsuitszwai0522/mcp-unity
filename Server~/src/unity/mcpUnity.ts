@@ -487,6 +487,43 @@ export class McpUnity {
   }
 
   /**
+   * Wait for the connection to be established or restored.
+   * Resolves immediately if already connected.
+   * Rejects if connection transitions to Disconnected or timeout is reached.
+   * @param timeoutMs Maximum time to wait in milliseconds (default: 30000)
+   */
+  public waitForConnection(timeoutMs: number = 30000): Promise<void> {
+    if (this.isConnected) {
+      return Promise.resolve();
+    }
+
+    return new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        removeListener();
+        reject(new McpUnityError(
+          ErrorType.CONNECTION,
+          `Timeout waiting for connection after ${timeoutMs}ms`
+        ));
+      }, timeoutMs);
+
+      const removeListener = this.onConnectionStateChange((change) => {
+        if (change.currentState === ConnectionState.Connected) {
+          clearTimeout(timeout);
+          removeListener();
+          resolve();
+        } else if (change.currentState === ConnectionState.Disconnected) {
+          clearTimeout(timeout);
+          removeListener();
+          reject(new McpUnityError(
+            ErrorType.CONNECTION,
+            change.reason || 'Connection permanently lost'
+          ));
+        }
+      });
+    });
+  }
+
+  /**
    * Force a reconnection to Unity
    * Useful when Unity has reloaded and the connection may be stale
    */

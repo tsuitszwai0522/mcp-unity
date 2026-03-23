@@ -53,6 +53,14 @@ MCP Unity provides automatic integration with VSCode-like IDEs (Visual Studio Co
 - Enables better autocompletion and type information for Unity packages
 - Helps AI coding assistants understand your project's dependencies
 
+### Play Mode Transparent Reconnection
+
+When entering or exiting Play Mode, Unity performs a Domain Reload that temporarily disconnects the WebSocket. MCP Unity now handles this transparently — `set_editor_state("play"/"stop")` automatically waits for reconnection and returns a verified result in a single call, with no manual retry needed.
+
+### External Tool Plugin System
+
+External projects can register custom MCP tools **without modifying the mcp-unity package**. Simply create a C# class that inherits `McpToolBase` in your own assembly — it will be auto-discovered at startup via assembly scanning and dynamically registered on the Node.js side.
+
 ### MCP Server Tools
 
 The following tools are available for manipulating and querying Unity scenes and GameObjects via MCP:

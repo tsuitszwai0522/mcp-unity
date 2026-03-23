@@ -27,6 +27,18 @@ namespace McpUnity.Tools
         /// If false, Execute should be overridden.
         /// </summary>
         public bool IsAsync { get; protected set; } = false;
+
+        /// <summary>
+        /// JSON Schema describing the tool's parameters.
+        /// Override this to provide parameter definitions for dynamic tool discovery.
+        /// Built-in tools can ignore this (Node.js side uses Zod schemas).
+        /// External tools should return a JSON Schema object with "type", "properties", and "required".
+        /// </summary>
+        public virtual JObject ParameterSchema => new JObject
+        {
+            ["type"] = "object",
+            ["properties"] = new JObject()
+        };
         
         /// <summary>
         /// Execute the tool asynchronously with the provided parameters.

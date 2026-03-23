@@ -55,7 +55,7 @@ Server~/                      # Node.js MCP server (TypeScript/ESM)
 - **Tool/resource names must match exactly** between Node and Unity (use `lower_snake_case`)
 - **Execution thread**: All tool execution runs on Unity main thread via EditorCoroutineUtility
 
-## Adding a New Tool
+## Adding a New Built-in Tool
 
 ### 1. Unity Side (C#)
 Create `Editor/Tools/YourTool.cs`:
@@ -85,6 +85,36 @@ Register in `Server~/src/index.ts`.
 cd Server~ && npm run build
 ```
 
+## Adding an External Tool (Plugin)
+
+External projects can register MCP tools **without modifying mcp-unity**. Just inherit `McpToolBase` in your own assembly:
+
+```csharp
+// Assets/YourProject/Editor/MCP/YourTool.cs
+public class YourTool : McpToolBase {
+    public YourTool() {
+        Name = "your_tool";
+        Description = "What it does";
+    }
+
+    public override JObject ParameterSchema => JObject.Parse(@"{
+        ""type"": ""object"",
+        ""properties"": {
+            ""param1"": { ""type"": ""string"", ""description"": ""A parameter"" }
+        },
+        ""required"": [""param1""]
+    }");
+
+    public override JObject Execute(JObject parameters) {
+        // Implementation
+    }
+}
+```
+
+- Auto-discovered at startup via assembly scanning (`McpUnityServer.DiscoverExternalTools()`)
+- Node.js side queries `list_tools` and registers dynamically with JSON Schema → Zod conversion
+- No changes to mcp-unity package needed
+
 ## Adding a New Resource
 
 Same pattern as tools:
@@ -113,7 +143,7 @@ Same pattern as tools:
 
 - **Name mismatch**: Node tool/resource name must equal Unity `Name` exactly
 - **Long main-thread work**: Synchronous `Execute()` blocks Unity; use `IsAsync = true` with `ExecuteAsync()` for long operations
-- **Unity domain reload**: Server stops during script reloads; avoid persistent in-memory state
+- **Unity domain reload**: Server stops during script reloads; `set_editor_state("play"/"stop")` handles this transparently via `waitForConnection()`
 - **Port conflicts**: Default is 8090; check if another process is using it
 - **Multiplayer Play Mode**: Clone instances auto-skip server startup; only main editor hosts MCP
 

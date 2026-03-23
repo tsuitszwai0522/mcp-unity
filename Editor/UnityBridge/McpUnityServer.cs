@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
+using System.Reflection;
 using System.Threading;
 using UnityEditor;
 using UnityEngine;
@@ -257,7 +259,12 @@ namespace McpUnity.Unity
         {
             return _tools.TryGetValue(name, out tool);
         }
-        
+
+        /// <summary>
+        /// Get all registered tools (read-only access for list_tools)
+        /// </summary>
+        public IReadOnlyDictionary<string, McpToolBase> Tools => _tools;
+
         /// <summary>
         /// Try to get a resource by name
         /// </summary>
@@ -507,9 +514,75 @@ namespace McpUnity.Unity
             SimulateDragTool simulateDragTool = new SimulateDragTool();
             _tools.Add(simulateDragTool.Name, simulateDragTool);
 
+            // Discover external tools from other assemblies (before BatchExecuteTool)
+            DiscoverExternalTools();
+
             // Register BatchExecuteTool (must be registered last as it needs access to other tools)
             BatchExecuteTool batchExecuteTool = new BatchExecuteTool(this);
             _tools.Add(batchExecuteTool.Name, batchExecuteTool);
+        }
+
+        /// <summary>
+        /// Scan all loaded assemblies for classes that extend McpToolBase outside this package.
+        /// Automatically instantiates and registers them as external tools.
+        /// </summary>
+        private void DiscoverExternalTools()
+        {
+            var mcpAssembly = typeof(McpToolBase).Assembly;
+            int discoveredCount = 0;
+
+            foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                // Skip the MCP Unity assembly itself — those tools are registered manually
+                if (assembly == mcpAssembly)
+                    continue;
+
+                Type[] types;
+                try
+                {
+                    types = assembly.GetTypes();
+                }
+                catch (ReflectionTypeLoadException ex)
+                {
+                    types = ex.Types.Where(t => t != null).ToArray();
+                }
+
+                foreach (var type in types)
+                {
+                    if (type.IsAbstract || !type.IsSubclassOf(typeof(McpToolBase)))
+                        continue;
+
+                    try
+                    {
+                        var tool = (McpToolBase)Activator.CreateInstance(type);
+
+                        if (string.IsNullOrEmpty(tool.Name))
+                        {
+                            McpLogger.LogWarning($"External tool {type.FullName} has empty Name, skipping");
+                            continue;
+                        }
+
+                        if (_tools.ContainsKey(tool.Name))
+                        {
+                            McpLogger.LogWarning($"External tool '{tool.Name}' ({type.FullName}) conflicts with existing tool, skipping");
+                            continue;
+                        }
+
+                        _tools[tool.Name] = tool;
+                        discoveredCount++;
+                        McpLogger.LogInfo($"Discovered external tool: '{tool.Name}' from {assembly.GetName().Name}");
+                    }
+                    catch (Exception ex)
+                    {
+                        McpLogger.LogWarning($"Failed to instantiate external tool {type.FullName}: {ex.Message}");
+                    }
+                }
+            }
+
+            if (discoveredCount > 0)
+            {
+                McpLogger.LogInfo($"Total external tools discovered: {discoveredCount}");
+            }
         }
         
         /// <summary>

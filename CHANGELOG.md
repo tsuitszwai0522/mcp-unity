@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.7.0] - 2026-03-23
+
+### Added
+
+- **Play Mode transparent reconnection** — `set_editor_state("play"/"stop")` now waits for WebSocket reconnection after Domain Reload and returns a verified result in a single call, eliminating the need for manual wait + check loops
+- **Dynamic external tool discovery** — external projects can now register MCP tools by simply inheriting `McpToolBase` in their own assemblies; tools are auto-discovered via assembly scanning at startup
+  - `McpToolBase.ParameterSchema` virtual property for self-describing JSON Schema parameters
+  - `list_tools` internal method returns external tool definitions to Node.js
+  - `McpUnity.waitForConnection()` utility for awaiting connection restoration
+  - `jsonSchemaToZodShape()` converter for dynamic MCP SDK registration
+  - `server.sendToolListChanged()` notification after dynamic registration
+
+### Changed
+
+- `set_editor_state` handler uses `queueIfDisconnected: false` to prevent unintended replay of play/stop commands
+
 ## [1.6.0] - 2026-03-23
 
 ### Added
