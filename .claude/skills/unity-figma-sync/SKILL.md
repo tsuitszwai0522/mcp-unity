@@ -89,19 +89,23 @@ description: ALL Figma-related UI operations use this Skill. Includes extracting
 
 ## Mode B：Figma → Unity Pull
 
+> **首次建構**時，不走此模式，而是走 `unity-ui-builder` 的四步分離建構流程。
+> 此模式用於**已有 Unity UI 後的增量更新**。
+
 1. **提取 Design Spec**：使用者提供 Figma URL → 提取 `fileKey` + `nodeId` → 依照「Design Spec 提取」雙軌流程整理成 JSON spec（主路線用官方 MCP，備用路線用 Framelink）。同時取得截圖作視覺參考（官方：`get_screenshot`；Framelink：`download_figma_images`）。
-2. **讀取 Unity**：`batch_execute` + `get_ui_element_info` 取得對應元素當前狀態。
-3. **差異分析**：建立對照表。
+2. **下載新增圖片**：若有新圖片素材，用 `download_figma_images` 下載 + `import_texture_as_sprite` 匯入。
+3. **讀取 Unity**：`batch_execute` + `get_ui_element_info` 取得對應元素當前狀態。
+4. **差異分析**：建立對照表。
 
    | 元素 | 屬性 | Figma 值 | Unity 值 | 差異 |
    |------|------|---------|---------|------|
    | Header | bg | #0066FF | rgba(1,0,0,1) | 色彩 |
    | Item1 | height | 140px | sizeDelta.y=120 | 尺寸 |
 
-4. **差異報告**（**強制門檻**）：呈現變更摘要 + 影響範圍 + 不支援的變更，**等待使用者確認**。
-5. **增量更新**：`batch_execute` 套用變更。
-6. **驗證**：`get_ui_element_info` 確認正確。
-7. **儲存**：`save_scene`。
+5. **差異報告**（**強制門檻**）：呈現變更摘要 + 影響範圍 + 不支援的變更，**等待使用者確認**。
+6. **增量更新**：`batch_execute` 套用變更。
+7. **驗證**：`get_ui_element_info` 確認正確。
+8. **儲存**：`save_scene`。
 
 ### 差異類型與對應操作
 
@@ -112,10 +116,13 @@ description: ALL Figma-related UI operations use this Skill. Includes extracting
 | 位置 | `set_rect_transform` → `anchoredPosition` |
 | 文字 | `update_component` → TMP `text`/`fontSize`/`alignment` |
 | 間距 | `update_component` → LayoutGroup `spacing`/`padding` |
+| 圖片 | `update_component` → Image `sprite`（新圖片需先 Step 0 匯入） |
 | 新增元素 | `create_ui_element`（需額外確認） |
 | 移除元素 | `delete_gameobject`（需額外確認） |
 
 ### Figma → Unity 值轉換
+
+> Step 1 使用 `topLeft` + pivot(0,1) 時：x 直接對應、y 取負、width/height 直接對應。
 
 | Figma / CSS | Unity | 公式 |
 |-------------|-------|------|
