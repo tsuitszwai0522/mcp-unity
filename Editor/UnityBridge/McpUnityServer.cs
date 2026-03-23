@@ -488,6 +488,25 @@ namespace McpUnity.Unity
             WriteSerializedFieldsTool writeSerializedFieldsTool = new WriteSerializedFieldsTool();
             _tools.Add(writeSerializedFieldsTool.Name, writeSerializedFieldsTool);
 
+            // Register UI Automation Tools
+            GetInteractableElementsTool getInteractableElementsTool = new GetInteractableElementsTool();
+            _tools.Add(getInteractableElementsTool.Name, getInteractableElementsTool);
+
+            SimulatePointerClickTool simulatePointerClickTool = new SimulatePointerClickTool();
+            _tools.Add(simulatePointerClickTool.Name, simulatePointerClickTool);
+
+            SimulateInputFieldTool simulateInputFieldTool = new SimulateInputFieldTool();
+            _tools.Add(simulateInputFieldTool.Name, simulateInputFieldTool);
+
+            GetUIElementStateTool getUIElementStateTool = new GetUIElementStateTool();
+            _tools.Add(getUIElementStateTool.Name, getUIElementStateTool);
+
+            WaitForConditionTool waitForConditionTool = new WaitForConditionTool();
+            _tools.Add(waitForConditionTool.Name, waitForConditionTool);
+
+            SimulateDragTool simulateDragTool = new SimulateDragTool();
+            _tools.Add(simulateDragTool.Name, simulateDragTool);
+
             // Register BatchExecuteTool (must be registered last as it needs access to other tools)
             BatchExecuteTool batchExecuteTool = new BatchExecuteTool(this);
             _tools.Add(batchExecuteTool.Name, batchExecuteTool);

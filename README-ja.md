@@ -193,6 +193,24 @@ MCP Unityは、Unityの`Library/PackedCache`フォルダーをワークスペー
 - `batch_execute`: 単一のバッチリクエストで複数のツール操作を実行し、ラウンドトリップを削減しアトミック操作を可能にする（失敗時のロールバックオプション付き）
   > **例:** "単一のバッチ操作でEnemy_1からEnemy_10という名前の10個の空のGameObjectを作成"
 
+- `get_interactable_elements`: シーン内のすべてのインタラクティブUI要素（Button、Toggle、InputField、Slider、Dropdown、ScrollRectなど）をスキャンし、フィルタリングとスコープ制御をサポート。Play Modeが必要
+  > **例:** "現在のシーンのすべてのインタラクティブUI要素を表示"
+
+- `simulate_pointer_click`: UI要素に対して完全なポインタークリックイベントシーケンス（PointerEnter → PointerDown → PointerUp → PointerClick → PointerExit）をシミュレート。Play Modeが必要
+  > **例:** "Canvas内のLoginButtonをクリック"
+
+- `simulate_input_field`: InputFieldまたはTMP_InputFieldにテキストを入力し、onValueChangedおよびオプションでonEndEdit/onSubmitイベントをトリガー。Play Modeが必要
+  > **例:** "EmailFieldに'player@test.com'と入力"
+
+- `get_ui_element_state`: 単一のUI要素のランタイム状態（コンポーネント状態、RectTransform情報、表示テキスト）をクエリ。EditモードとPlayモードの両方で動作
+  > **例:** "SubmitButtonの現在の状態は？"
+
+- `wait_for_condition`: 設定可能なタイムアウトでGameObjectの条件（active、inactive、exists、not_exists、interactable、text_equals、text_contains、component_enabled）を待機。Play Modeが必要
+  > **例:** "LoadingPanelが非アクティブになるまで待機"
+
+- `simulate_drag`: マルチフレーム補間によるUI要素のドラッグジェスチャーをシミュレート。デルタ（ピクセルオフセット）またはターゲットベースの移動とIDropHandlerサポートに対応。Play Modeが必要
+  > **例:** "InventoryItemをEquipSlotにドラッグ"
+
 ### MCPサーバーリソース
 
 - `unity://menu-items`: `execute_menu_item`ツールを容易にするために、Unityエディターで利用可能なすべてのメニュー項目のリストを取得

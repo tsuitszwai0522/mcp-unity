@@ -213,6 +213,24 @@ The following tools are available for manipulating and querying Unity scenes and
 - `batch_execute`: Executes multiple tool operations in a single batch request, reducing round-trips and enabling atomic operations with optional rollback on failure
   > **Example prompt:** "Create 10 empty GameObjects named Enemy_1 through Enemy_10 in a single batch operation"
 
+- `get_interactable_elements`: Scans the scene for all interactable UI elements (Button, Toggle, InputField, Slider, Dropdown, ScrollRect, etc.) with optional filtering and scope control. Requires Play Mode
+  > **Example prompt:** "Show me all interactable UI elements in the current scene"
+
+- `simulate_pointer_click`: Simulates a full pointer click event sequence (PointerEnter → PointerDown → PointerUp → PointerClick → PointerExit) on a UI element. Requires Play Mode
+  > **Example prompt:** "Click the LoginButton in the Canvas"
+
+- `simulate_input_field`: Fills text into an InputField or TMP_InputField, triggering onValueChanged and optionally onEndEdit/onSubmit events. Requires Play Mode
+  > **Example prompt:** "Type 'player@test.com' into the EmailField"
+
+- `get_ui_element_state`: Queries the runtime state of a single UI element including component states, RectTransform info, and display text. Works in both Edit and Play Mode
+  > **Example prompt:** "What is the current state of the SubmitButton?"
+
+- `wait_for_condition`: Waits for a condition (active, inactive, exists, not_exists, interactable, text_equals, text_contains, component_enabled) on a GameObject with configurable timeout. Requires Play Mode
+  > **Example prompt:** "Wait for the LoadingPanel to become inactive"
+
+- `simulate_drag`: Simulates a drag gesture on a UI element with multi-frame interpolation, supporting delta (pixel offset) or target-based movement with IDropHandler support. Requires Play Mode
+  > **Example prompt:** "Drag the InventoryItem to the EquipSlot"
+
 ### MCP Server Resources
 
 - `unity://menu-items`: Retrieves a list of all available menu items in the Unity Editor to facilitate `execute_menu_item` tool

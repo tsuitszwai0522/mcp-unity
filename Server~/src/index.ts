@@ -35,6 +35,7 @@ import { registerScreenshotTools } from './tools/screenshotTools.js';
 import { registerEditorStateTools } from './tools/editorStateTools.js';
 import { registerGetSelectionTool } from './tools/getSelectionTool.js';
 import { registerReadSerializedFieldsTool, registerWriteSerializedFieldsTool } from './tools/serializedFieldTools.js';
+import { registerUIAutomationTools } from './tools/uiAutomationTools.js';
 import { registerBatchExecuteTool } from './tools/batchExecuteTool.js';
 import { registerGetMenuItemsResource } from './resources/getMenuItemResource.js';
 import { registerGetConsoleLogsResource } from './resources/getConsoleLogsResource.js';
@@ -130,6 +131,9 @@ registerGetSelectionTool(server, mcpUnity, toolLogger);
 // Register Serialized Field Tools
 registerReadSerializedFieldsTool(server, mcpUnity, toolLogger);
 registerWriteSerializedFieldsTool(server, mcpUnity, toolLogger);
+
+// Register UI Automation Tools
+registerUIAutomationTools(server, mcpUnity, toolLogger);
 
 // Register Batch Execute Tool (high-priority for performance)
 registerBatchExecuteTool(server, mcpUnity, toolLogger);
