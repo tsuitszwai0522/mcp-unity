@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.8.2] - 2026-04-01
+
+### Fixed
+
+- **Schema converter coerce support** — `z.number()` → `z.coerce.number()` for integer/number/boolean types in `schemaConverter.ts`, fixing MCP clients that pass parameters as strings (e.g. `"10"` instead of `10`)
+- **Array items type resolution** — `z.array(z.any())` now reads `items` definition from JSON Schema and applies coerce, fixing array parameters like `material_card_ids: [8, 11]` that failed validation
+
 ## [1.8.0] - 2026-04-01
 
 ### Changed

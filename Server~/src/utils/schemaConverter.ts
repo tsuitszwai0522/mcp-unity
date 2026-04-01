@@ -5,6 +5,21 @@ import * as z from 'zod';
  * Supports basic types: string (with enum), number, integer, boolean, array, object.
  * Complex/nested schemas fall back to z.any() — Unity C# side does the real validation.
  */
+/**
+ * Resolve the Zod type for array items based on JSON Schema `items` definition.
+ * Uses coerce variants so string-encoded values ("10" → 10) are accepted.
+ */
+function resolveItemType(items: any): z.ZodTypeAny {
+  if (!items?.type) return z.any();
+  switch (items.type) {
+    case 'string':  return z.string();
+    case 'integer': return z.coerce.number().int();
+    case 'number':  return z.coerce.number();
+    case 'boolean': return z.coerce.boolean();
+    default:        return z.any();
+  }
+}
+
 export function jsonSchemaToZodShape(schema: any): z.ZodRawShape {
   const shape: z.ZodRawShape = {};
 
@@ -26,16 +41,16 @@ export function jsonSchemaToZodShape(schema: any): z.ZodRawShape {
         }
         break;
       case 'integer':
-        zodType = z.number().int();
+        zodType = z.coerce.number().int();
         break;
       case 'number':
-        zodType = z.number();
+        zodType = z.coerce.number();
         break;
       case 'boolean':
-        zodType = z.boolean();
+        zodType = z.coerce.boolean();
         break;
       case 'array':
-        zodType = z.array(z.any());
+        zodType = z.array(resolveItemType(prop.items));
         break;
       case 'object':
         zodType = z.record(z.any());
