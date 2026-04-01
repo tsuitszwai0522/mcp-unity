@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.8.0] - 2026-04-01
+
+### Changed
+
+- **`batch_execute` returns full tool result data** — each operation result now includes a complete `data` field with the tool's full JSON response, enabling AI clients to programmatically access all returned data (previously only returned summary status)
+- **Dynamic tools register before `server.connect()`** — startup sequence reordered (`mcpUnity.start()` → `registerDynamicTools()` → `server.connect()`) so external tools appear in the first `tools/list` query without relying on `sendToolListChanged()`
+  - Graceful fallback when Unity Editor is not running: server starts with built-in tools only, no crash
+
+### Added
+
+- **Test external tools** — `test_echo` and `test_get_time` tools in `Assets/Editor/McpTestTools/` for verifying dynamic tool discovery and batch_execute data return
+
 ## [1.7.0] - 2026-03-23
 
 ### Added
