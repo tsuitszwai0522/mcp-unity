@@ -146,43 +146,46 @@ async function batchExecuteHandler(
     }
   }
 
-  // Add individual results with instanceIds and key data for each operation
-  if (response.results && response.results.length > 0) {
-    resultText += '\n\nOperation results:';
-    for (const res of response.results) {
-      if (res.success && res.result) {
-        const instanceId = res.result.instanceId;
-        const path = res.result.path || res.result.newPath;
-        const name = res.result.name;
-        let detail = `[${res.id}] OK`;
-        if (instanceId !== undefined) detail += ` instanceId=${instanceId}`;
-        if (name) detail += ` name="${name}"`;
-        if (path) detail += ` path="${path}"`;
-        resultText += `\n  - ${detail}`;
-      } else if (!res.success) {
-        resultText += `\n  - [${res.id}] FAILED: ${res.error || 'Unknown error'}`;
-      }
+  // Build structured results with full tool data for each operation
+  const structuredResults = response.results?.map((res: OperationResult) => {
+    const entry: Record<string, any> = {
+      id: res.id,
+      status: res.success ? 'OK' : 'Error'
+    };
+    if (res.success && res.result) {
+      entry.data = res.result;
     }
-  }
+    if (!res.success && res.error) {
+      entry.error = res.error;
+    }
+    return entry;
+  }) ?? [];
 
   // Determine if we should throw an error or return success
   if (!response.success && params.stopOnError) {
     // When stopOnError is true and we failed, throw to signal the error clearly
     throw new McpUnityError(
       ErrorType.TOOL_EXECUTION,
-      resultText
+      resultText + '\n\n' + JSON.stringify({ results: structuredResults }, null, 2)
     );
   }
 
+  // Include full results JSON so AI clients can access each tool's return data
+  const fullResultsJson = JSON.stringify({
+    results: structuredResults,
+    summary: response.summary
+  }, null, 2);
+
   return {
-    content: [{
-      type: 'text',
-      text: resultText
-    }],
-    // Include structured results data so callers can programmatically access instanceIds
-    data: {
-      results: response.results,
-      summary: response.summary
-    }
+    content: [
+      {
+        type: 'text',
+        text: resultText
+      },
+      {
+        type: 'text',
+        text: fullResultsJson
+      }
+    ]
   };
 }

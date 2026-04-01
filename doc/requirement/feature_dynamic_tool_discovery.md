@@ -409,13 +409,28 @@ export async function registerDynamicTools(
 }
 ```
 
-#### 改動 3：`index.ts` 在連線建立後觸發動態註冊
+#### 改動 3：`index.ts` 在 `server.connect()` 前完成動態註冊
+
+> **重要**：動態工具必須在 `server.connect()` 之前註冊，確保 MCP client 第一次查詢 `tools/list` 時所有工具已就緒。
 
 ```typescript
 // index.ts — startServer() 中
 
 async function startServer() {
   try {
+    // 1. 先連接 Unity WebSocket（在 MCP client 連接前）
+    //    start() 連接失敗時不會 crash，只會 warn 並繼續
+    await mcpUnity.start();
+
+    // 2. 如果 Unity 已連接，查詢並註冊外部 tools
+    if (mcpUnity.isConnected) {
+      const dynamicCount = await registerDynamicTools(server, mcpUnity, toolLogger);
+      if (dynamicCount > 0) {
+        serverLogger.info(`Registered ${dynamicCount} external tools from Unity`);
+      }
+    }
+
+    // 3. 最後才連接 MCP transport — 此時 tools/list 已包含所有工具
     const stdioTransport = new StdioServerTransport();
     await server.connect(stdioTransport);
 
@@ -423,14 +438,6 @@ async function startServer() {
 
     const clientName = server.server.getClientVersion()?.name || 'Unknown MCP Client';
     serverLogger.info(`Connected MCP client: ${clientName}`);
-
-    await mcpUnity.start(clientName);
-
-    // 連線建立後，查詢並註冊外部 tools
-    const dynamicCount = await registerDynamicTools(server, mcpUnity, toolLogger);
-    if (dynamicCount > 0) {
-      serverLogger.info(`Registered ${dynamicCount} external tools from Unity`);
-    }
   } catch (error) {
     serverLogger.error('Failed to start server', error);
     process.exit(1);
@@ -555,20 +562,21 @@ public class WaitForBattleEndTool : McpToolBase
 ```
 MCP Client          Node.js Server          Unity Editor
     │                    │                       │
-    │                    │── start() ──────────→ │
+    │                    │── mcpUnity.start() ──→│  (1) 先連 Unity
     │                    │←── connected ─────────│
     │                    │                       │
-    │                    │── list_tools ────────→│
+    │                    │── list_tools ────────→│  (2) 查詢外部工具
     │                    │                       │── DiscoverExternalTools()
     │                    │                       │   (assembly scan at startup)
     │                    │←── { tools: [...] } ──│
     │                    │                       │
-    │                    │── registerDynamicTools()
+    │                    │── registerDynamicTools()  (3) 註冊動態工具
     │                    │   server.tool(name, zodShape, handler)
-    │                    │   server.sendToolListChanged()
     │                    │                       │
-    │←── tools/list ─────│                       │
-    │   (includes dynamic)                       │
+    │←── server.connect()│                       │  (4) 最後才接 MCP client
+    │                    │                       │
+    │── tools/list ─────→│                       │  (5) 第一次查詢已包含所有工具
+    │←── (built-in + dynamic tools) ─────────────│
     │                    │                       │
     │── tools/call ─────→│                       │
     │   "cb_start_battle"│── sendRequest() ────→│

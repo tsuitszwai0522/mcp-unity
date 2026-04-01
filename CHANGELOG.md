@@ -59,7 +59,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - `UpdateComponentTool` now caches `SerializedObject` per component in batch operations instead of recreating per field
 - Unified structured `ObjectReference` keys — both `assetPath` and `objectPath` now accepted in all tools
 - Updated `update_component` and `write_serialized_fields` TS descriptions to clarify tool selection guidance
-- `batch_execute` now returns `instanceId`, `name`, and `path` for each operation result
+- `batch_execute` now returns full tool result data (complete JSON) for each operation, not just summary fields
 
 ## [1.4.0] - 2026-03-06
 

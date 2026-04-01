@@ -113,6 +113,8 @@ public class YourTool : McpToolBase {
 
 - Auto-discovered at startup via assembly scanning (`McpUnityServer.DiscoverExternalTools()`)
 - Node.js side queries `list_tools` and registers dynamically with JSON Schema → Zod conversion
+- Startup order ensures dynamic tools are available on first `tools/list` query: `mcpUnity.start()` → `registerDynamicTools()` → `server.connect()`
+- If Unity is not running at startup, dynamic tools are skipped (server doesn't crash; built-in tools remain available)
 - No changes to mcp-unity package needed
 
 ## Adding a New Resource

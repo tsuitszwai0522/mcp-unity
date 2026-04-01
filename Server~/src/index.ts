@@ -155,30 +155,36 @@ registerGameObjectHandlingPrompt(server);
 // Server startup function
 async function startServer() {
   try {
-    // Initialize STDIO transport for MCP client communication
+    // 1. Connect to Unity WebSocket FIRST (before MCP client connects)
+    //    so dynamic tools are available when tools/list is queried.
+    //    start() handles connection failure gracefully (warns + continues).
+    await mcpUnity.start();
+
+    // 2. Discover and register external tools from Unity (if connected)
+    if (mcpUnity.isConnected) {
+      try {
+        const dynamicCount = await registerDynamicTools(server, mcpUnity, toolLogger);
+        if (dynamicCount > 0) {
+          serverLogger.info(`Registered ${dynamicCount} external tool(s) from Unity`);
+        }
+      } catch (error) {
+        serverLogger.warn('Failed to register dynamic tools (non-fatal)', error);
+      }
+    } else {
+      serverLogger.info('Unity not connected — dynamic tools will be registered when Unity connects');
+    }
+
+    // 3. NOW connect the MCP server to the transport
+    //    At this point all built-in + dynamic tools are registered,
+    //    so the first tools/list response includes everything.
     const stdioTransport = new StdioServerTransport();
-    
-    // Connect the server to the transport
     await server.connect(stdioTransport);
 
     serverLogger.info('MCP Server started');
-    
-    // Get the client name from the MCP server
+
+    // Update Unity connection with client name (for logging/headers)
     const clientName = server.server.getClientVersion()?.name || 'Unknown MCP Client';
     serverLogger.info(`Connected MCP client: ${clientName}`);
-    
-    // Start Unity Bridge connection with client name in headers
-    await mcpUnity.start(clientName);
-
-    // Discover and register external tools from Unity
-    try {
-      const dynamicCount = await registerDynamicTools(server, mcpUnity, toolLogger);
-      if (dynamicCount > 0) {
-        serverLogger.info(`Registered ${dynamicCount} external tool(s) from Unity`);
-      }
-    } catch (error) {
-      serverLogger.warn('Failed to register dynamic tools (non-fatal)', error);
-    }
 
   } catch (error) {
     serverLogger.error('Failed to start server', error);
