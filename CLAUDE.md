@@ -121,7 +121,7 @@ public class YourTool : McpToolBase {
 
 When integrating with an *optional* Unity package (e.g. `com.unity.localization`, `com.unity.addressables`, `com.unity.cinemachine`), use a **sub-assembly with version-gated compilation** rather than conditional code inside the main `McpUnity.Editor.asmdef`. The main assembly must remain compilable for users who don't have the optional package installed.
 
-The pattern (reference: `Editor/Tools/Localization/`):
+The pattern (in-tree references: `Editor/Tools/Localization/` and `Editor/Tools/Addressables/`, with matching test assemblies in `Editor/Tests/Localization/` and `Editor/Tests/Addressables/`):
 
 ### 1. Sub-assembly definition
 

@@ -4,6 +4,34 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.11.1] - 2026-04-13
+
+### Added
+
+- **`[McpUnityFirstParty]` markers on all 15 Addressables tools** — keeps the dynamic `list_tools` path from double-registering them; the hand-written TypeScript wrappers in `Server~/src/tools/addressablesTools.ts` remain the canonical entry point.
+- **`AddrHelper` `InternalsVisibleTo`** — `McpUnity.Addressables` exposes internals to `McpUnity.Addressables.Tests` so the test fixture can reach shared helpers directly.
+
+### Tests
+
+- **62 EditMode tests pass** (`McpUnity.Tests.Addressables.AddrTests`) covering the entire 1.10.0 Addressables tool suite:
+  - 4 Settings tests (A1–A4): `addr_get_settings` field shape, `addr_init_settings` idempotency, custom-folder param handling on the idempotent path
+  - 18 Group tests (B1–B18): create with all schema variants (`PackTogether`/`PackSeparately`/`PackTogetherByLabel`, `include_in_build`), default-group handling, in-use protection, validation errors, default-group deletion guard
+  - 10 Label tests (C1–C10): create/list/remove, idempotency, space/bracket/empty validation, in-use protection, force-strip
+  - 26 Entry tests (D1–D26): batch add/remove/move with mixed identifiers (guid + asset_path), glob filters, address pattern matching, `truncated` flag, partial `set_entry` update, auto-label-creation warnings, mixed valid/invalid batch reporting
+  - 3 Query tests (E1–E3): `addr_find_asset` for addressable / non-addressable / non-existent paths
+  - 1 Golden Path scenario (F1, `[Order(999)]`): 18-step end-to-end agent workflow exercising every tool in realistic order, with a `step` counter embedded in every assertion message for fast failure localisation
+- **Self-contained dummy assets** — fixture creates `AddrTestDummySO` ScriptableObjects in `Assets/Tests/AddressablesTests/` at `[OneTimeSetUp]` and removes them at `[OneTimeTearDown]`. No dependency on any specific asset existing in the consumer Unity project. The `AddrTestDummySO` type lives inside the test assembly only and never ships in runtime builds.
+- **Default-group restoration** — `[OneTimeSetUp]` snapshots `_originalDefaultGroup`; per-test `[TearDown]` restores it before cleaning up test groups, so tests that mutate the default (B5, B11) cannot leak state into the consumer project or sibling tests.
+- **Defensive cleanup** — `CleanupTestArtifacts` scrubs any residual entry on the dummy-asset paths regardless of which group it landed in, then removes any `McpAddrTest_*`-prefixed groups and labels. Survives mid-test crashes from previous failed runs.
+- **`testables` requirement** — same as Localization: running these tests requires the consumer project's `Packages/manifest.json` to include `"testables": ["com.gamelovers.mcp-unity"]`.
+
+### Documentation
+
+- **`doc/lessons/unity-mcp-lessons.md`** — two new lessons:
+  - "The Unity project running tests is the **consumer project**, not the package source folder" — explains why `AssetDatabase.AssetPathToGUID` returns empty for files that clearly exist in the package's repo Assets folder, with diagnosis tip via `get_editor_state`'s `Current Scene` path.
+  - "`mcp__mcp-unity__run_tests` with broad filters fails the WebSocket payload size limit" — for test classes with > ~30 tests, the response payload exceeds the WebSocket frame buffer; fix is to filter one test at a time even though it's tedious.
+- **`doc/requirement/feature_addressables_mcp_tests.md`** — full 4-stage test plan document that drove this implementation, including fixture design, test inventory, deferred-test rationale, and risk register.
+
 ## [1.11.0] - 2026-04-13
 
 ### Added
