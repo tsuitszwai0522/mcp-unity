@@ -158,6 +158,40 @@ namespace McpUnity.Tools.Localization
         }
 
         /// <summary>
+        /// Delete a StringTableCollection and all its assets. Unity Localization 1.x has
+        /// no public RemoveCollection API — the supported path is deleting the assets via
+        /// AssetDatabase, which fires LocalizationAssetModificationProcessor.OnWillDeleteAsset
+        /// and unregisters the collection automatically.
+        /// </summary>
+        public static void DeleteStringTableCollection(StringTableCollection collection)
+        {
+            if (collection == null) return;
+
+            // Capture all asset paths BEFORE deletion (references go invalid as we delete).
+            var paths = new List<string>();
+            foreach (var t in collection.StringTables)
+            {
+                if (t != null)
+                {
+                    var p = AssetDatabase.GetAssetPath(t);
+                    if (!string.IsNullOrEmpty(p)) paths.Add(p);
+                }
+            }
+            if (collection.SharedData != null)
+            {
+                var sp = AssetDatabase.GetAssetPath(collection.SharedData);
+                if (!string.IsNullOrEmpty(sp)) paths.Add(sp);
+            }
+            var cp = AssetDatabase.GetAssetPath(collection);
+            if (!string.IsNullOrEmpty(cp)) paths.Add(cp);
+
+            foreach (var p in paths)
+            {
+                AssetDatabase.DeleteAsset(p);
+            }
+        }
+
+        /// <summary>
         /// Ensure an asset folder exists, creating intermediate folders via AssetDatabase
         /// (which writes proper .meta files atomically — unlike Directory.CreateDirectory).
         /// Caller must have already passed the path through ValidateAssetPath.

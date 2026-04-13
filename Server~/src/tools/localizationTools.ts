@@ -212,6 +212,38 @@ export function registerLocDeleteEntryTool(server: McpServer, mcpUnity: McpUnity
 }
 
 // ============================================================================
+// loc_delete_table
+// ============================================================================
+
+export function registerLocDeleteTableTool(server: McpServer, mcpUnity: McpUnity, logger: Logger) {
+  const name = 'loc_delete_table';
+  const description = 'Deletes a Unity Localization StringTable collection (removes the collection asset, its SharedTableData, and all per-locale StringTables). Symmetric to loc_create_table.';
+  const schema = z.object({
+    table_name: z.string().describe('StringTable collection name to delete'),
+  });
+
+  wrap(server, mcpUnity, logger, name, description, schema.shape, async (params) => {
+    if (!params.table_name) {
+      throw new McpUnityError(ErrorType.VALIDATION, "Required parameter 'table_name' must be provided");
+    }
+
+    const response = await mcpUnity.sendRequest({ method: name, params });
+    ensureSuccess(response, 'Failed to delete StringTable');
+
+    return {
+      content: [{ type: 'text', text: response.message || `StringTable '${params.table_name}' deleted` }],
+      data: {
+        deleted: response.deleted,
+        name: response.name,
+        path: response.path,
+        entryCount: response.entryCount,
+        locales: response.locales,
+      },
+    };
+  });
+}
+
+// ============================================================================
 // loc_create_table
 // ============================================================================
 
@@ -244,6 +276,37 @@ export function registerLocCreateTableTool(server: McpServer, mcpUnity: McpUnity
         name: response.name,
         path: response.path,
         warnings: response.warnings,
+      },
+    };
+  });
+}
+
+// ============================================================================
+// loc_remove_locale
+// ============================================================================
+
+export function registerLocRemoveLocaleTool(server: McpServer, mcpUnity: McpUnity, logger: Logger) {
+  const name = 'loc_remove_locale';
+  const description = "Unregisters a Locale (by code, e.g. 'zh-TW') from Unity Localization and deletes its asset. Symmetric to loc_add_locale.";
+  const schema = z.object({
+    code: z.string().describe("Locale identifier code to remove (e.g. 'zh-TW', 'en')"),
+    delete_asset: z.boolean().optional().describe('Also delete the .asset file from disk (default true)'),
+  });
+
+  wrap(server, mcpUnity, logger, name, description, schema.shape, async (params) => {
+    if (!params.code) {
+      throw new McpUnityError(ErrorType.VALIDATION, "Required parameter 'code' must be provided");
+    }
+
+    const response = await mcpUnity.sendRequest({ method: name, params });
+    ensureSuccess(response, 'Failed to remove locale');
+
+    return {
+      content: [{ type: 'text', text: response.message || `Locale '${params.code}' removed` }],
+      data: {
+        action: response.action,
+        code: response.code,
+        path: response.path,
       },
     };
   });

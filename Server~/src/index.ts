@@ -45,6 +45,8 @@ import {
   registerLocDeleteEntryTool,
   registerLocCreateTableTool,
   registerLocAddLocaleTool,
+  registerLocRemoveLocaleTool,
+  registerLocDeleteTableTool,
 } from './tools/localizationTools.js';
 import { registerDynamicTools } from './tools/dynamicTools.js';
 import { registerGetMenuItemsResource } from './resources/getMenuItemResource.js';
@@ -149,12 +151,14 @@ registerUIAutomationTools(server, mcpUnity, toolLogger);
 // when com.unity.localization is installed; Node side always registers, calls fall
 // through to "unknown method" if Localization is not present in Unity)
 registerLocAddLocaleTool(server, mcpUnity, toolLogger);
+registerLocRemoveLocaleTool(server, mcpUnity, toolLogger);
 registerLocListTablesTool(server, mcpUnity, toolLogger);
 registerLocGetEntriesTool(server, mcpUnity, toolLogger);
 registerLocSetEntryTool(server, mcpUnity, toolLogger);
 registerLocSetEntriesTool(server, mcpUnity, toolLogger);
 registerLocDeleteEntryTool(server, mcpUnity, toolLogger);
 registerLocCreateTableTool(server, mcpUnity, toolLogger);
+registerLocDeleteTableTool(server, mcpUnity, toolLogger);
 
 // Register Batch Execute Tool (high-priority for performance)
 registerBatchExecuteTool(server, mcpUnity, toolLogger);
