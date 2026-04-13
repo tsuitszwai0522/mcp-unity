@@ -4,6 +4,62 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.11.0] - 2026-04-13
+
+### Added
+
+- **`loc_delete_table`** — symmetric counterpart to `loc_create_table`. Deletes a StringTableCollection along with its SharedTableData and every per-locale StringTable via `AssetDatabase.DeleteAsset`, which fires `LocalizationAssetModificationProcessor` for proper cleanup. Returns the deleted collection's name, path, entry count, and locale list.
+- **`loc_remove_locale`** — symmetric counterpart to `loc_add_locale`. Unregisters a Locale via `LocalizationEditorSettings.RemoveLocale` and (by default) deletes the underlying asset. Optional `delete_asset: false` keeps the file on disk.
+- **`[McpUnityFirstParty]` attribute** (`Editor/Tools/McpUnityFirstPartyAttribute.cs`) — explicit marker for first-party tools that ship hand-written TS wrappers. `McpUnitySocketHandler.HandleListTools` now excludes attributed tools from dynamic registration, with the existing `McpUnity.*` assembly-name prefix as a fallback. All Localization tools are marked.
+- **`LocTableHelper.DeleteStringTableCollection`** — production helper used by both `loc_delete_table` and the test fixture cleanup, ensuring the supported "delete via AssetDatabase" path is exercised in both code paths.
+- **CLAUDE.md "Adding a First-Party Optional Package Tool" chapter** — documents the sub-assembly + `versionDefines` pattern, the `[McpUnityFirstParty]` marker, the `McpUnity.*` reserved-prefix invariant, and the consumer-side `testables` requirement for running package tests.
+- **`doc/lessons/unity-mcp-lessons.md`** — new lessons file covering Localization gotchas (`Locale.CreateLocale` factory, missing `RemoveCollection` API, collection-level `RemoveEntry`, `CultureInfo` strict-check trap), AssetDatabase pitfalls (`AssetPathToGUID` cache, `Directory.CreateDirectory` vs `AssetDatabase.CreateFolder`), and MCP tooling pitfalls (`run_tests` testables requirement, `recompile_scripts` no-refresh, edit→recompile→run sequencing).
+- **`InternalsVisibleTo` for tests** — `McpUnity.Localization` exposes internals to `McpUnity.Localization.Tests` so the test suite can call `LocTableHelper` directly.
+
+### Fixed
+
+- **`loc_delete_entry` orphan leak** — previously called `SharedData.RemoveKey` directly, which left an orphan `StringTableEntry` in every per-locale `.asset` file. `loc_get_entries` hid the orphan because it filters via SharedData, so the bug was invisible to tool-level checks but visible in the YAML and after reimport. Now uses `StringTableCollection.RemoveEntry(key)` — the collection-level API that atomically removes both SharedData and per-locale entries AND raises `RaiseTableEntryRemoved`.
+- **`loc_set_entries` lost inner error detail** — batch errors were rewrapped as `"entries[i]: invalid key"`, hiding the original validation reason. Now preserves the inner message: `"entries[i]: Key 'foo ' has leading/trailing whitespace"`.
+- **`loc_set_entries` partial in-memory pollution** — a mid-batch validation failure could leave the in-memory `SharedData` half-mutated even though the disk state was clean. Pre-flight validates every entry before any mutation, achieving all-or-nothing semantic. Inline comment marks the invariant for future maintainers.
+
+### Changed
+
+- **`loc_create_table` / `loc_add_locale` directory handling** — both tools now route through new `LocTableHelper` helpers:
+  - `ValidateAssetPath` rejects paths outside `Assets/` (was silently accepted, with undefined behaviour)
+  - `EnsureFolderExists` walks the path via `AssetDatabase.CreateFolder` instead of `Directory.CreateDirectory` + `AssetDatabase.Refresh`, atomically writing `.meta` files
+  - `FindLocale` unifies locale lookup by `Identifier.Code` instead of struct-equality on `LocaleIdentifier`
+- **`loc_add_locale` invalid-culture handling** — was a hard error if `Locale.CreateLocale` returned null. Now soft-warns when `CultureInfo.GetCultureInfo` and the IETF-tag fallback both fail, but still creates the Locale (Unity Localization accepts identifiers like `zh-Hant` that .NET does not recognise on some runtimes).
+- **`loc_set_entry` description** — now nudges callers toward `loc_set_entries` for batches of >5 entries (saves 100x reimports vs single-entry loops).
+
+### Tests
+
+- **40 EditMode tests pass** (`McpUnity.Tests.Localization.LocTests`):
+  - 12 original scenario tests now actually run for the first time (latent `LocalizationEditorSettings.RemoveCollection` bug + missing `testables` had been silently dropping the assembly)
+  - 16 refactor coverage tests for B1/B2/B3 + C1/C2/C3 with regression-locking assertions (orphan probe via `StringTable.GetEntry(keyId)`, multi-locale variant, all-or-nothing pre-flight, soft-warning vs hard-reject)
+  - 7 D4 tests for `loc_delete_table` and `loc_remove_locale` happy + error paths, including `delete_asset: false`
+  - 1 idempotent dangling-locale cleanup test
+- **`testables` requirement documented** — running these tests requires the consumer project's `Packages/manifest.json` to include `"testables": ["com.gamelovers.mcp-unity"]`.
+
+## [1.10.0] - 2026-04-13
+
+### Added
+
+- **Unity Addressables tool suite** — 15 new tools for managing the Addressables system without leaving the MCP client. Covers the four most common workflows (setup, group management, entry management, label management) and a direct lookup query:
+  - `addr_get_settings` — query initialized flag, default group, active profile, profile variables, labels, group/entry counts
+  - `addr_init_settings` — bootstrap AddressableAssetSettings (equivalent to the "Create Addressables Settings" button); idempotent
+  - `addr_list_groups` — list all groups with entry counts and attached schemas
+  - `addr_create_group` — create a new group with default Bundled + ContentUpdate schemas; configurable `packed_mode`, `include_in_build`, `set_as_default`
+  - `addr_remove_group` — remove a group; refuses to delete the default group or non-empty groups unless `force=true`
+  - `addr_set_default_group` — switch the default group
+  - `addr_list_entries` — filter entries by group, label, address glob pattern (supports `*`), asset-path prefix; `limit` guard (default 200) with `truncated` flag
+  - `addr_add_entries` — batch-add assets to a group with per-asset optional address/labels; auto-creates missing labels with warnings; single save at the end
+  - `addr_remove_entries` — batch-remove entries by guid or asset_path
+  - `addr_move_entries` — batch-move entries between groups
+  - `addr_set_entry` — partial update on a single entry (address, add_labels, remove_labels)
+  - `addr_list_labels` / `addr_create_label` / `addr_remove_label` — label management; remove refuses in-use labels unless `force=true`
+  - `addr_find_asset` — direct lookup by asset path, returns group/address/labels
+- **Optional-package sub-assembly** — Addressables tools live in a dedicated `McpUnity.Addressables` assembly (`Editor/Tools/Addressables/`) gated by `versionDefines` + `defineConstraints: ["MCP_UNITY_ADDRESSABLES"]` on `com.unity.addressables ≥ 1.19.0`. The entire assembly is skipped from compilation when Addressables is not installed — zero impact on projects that do not use it. Node side always registers the 15 tools; calls fall through to `unknown method` when Unity lacks the package.
+
 ## [1.9.0] - 2026-04-13
 
 ### Added
