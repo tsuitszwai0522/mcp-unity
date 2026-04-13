@@ -206,14 +206,15 @@
 |------|------|------|------|
 | `group` | string | ✅ | 目標 group 名稱（必須已存在） |
 | `assets` | array | ✅ | `[{ "asset_path": "...", "address": "...", "labels": [...] }]` |
+| `fail_on_missing_asset` | boolean | ❌ | 預設 `true`：任何 `asset_path` 解析唔到整批會以 `not_found` 中止。設 `false` 切換到 best-effort 模式：略過缺失 asset 並返 `missingAssets` 清單。 |
 
 `address` 預設為 asset path；`labels` optional，未存在嘅 label 會自動建立並產生 warning。
 
-**回傳**:
+**回傳（嚴格模式 — 預設）**:
 ```json
 {
   "added": 3,
-  "skipped": 1,
+  "skipped": 0,
   "warnings": ["Label 'newlabel' was created automatically"],
   "entries": [
     { "guid": "...", "assetPath": "...", "address": "...", "group": "..." }
@@ -221,7 +222,22 @@
 }
 ```
 
-**錯誤**: `not_found` (group 或 asset)、`validation_error` (空 array)。
+**回傳（`fail_on_missing_asset:false` 寬鬆模式）**:
+```json
+{
+  "added": 3,
+  "skipped": 1,
+  "warnings": ["Asset 'Assets/Missing.prefab' not found, skipped"],
+  "missingAssets": ["Assets/Missing.prefab"],
+  "entries": [
+    { "guid": "...", "assetPath": "...", "address": "...", "group": "..." }
+  ]
+}
+```
+
+**錯誤**:
+- `not_found` — group 不存在；或嚴格模式下（預設）任何 `asset_path` 解析不到
+- `validation_error` — `assets` 係空 array，或嚴格模式下某個 entry 嘅 `asset_path` 係空字串
 
 ---
 

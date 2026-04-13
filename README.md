@@ -256,10 +256,10 @@ The following tools are available for manipulating and querying Unity scenes and
 
 > Requires the `com.unity.addressables` package (≥ 1.19.0). The entire Addressables assembly is skipped from compilation if the package is not installed, so there is zero impact on projects that do not use Unity Addressables.
 
-- `addr_get_settings`: Queries Addressables settings state — returns `initialized` flag, default group, active profile, profile variables, label list, group/entry counts. Use this first; tools branch on whether Addressables is initialised
+- `addr_get_settings`: Queries Addressables settings state — returns `initialized` flag, default group, active profile, profile variables, label list, group/entry counts, and the installed Addressables package `version`. Use this first; tools branch on whether Addressables is initialised
   > **Example prompt:** "Is Addressables set up in this project? What's the default group?"
 
-- `addr_init_settings`: Bootstraps `AddressableAssetSettings` for projects that have never opened the Addressables Groups window. Idempotent — safe to call when already initialised
+- `addr_init_settings`: Bootstraps `AddressableAssetSettings` for projects that have never opened the Addressables Groups window. Idempotent — safe to call when already initialised. The optional `folder` parameter is validated: must start with `Assets/` and must not contain `..` traversal
   > **Example prompt:** "Initialize Addressables in this project"
 
 - `addr_list_groups`: Lists all Addressables groups with their entry counts and attached schemas, marking which one is the default
@@ -277,7 +277,7 @@ The following tools are available for manipulating and querying Unity scenes and
 - `addr_list_entries`: Lists entries with optional filters: `group`, `label_filter`, `address_pattern` (glob, supports `*`), `asset_path_prefix`. `limit` guard (default 200) with `truncated` flag
   > **Example prompt:** "Show me all entries with label 'preload' under address pattern 'ui/*'"
 
-- `addr_add_entries`: Batch-adds assets to a group with per-asset optional `address` and `labels`. Auto-creates missing labels with warnings; one save at the end of the batch
+- `addr_add_entries`: Batch-adds assets to a group with per-asset optional `address` and `labels`. Auto-creates missing labels with warnings; one save at the end of the batch. Strict by default — any unresolvable `asset_path` aborts the batch with `not_found`; pass `fail_on_missing_asset: false` for best-effort batches that skip missing assets and report them in a `missingAssets` array
   > **Example prompt:** "Add all prefabs under Assets/UI to the UI group with the 'preload' label"
 
 - `addr_remove_entries`: Batch-removes entries identified by `guid` or `asset_path`

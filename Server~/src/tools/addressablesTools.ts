@@ -62,6 +62,7 @@ export function registerAddrGetSettingsTool(server: McpServer, mcpUnity: McpUnit
         groupCount: response.groupCount,
         entryCount: response.entryCount,
         labels: response.labels,
+        version: response.version,
       },
     };
   });
@@ -255,7 +256,7 @@ export function registerAddrListEntriesTool(server: McpServer, mcpUnity: McpUnit
 
 export function registerAddrAddEntriesTool(server: McpServer, mcpUnity: McpUnity, logger: Logger) {
   const name = 'addr_add_entries';
-  const description = 'Batch-add Unity Addressables entries to a group with optional address/labels per asset. Saves once at the end.';
+  const description = 'Batch-add Unity Addressables entries to a group with optional address/labels per asset. Saves once at the end. Defaults to strict mode: missing assets abort the batch with not_found.';
   const schema = z.object({
     group: z.string().describe('Target group name (must exist)'),
     assets: z
@@ -268,6 +269,10 @@ export function registerAddrAddEntriesTool(server: McpServer, mcpUnity: McpUnity
       )
       .min(1)
       .describe('Assets to add'),
+    fail_on_missing_asset: z
+      .boolean()
+      .optional()
+      .describe('Default true: abort the whole call with not_found if any asset_path does not resolve. Set false for best-effort batches.'),
   });
 
   wrap(server, mcpUnity, logger, name, description, schema.shape, async (params) => {
@@ -293,6 +298,7 @@ export function registerAddrAddEntriesTool(server: McpServer, mcpUnity: McpUnity
         skipped: response.skipped,
         entries: response.entries,
         warnings: response.warnings,
+        missingAssets: response.missingAssets,
       },
     };
   });

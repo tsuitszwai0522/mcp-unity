@@ -4,6 +4,33 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.11.2] - 2026-04-13
+
+Addressables code-review follow-up — aligns tool contracts with the spec, closes the first-use regression gap, and hardens the `addr_init_settings` path-handling attack surface. See `doc/codeReview/Response_20260413_AddressablesTools.md`.
+
+### Added
+
+- **`addr_get_settings` returns `version`** — reads the Addressables package version via `PackageInfo.FindForAssembly(typeof(AddressableAssetSettings).Assembly)` and surfaces it alongside the existing summary fields. Caller can now gate capability on package version (spec required this field; v1.10.0 shipped without it).
+- **`addr_add_entries` strict mode (default)** — new `fail_on_missing_asset` parameter, defaults to `true`. In strict mode any unresolvable `asset_path` aborts the batch with `not_found` instead of silently becoming a skip+warning, matching the spec's error contract. Pass `fail_on_missing_asset: false` to opt back into best-effort batching; the lenient response now also carries a `missingAssets` array so callers can act on the skipped paths without parsing warning strings.
+- **`addr_init_settings` folder validation** — the `folder` parameter is validated up-front before any filesystem work: must start with `Assets/`, must not contain `..` traversal. Rejected inputs return `validation_error` with no side effect. Closes the `Directory.CreateDirectory` vector where an agent-supplied `../evil` path would create a folder anywhere on disk.
+- **`AddrHelper.SettingsProvider` test injection point** — `internal static System.Func<AddressableAssetSettings>` that `TryGetSettings` routes through. Production code keeps the default `AddressableAssetSettingsDefaultObject.GetSettings(false)` closure; tests can swap it to simulate "Addressables not initialised" without tearing down the consumer project's real settings asset.
+
+### Tests
+
+- **+4 new Addressables tests** (`McpUnity.Tests.Addressables.AddrTests`, now 66 total):
+  - `A0_Tools_WhenNotInitialized_ReturnNotInitializedError` — uses `SettingsProvider` injection to lock the `not_initialized` contract across five representative tools (`addr_list_groups`, `addr_list_labels`, `addr_create_label`, `addr_add_entries`, `addr_find_asset`). Closes the regression gap flagged by the review: the first-use path is now under test without the blast radius of actually removing the default settings.
+  - `A3b_InitSettings_FolderOutsideAssets_ReturnsValidationError` — rejects `/tmp/evil`, `C:/Windows/System32`, `Packages/com.unity.addressables`
+  - `A3c_InitSettings_FolderWithParentTraversal_ReturnsValidationError` — rejects `Assets/../evil` and `Assets/foo/../../bar`, asserts no folder side-effect
+  - `D5b_AddEntries_InvalidAssetPath_LenientMode_SkippedWithWarning` — covers the opt-in best-effort path end-to-end, asserts `missingAssets` array presence
+- **`D5_AddEntries_InvalidAssetPath_*` renamed + flipped** — now `D5_AddEntries_InvalidAssetPath_StrictDefault_ReturnsNotFound`, asserts the new default contract. The lenient behaviour moved to `D5b`.
+- **`A1_GetSettings_*` extended** — asserts the new `version` field is populated.
+
+### Documentation
+
+- **`doc/requirement/feature_addressables_mcp.md`** — `addr_add_entries` chapter rewritten to document the strict/lenient split (`fail_on_missing_asset`, two response shapes, explicit error semantics). Resolves the internal inconsistency flagged by the review (the previous doc simultaneously showed `skipped` in the success shape and listed `not_found` as the asset-missing error).
+- **`doc/requirement/feature_addressables_mcp_tests.md`** — removed the self-contradiction in the coverage goals. The `not_initialized` error branch is now explicitly covered via `SettingsProvider` injection; the deferred list now only carries the `addr_get_settings` `initialized:false` **happy-path** shape (which is a non-error branch that still needs tearing down real settings to trigger).
+- **`doc/codeReview/Request_20260413_AddressablesTools.md` + `Response_20260413_AddressablesTools.md`** — code review round-trip for the v1.11.1 Addressables drop.
+
 ## [1.11.1] - 2026-04-13
 
 ### Added

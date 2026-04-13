@@ -298,6 +298,40 @@ namespace McpUnity.Tests.Addressables
         // ========================================================================
 
         [Test]
+        public void A0_Tools_WhenNotInitialized_ReturnNotInitializedError()
+        {
+            // Simulate "Addressables is not set up" by swapping AddrHelper's
+            // SettingsProvider to return null. This avoids the blast radius of
+            // actually ripping out AddressableAssetSettingsDefaultObject.Settings
+            // on the consumer project.
+            var originalProvider = AddrHelper.SettingsProvider;
+            AddrHelper.SettingsProvider = () => null;
+            try
+            {
+                // Pick a representative cross-section of tools that flow through
+                // AddrHelper.TryGetSettings so we lock the error contract for the
+                // whole family, not just one tool.
+                AssertError(new AddrListGroupsTool().Execute(new JObject()), "not_initialized");
+                AssertError(new AddrListLabelsTool().Execute(new JObject()), "not_initialized");
+                AssertError(new AddrCreateLabelTool().Execute(new JObject { ["label"] = "any" }),
+                    "not_initialized");
+                AssertError(new AddrAddEntriesTool().Execute(new JObject
+                {
+                    ["group"] = "any",
+                    ["assets"] = new JArray(new JObject { ["asset_path"] = Asset1Path })
+                }), "not_initialized");
+                AssertError(new AddrFindAssetTool().Execute(new JObject
+                {
+                    ["asset_path"] = Asset1Path
+                }), "not_initialized");
+            }
+            finally
+            {
+                AddrHelper.SettingsProvider = originalProvider;
+            }
+        }
+
+        [Test]
         public void A1_GetSettings_WhenInitialized_ReturnsExpectedFields()
         {
             var result = new AddrGetSettingsTool().Execute(new JObject());
@@ -321,6 +355,9 @@ namespace McpUnity.Tests.Addressables
 
             var labels = result["labels"] as JArray;
             Assert.IsNotNull(labels, "labels should be a JArray");
+
+            Assert.IsFalse(string.IsNullOrEmpty(result.Value<string>("version")),
+                "version should be populated from the Addressables package info");
         }
 
         [Test]
@@ -353,6 +390,40 @@ namespace McpUnity.Tests.Addressables
                 "created should stay false regardless of folder param when already initialized");
             Assert.IsFalse(AssetDatabase.IsValidFolder("Assets/NonexistentAddrFolder"),
                 "Idempotent path must not create the folder passed in the params");
+        }
+
+        [Test]
+        public void A3b_InitSettings_FolderOutsideAssets_ReturnsValidationError()
+        {
+            // Agents can pass arbitrary strings — we must refuse anything that
+            // isn't under Assets/ before any IO happens.
+            foreach (var bad in new[] { "/tmp/evil", "C:/Windows/System32", "Packages/com.unity.addressables" })
+            {
+                var result = new AddrInitSettingsTool().Execute(new JObject
+                {
+                    ["folder"] = bad
+                });
+                AssertError(result, "validation_error");
+            }
+        }
+
+        [Test]
+        public void A3c_InitSettings_FolderWithParentTraversal_ReturnsValidationError()
+        {
+            // Reject `..` in any position — even "Assets/../evil" would escape.
+            foreach (var bad in new[] { "Assets/../evil", "Assets/foo/../../bar" })
+            {
+                var result = new AddrInitSettingsTool().Execute(new JObject
+                {
+                    ["folder"] = bad
+                });
+                AssertError(result, "validation_error");
+            }
+
+            Assert.IsFalse(AssetDatabase.IsValidFolder("Assets/evil"),
+                "Rejected folder must not have been created");
+            Assert.IsFalse(AssetDatabase.IsValidFolder("Assets/bar"),
+                "Rejected folder must not have been created");
         }
 
         [Test]
@@ -867,8 +938,10 @@ namespace McpUnity.Tests.Addressables
         }
 
         [Test]
-        public void D5_AddEntries_InvalidAssetPath_SkippedWithWarning()
+        public void D5_AddEntries_InvalidAssetPath_StrictDefault_ReturnsNotFound()
         {
+            // Default contract: a missing asset_path aborts the whole batch with
+            // not_found so callers can't silently drop content.
             CreateTestGroup(TestGroupName);
             var result = new AddrAddEntriesTool().Execute(new JObject
             {
@@ -877,15 +950,38 @@ namespace McpUnity.Tests.Addressables
                     new JObject { ["asset_path"] = "Assets/Does/Not/Exist.png" }
                 )
             });
+            AssertError(result, "not_found");
+        }
+
+        [Test]
+        public void D5b_AddEntries_InvalidAssetPath_LenientMode_SkippedWithWarning()
+        {
+            // Opt-in lenient mode: missing assets become skip+warning and are
+            // surfaced in a missingAssets array for the caller to inspect.
+            CreateTestGroup(TestGroupName);
+            var result = new AddrAddEntriesTool().Execute(new JObject
+            {
+                ["group"] = TestGroupName,
+                ["fail_on_missing_asset"] = false,
+                ["assets"] = new JArray(
+                    new JObject { ["asset_path"] = Asset1Path },
+                    new JObject { ["asset_path"] = "Assets/Does/Not/Exist.png" }
+                )
+            });
             AssertSuccess(result);
 
-            Assert.AreEqual(0, result.Value<int>("added"));
+            Assert.AreEqual(1, result.Value<int>("added"));
             Assert.AreEqual(1, result.Value<int>("skipped"));
 
             var warnings = result["warnings"] as JArray;
             Assert.IsNotNull(warnings);
             Assert.IsTrue(warnings.Any(w => w.ToString().Contains("not found")),
                 $"Expected 'not found' warning, got: {warnings}");
+
+            var missing = result["missingAssets"] as JArray;
+            Assert.IsNotNull(missing, "missingAssets array should be present in lenient mode");
+            Assert.AreEqual(1, missing.Count);
+            Assert.AreEqual("Assets/Does/Not/Exist.png", missing[0].ToString());
         }
 
         [Test]

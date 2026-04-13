@@ -36,6 +36,10 @@ namespace McpUnity.Tools.Addressables
                         },
                         ""required"": [""asset_path""]
                     }
+                },
+                ""fail_on_missing_asset"": {
+                    ""type"": ""boolean"",
+                    ""description"": ""When true (default) the whole call fails with not_found if any asset_path does not resolve. Set false for best-effort batches that skip missing assets with a warning.""
                 }
             },
             ""required"": [""group"", ""assets""]
@@ -58,9 +62,14 @@ namespace McpUnity.Tools.Addressables
             var group = AddrHelper.ResolveGroup(settings, groupName, out var groupError);
             if (group == null) return groupError;
 
+            // Default strict: any unresolved asset_path aborts the batch. Agents
+            // that want best-effort behaviour opt in with fail_on_missing_asset=false.
+            bool failOnMissingAsset = parameters["fail_on_missing_asset"]?.ToObject<bool>() ?? true;
+
             var existingLabels = new HashSet<string>(settings.GetLabels());
             var warnings = new JArray();
             var addedEntries = new JArray();
+            var missingAssets = new JArray();
             int added = 0, skipped = 0;
 
             foreach (var item in assetsArray)
@@ -68,6 +77,12 @@ namespace McpUnity.Tools.Addressables
                 string assetPath = item["asset_path"]?.ToString();
                 if (string.IsNullOrWhiteSpace(assetPath))
                 {
+                    if (failOnMissingAsset)
+                    {
+                        return McpUnitySocketHandler.CreateErrorResponse(
+                            "Each entry in 'assets' must have a non-empty 'asset_path'",
+                            "validation_error");
+                    }
                     warnings.Add("Skipped entry with empty asset_path");
                     skipped++;
                     continue;
@@ -76,7 +91,14 @@ namespace McpUnity.Tools.Addressables
                 string guid = AssetDatabase.AssetPathToGUID(assetPath);
                 if (string.IsNullOrEmpty(guid))
                 {
+                    if (failOnMissingAsset)
+                    {
+                        return McpUnitySocketHandler.CreateErrorResponse(
+                            $"Asset '{assetPath}' not found. Pass fail_on_missing_asset=false for best-effort batches.",
+                            "not_found");
+                    }
                     warnings.Add($"Asset '{assetPath}' not found, skipped");
+                    missingAssets.Add(assetPath);
                     skipped++;
                     continue;
                 }
@@ -133,6 +155,7 @@ namespace McpUnity.Tools.Addressables
                 ["entries"] = addedEntries
             };
             if (warnings.Count > 0) result["warnings"] = warnings;
+            if (missingAssets.Count > 0) result["missingAssets"] = missingAssets;
             return result;
         }
     }

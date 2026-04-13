@@ -32,6 +32,31 @@ namespace McpUnity.Tools.Addressables
 
         public override JObject Execute(JObject parameters)
         {
+            // Validate input up-front so bad folder params surface as validation_error
+            // even on the idempotent path (where we wouldn't otherwise touch the folder).
+            string folder = parameters["folder"]?.ToString();
+            if (string.IsNullOrWhiteSpace(folder))
+            {
+                folder = DefaultConfigFolder;
+            }
+            folder = folder.Replace('\\', '/').TrimEnd('/');
+
+            // Guard against path traversal and writes outside the project Assets
+            // folder — agents can pass arbitrary strings, and Directory.CreateDirectory
+            // will happily create folders anywhere on disk otherwise.
+            if (folder != "Assets" && !folder.StartsWith("Assets/"))
+            {
+                return McpUnitySocketHandler.CreateErrorResponse(
+                    $"Parameter 'folder' must start with 'Assets/' (got '{folder}')",
+                    "validation_error");
+            }
+            if (folder.Contains("../") || folder.Contains("/..") || folder == "..")
+            {
+                return McpUnitySocketHandler.CreateErrorResponse(
+                    $"Parameter 'folder' must not contain parent traversal ('..') (got '{folder}')",
+                    "validation_error");
+            }
+
             var existing = AddressableAssetSettingsDefaultObject.GetSettings(false);
             if (existing != null)
             {
@@ -45,13 +70,6 @@ namespace McpUnity.Tools.Addressables
                     ["defaultGroup"] = existing.DefaultGroup?.Name
                 };
             }
-
-            string folder = parameters["folder"]?.ToString();
-            if (string.IsNullOrWhiteSpace(folder))
-            {
-                folder = DefaultConfigFolder;
-            }
-            folder = folder.TrimEnd('/');
 
             if (!AssetDatabase.IsValidFolder(folder))
             {

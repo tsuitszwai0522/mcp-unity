@@ -1,5 +1,7 @@
 using Newtonsoft.Json.Linq;
 using UnityEditor.AddressableAssets;
+using UnityEditor.AddressableAssets.Settings;
+using UnityEditor.PackageManager;
 
 namespace McpUnity.Tools.Addressables
 {
@@ -51,18 +53,22 @@ namespace McpUnity.Tools.Addressables
                 labels.Add(label);
             }
 
+            var packageInfo = PackageInfo.FindForAssembly(typeof(AddressableAssetSettings).Assembly);
+            string version = packageInfo?.version ?? "unknown";
+
             return new JObject
             {
                 ["success"] = true,
                 ["type"] = "text",
-                ["message"] = $"Addressables initialized. Default group: '{settings.DefaultGroup?.Name}', active profile: '{profileName}', groups: {settings.groups.Count}, entries: {AddrHelper.GetTotalEntryCount(settings)}",
+                ["message"] = $"Addressables initialized. Default group: '{settings.DefaultGroup?.Name}', active profile: '{profileName}', groups: {settings.groups.Count}, entries: {AddrHelper.GetTotalEntryCount(settings)}, version: {version}",
                 ["initialized"] = true,
                 ["defaultGroup"] = settings.DefaultGroup?.Name,
                 ["activeProfile"] = profileName,
                 ["profileVariables"] = profileVariables,
                 ["groupCount"] = settings.groups.Count,
                 ["entryCount"] = AddrHelper.GetTotalEntryCount(settings),
-                ["labels"] = labels
+                ["labels"] = labels,
+                ["version"] = version
             };
         }
     }

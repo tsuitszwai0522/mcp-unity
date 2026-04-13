@@ -12,7 +12,7 @@
 對 15 個 `addr_*` tool 建立完整 EditMode 測試覆蓋,達到:
 
 1. **Happy path** — 每個 tool 正常調用返回預期結果
-2. **Error path** — 所有 `error_type` 分類(`not_initialized` / `not_found` / `duplicate` / `in_use` / `validation_error`)都有對應測試
+2. **Error path** — 所有 `error_type` 分類(`not_initialized` / `not_found` / `duplicate` / `in_use` / `validation_error`)都有對應測試。`not_initialized` 經 `AddrHelper.SettingsProvider` 注入點模擬,避免真係拆咗 consumer project 嘅 Addressables 設定。
 3. **Integration** — 一個 ordered scenario 模擬 agent 實際用法,catch 跨 tool 的狀態 bug
 4. **Regression lock** — 對未來 Addressables API 升級提供安全網
 
@@ -411,8 +411,8 @@ Stage 1 驗收:
 
 ## 明確不測(列出以避免將來質疑)
 
-1. **`initialized:false` path** — 需要移除 `AddressableAssetSettingsDefaultObject.Settings`,副作用太大影響用戶 project。改為 code review + 手動冒煙測試覆蓋。
-2. **`addr_init_settings` 實際建立新 folder** — fixture 進入時 project 通常已 init,所以只測 idempotent path。`addr_init_settings` 第一次建 settings 嘅路徑由 README/CHANGELOG 文字覆蓋。
+1. **`addr_get_settings` 嘅 `initialized:false` 回傳 shape** — 屬於 happy path 嘅特殊 branch,而唔係 error。需要移除 `AddressableAssetSettingsDefaultObject.Settings` 先可以真正觸發,副作用太大,改為 code review + 手動冒煙測試覆蓋。(注意:經 `AddrHelper.TryGetSettings` 嘅 `not_initialized` **error** branch 已經喺 `A0_Tools_WhenNotInitialized_*` 用 SettingsProvider 注入覆蓋。)
+2. **`addr_init_settings` 實際建立新 folder** — fixture 進入時 project 通常已 init,所以只測 idempotent path + folder 參數驗證(拒絕 `Assets/` 以外同 path traversal)。`addr_init_settings` 第一次建 settings 嘅路徑由 README/CHANGELOG 文字覆蓋。
 3. **並發 / domain reload** — Addressables 本身單線程,無意義測。
 4. **Build-time 行為** — v2 才有 build tool。
 5. **完整 Schema 深層欄位**(compression、BundleNaming、Provider type 等)— v1 只暴露 3 個欄位(`BundleMode`、`IncludeInBuild`、schema 類型組合),深度測試留 v2 `addr_set_schema` 嗰陣。

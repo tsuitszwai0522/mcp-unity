@@ -17,13 +17,22 @@ namespace McpUnity.Tools.Addressables
     internal static class AddrHelper
     {
         /// <summary>
+        /// Indirection for <see cref="AddressableAssetSettingsDefaultObject.GetSettings"/> so
+        /// tests can simulate the <c>not_initialized</c> branch without actually
+        /// tearing down the consumer project's Addressables settings (which has
+        /// huge blast radius). Production code should never reassign this.
+        /// </summary>
+        internal static System.Func<AddressableAssetSettings> SettingsProvider =
+            () => AddressableAssetSettingsDefaultObject.GetSettings(false);
+
+        /// <summary>
         /// Get the current AddressableAssetSettings. Returns null and fills <paramref name="error"/>
         /// with a <c>not_initialized</c> response if Addressables has not been set up yet.
         /// </summary>
         public static AddressableAssetSettings TryGetSettings(out JObject error)
         {
             error = null;
-            var settings = AddressableAssetSettingsDefaultObject.GetSettings(false);
+            var settings = SettingsProvider();
             if (settings != null) return settings;
 
             error = McpUnitySocketHandler.CreateErrorResponse(
