@@ -46,7 +46,12 @@ namespace McpUnity.Tools.Localization
                 };
             }
 
-            collection.SharedData.RemoveKey(key);
+            // Use the collection-level RemoveEntry API — this atomically removes the
+            // SharedData key AND every per-locale StringTable entry referencing it,
+            // and raises LocalizationEditorSettings.EditorEvents.RaiseTableEntryRemoved.
+            // (Available since Unity Localization 1.x. Doing this manually risks orphan
+            // StringTableEntry rows surviving in per-locale .asset files.)
+            collection.RemoveEntry(key);
 
             EditorUtility.SetDirty(collection.SharedData);
             foreach (var t in collection.StringTables)

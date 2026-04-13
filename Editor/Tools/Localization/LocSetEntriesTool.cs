@@ -54,9 +54,11 @@ namespace McpUnity.Tools.Localization
             var table = LocTableHelper.ResolveTable(collection, locale, out error);
             if (table == null) return error;
 
-            int created = 0;
-            int updated = 0;
-
+            // Pre-flight validate every entry before mutating anything. This keeps the
+            // batch all-or-nothing: a single bad key cannot leave the in-memory SharedData
+            // half-mutated. NOTE: this only covers the failure modes inside LocSetEntryTool.SetEntry
+            // today (key validation). If SetEntry ever grows new failure paths, those
+            // also need pre-flight checks here, otherwise partial mutation can return.
             for (int i = 0; i < entriesArray.Count; i++)
             {
                 var entry = entriesArray[i] as JObject;
@@ -67,15 +69,24 @@ namespace McpUnity.Tools.Localization
                         "validation_error");
                 }
 
-                string key = entry["key"]?.ToString();
-                string value = entry["value"]?.ToString() ?? string.Empty;
-
-                if (!LocTableHelper.ValidateKey(key, out error))
+                string k = entry["key"]?.ToString();
+                if (!LocTableHelper.ValidateKey(k, out var innerError))
                 {
+                    string innerMessage = innerError?["error"]?["message"]?.ToString() ?? "invalid key";
                     return McpUnitySocketHandler.CreateErrorResponse(
-                        $"entries[{i}]: invalid key",
+                        $"entries[{i}]: {innerMessage}",
                         "validation_error");
                 }
+            }
+
+            int created = 0;
+            int updated = 0;
+
+            for (int i = 0; i < entriesArray.Count; i++)
+            {
+                var entry = (JObject)entriesArray[i];
+                string key = entry["key"].ToString();
+                string value = entry["value"]?.ToString() ?? string.Empty;
 
                 string action = LocSetEntryTool.SetEntry(collection, table, key, value);
                 if (action == "created") created++;
