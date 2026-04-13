@@ -6,6 +6,7 @@ namespace McpUnity.Tools.Localization
     /// <summary>
     /// Deletes an entry key from a StringTable collection (removes from SharedData and all locale tables).
     /// </summary>
+    [McpUnityFirstParty]
     public class LocDeleteEntryTool : McpToolBase
     {
         public LocDeleteEntryTool()

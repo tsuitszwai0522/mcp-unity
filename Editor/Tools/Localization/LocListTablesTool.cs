@@ -6,6 +6,7 @@ namespace McpUnity.Tools.Localization
     /// <summary>
     /// Lists all StringTable collections in the project with their locales and entry counts.
     /// </summary>
+    [McpUnityFirstParty]
     public class LocListTablesTool : McpToolBase
     {
         public LocListTablesTool()

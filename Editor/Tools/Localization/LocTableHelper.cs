@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using McpUnity.Unity;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
@@ -7,6 +8,8 @@ using UnityEditor.Localization;
 using UnityEngine.Localization;
 using UnityEngine.Localization.Settings;
 using UnityEngine.Localization.Tables;
+
+[assembly: InternalsVisibleTo("McpUnity.Localization.Tests")]
 
 namespace McpUnity.Tools.Localization
 {
@@ -122,6 +125,59 @@ namespace McpUnity.Tools.Localization
                 .Where(t => t != null)
                 .Select(t => t.LocaleIdentifier.Code)
                 .ToList();
+        }
+
+        /// <summary>
+        /// Find a registered project Locale by its code (e.g. "zh-TW"). Returns null if not registered.
+        /// Use this instead of struct equality on LocaleIdentifier to avoid edge cases like zh-Hant-TW.
+        /// </summary>
+        public static Locale FindLocale(string code)
+        {
+            if (string.IsNullOrWhiteSpace(code)) return null;
+            return LocalizationEditorSettings.GetLocales()
+                .FirstOrDefault(l => l.Identifier.Code == code);
+        }
+
+        /// <summary>
+        /// Reject paths that escape the Unity Assets folder. Empty/null is treated as
+        /// "use default" by the caller and is allowed.
+        /// </summary>
+        public static bool ValidateAssetPath(string dir, out JObject error)
+        {
+            error = null;
+            if (string.IsNullOrWhiteSpace(dir)) return true;
+
+            if (dir != "Assets" && !dir.StartsWith("Assets/"))
+            {
+                error = McpUnitySocketHandler.CreateErrorResponse(
+                    $"Directory '{dir}' must be inside the Assets folder (start with 'Assets/')",
+                    "validation_error");
+                return false;
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// Ensure an asset folder exists, creating intermediate folders via AssetDatabase
+        /// (which writes proper .meta files atomically — unlike Directory.CreateDirectory).
+        /// Caller must have already passed the path through ValidateAssetPath.
+        /// </summary>
+        public static void EnsureFolderExists(string folderPath)
+        {
+            if (string.IsNullOrWhiteSpace(folderPath)) return;
+            if (AssetDatabase.IsValidFolder(folderPath)) return;
+
+            string[] parts = folderPath.Split('/');
+            string currentPath = parts[0]; // "Assets"
+            for (int i = 1; i < parts.Length; i++)
+            {
+                string parentPath = currentPath;
+                currentPath = currentPath + "/" + parts[i];
+                if (!AssetDatabase.IsValidFolder(currentPath))
+                {
+                    AssetDatabase.CreateFolder(parentPath, parts[i]);
+                }
+            }
         }
     }
 }

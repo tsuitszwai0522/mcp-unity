@@ -6,6 +6,7 @@ namespace McpUnity.Tools.Localization
     /// <summary>
     /// Reads entries from a StringTable, optionally filtered by key prefix.
     /// </summary>
+    [McpUnityFirstParty]
     public class LocGetEntriesTool : McpToolBase
     {
         public LocGetEntriesTool()

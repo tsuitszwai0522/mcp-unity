@@ -6,6 +6,7 @@ namespace McpUnity.Tools.Localization
     /// <summary>
     /// Batch sets multiple StringTable entries in a single transaction.
     /// </summary>
+    [McpUnityFirstParty]
     public class LocSetEntriesTool : McpToolBase
     {
         public LocSetEntriesTool()

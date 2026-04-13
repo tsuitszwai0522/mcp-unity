@@ -6,12 +6,13 @@ namespace McpUnity.Tools.Localization
     /// <summary>
     /// Adds or updates a single StringTable entry. Creates the key in SharedData if missing.
     /// </summary>
+    [McpUnityFirstParty]
     public class LocSetEntryTool : McpToolBase
     {
         public LocSetEntryTool()
         {
             Name = "loc_set_entry";
-            Description = "Sets a Unity Localization StringTable entry value. Creates the key if it does not exist. Supports TMP RichText.";
+            Description = "Sets a Unity Localization StringTable entry value. Creates the key if it does not exist. Supports TMP RichText. For batches of >5 entries, prefer loc_set_entries (single SaveAssets at the end).";
         }
 
         public override JObject ParameterSchema => JObject.Parse(@"{

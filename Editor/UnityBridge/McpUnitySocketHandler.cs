@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using System.Text;
 using System.Threading.Tasks;
 using UnityEngine;
@@ -60,12 +61,15 @@ namespace McpUnity.Unity
 
             foreach (var kvp in _server.Tools)
             {
-                // Only return external tools — built-in tools are hardcoded on Node.js side.
-                // Sub-assemblies prefixed "McpUnity." (e.g. McpUnity.Localization) are first-party
-                // extensions with hand-written TS wrappers, so they are also excluded.
-                var asmName = kvp.Value.GetType().Assembly.GetName().Name;
-                if (kvp.Value.GetType().Assembly == mcpAssembly || asmName.StartsWith("McpUnity."))
-                    continue;
+                // Only return external tools. Built-in tools live in the main McpUnity.Editor
+                // assembly. First-party sub-assemblies (e.g. McpUnity.Localization) ship hand-written
+                // TS wrappers, so they're excluded from dynamic registration via either:
+                //   1. [McpUnityFirstParty] attribute (preferred, explicit), OR
+                //   2. assembly name prefix "McpUnity." (fallback for unmarked tools)
+                var toolType = kvp.Value.GetType();
+                if (toolType.Assembly == mcpAssembly) continue;
+                if (toolType.GetCustomAttribute<McpUnityFirstPartyAttribute>() != null) continue;
+                if (toolType.Assembly.GetName().Name.StartsWith("McpUnity.")) continue;
 
                 tools.Add(new JObject
                 {

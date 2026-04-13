@@ -1,5 +1,4 @@
-using System.IO;
-using System.Linq;
+using System.Globalization;
 using McpUnity.Unity;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
@@ -12,6 +11,7 @@ namespace McpUnity.Tools.Localization
     /// Registers a Locale with the project's Localization settings. Creates the Locale asset
     /// if it does not already exist. Intended for fresh-project bootstrap — explicit, not automatic.
     /// </summary>
+    [McpUnityFirstParty]
     public class LocAddLocaleTool : McpToolBase
     {
         private const string DefaultDirectory = "Assets/Localization/Locales";
@@ -43,11 +43,8 @@ namespace McpUnity.Tools.Localization
                     "validation_error");
             }
 
-            var identifier = new LocaleIdentifier(code);
-
-            // Already registered?
-            var existing = LocalizationEditorSettings.GetLocales()
-                .FirstOrDefault(l => l.Identifier == identifier);
+            // Already registered? Match by Identifier.Code (consistent with FindLocale).
+            var existing = LocTableHelper.FindLocale(code);
             if (existing != null)
             {
                 return new JObject
@@ -61,6 +58,22 @@ namespace McpUnity.Tools.Localization
                 };
             }
 
+            // Soft culture pre-check: warn if .NET doesn't recognise the code, but still
+            // create the Locale. Unity Localization accepts identifiers that .NET does not
+            // (e.g. "zh-Hant" on some runtimes), so a hard reject would block legal cases.
+            // We try GetCultureInfo first and the IETF-tag fallback second; both failing
+            // is reported as a warning — never an error.
+            JArray warnings = null;
+            if (!IsRecognisedCulture(code))
+            {
+                warnings = new JArray
+                {
+                    $"Locale code '{code}' is not recognised by .NET CultureInfo on this runtime. Unity will still create it, but verify the code is correct (e.g. 'zh-TW', 'en', 'ja')."
+                };
+            }
+
+            var identifier = new LocaleIdentifier(code);
+
             // Create the Locale via the runtime factory (handles m_Identifier + CultureInfo correctly).
             var locale = Locale.CreateLocale(identifier);
             if (locale == null)
@@ -71,18 +84,15 @@ namespace McpUnity.Tools.Localization
             }
 
             string dir = string.IsNullOrWhiteSpace(directory) ? DefaultDirectory : directory.TrimEnd('/');
-            if (!AssetDatabase.IsValidFolder(dir))
-            {
-                Directory.CreateDirectory(dir);
-                AssetDatabase.Refresh();
-            }
+            if (!LocTableHelper.ValidateAssetPath(dir, out var pathError)) return pathError;
+            LocTableHelper.EnsureFolderExists(dir);
 
             string assetPath = $"{dir}/Locale_{code}.asset";
             AssetDatabase.CreateAsset(locale, assetPath);
             LocalizationEditorSettings.AddLocale(locale, createUndo: false);
             AssetDatabase.SaveAssets();
 
-            return new JObject
+            var result = new JObject
             {
                 ["success"] = true,
                 ["type"] = "text",
@@ -91,6 +101,27 @@ namespace McpUnity.Tools.Localization
                 ["code"] = code,
                 ["path"] = assetPath
             };
+            if (warnings != null) result["warnings"] = warnings;
+            return result;
+        }
+
+        private static bool IsRecognisedCulture(string code)
+        {
+            try
+            {
+                CultureInfo.GetCultureInfo(code);
+                return true;
+            }
+            catch (CultureNotFoundException) { }
+
+            try
+            {
+                CultureInfo.GetCultureInfoByIetfLanguageTag(code);
+                return true;
+            }
+            catch (System.ArgumentException) { }
+
+            return false;
         }
     }
 }

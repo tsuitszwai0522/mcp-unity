@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using McpUnity.Unity;
 using Newtonsoft.Json.Linq;
@@ -12,6 +11,7 @@ namespace McpUnity.Tools.Localization
     /// <summary>
     /// Creates a new StringTable Collection with the specified locales.
     /// </summary>
+    [McpUnityFirstParty]
     public class LocCreateTableTool : McpToolBase
     {
         private const string DefaultDirectory = "Assets/Localization/Tables";
@@ -64,13 +64,12 @@ namespace McpUnity.Tools.Localization
                 ? localesArray.Select(t => t.ToString()).ToList()
                 : new List<string> { LocTableHelper.DefaultLocale };
 
-            var availableLocales = LocalizationEditorSettings.GetLocales();
             var resolvedLocales = new List<Locale>();
             var warnings = new JArray();
 
             foreach (var code in requestedCodes)
             {
-                var locale = availableLocales.FirstOrDefault(l => l.Identifier.Code == code);
+                var locale = LocTableHelper.FindLocale(code);
                 if (locale != null)
                 {
                     resolvedLocales.Add(locale);
@@ -90,11 +89,8 @@ namespace McpUnity.Tools.Localization
 
             // Ensure directory
             string dir = string.IsNullOrWhiteSpace(directory) ? DefaultDirectory : directory.TrimEnd('/');
-            if (!AssetDatabase.IsValidFolder(dir))
-            {
-                Directory.CreateDirectory(dir);
-                AssetDatabase.Refresh();
-            }
+            if (!LocTableHelper.ValidateAssetPath(dir, out var pathError)) return pathError;
+            LocTableHelper.EnsureFolderExists(dir);
 
             var collection = LocalizationEditorSettings.CreateStringTableCollection(tableName, dir, resolvedLocales);
             if (collection == null)

@@ -102,7 +102,7 @@ export function registerLocGetEntriesTool(server: McpServer, mcpUnity: McpUnity,
 
 export function registerLocSetEntryTool(server: McpServer, mcpUnity: McpUnity, logger: Logger) {
   const name = 'loc_set_entry';
-  const description = 'Sets a Unity Localization StringTable entry value. Creates the key if it does not exist. Supports TMP RichText (e.g. <color=#88CCFF>...</color>).';
+  const description = 'Sets a Unity Localization StringTable entry value. Creates the key if it does not exist. Supports TMP RichText (e.g. <color=#88CCFF>...</color>). For batches of >5 entries, prefer loc_set_entries (single SaveAssets at the end).';
   const schema = z.object({
     table_name: z.string().describe('StringTable collection name'),
     locale: z.string().optional().describe('Locale code (default "zh-TW")'),
