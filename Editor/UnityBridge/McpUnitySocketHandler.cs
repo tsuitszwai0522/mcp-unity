@@ -60,8 +60,11 @@ namespace McpUnity.Unity
 
             foreach (var kvp in _server.Tools)
             {
-                // Only return external tools — built-in tools are hardcoded on Node.js side
-                if (kvp.Value.GetType().Assembly == mcpAssembly)
+                // Only return external tools — built-in tools are hardcoded on Node.js side.
+                // Sub-assemblies prefixed "McpUnity." (e.g. McpUnity.Localization) are first-party
+                // extensions with hand-written TS wrappers, so they are also excluded.
+                var asmName = kvp.Value.GetType().Assembly.GetName().Name;
+                if (kvp.Value.GetType().Assembly == mcpAssembly || asmName.StartsWith("McpUnity."))
                     continue;
 
                 tools.Add(new JObject

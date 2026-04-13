@@ -221,6 +221,31 @@ The following tools are available for manipulating and querying Unity scenes and
 - `batch_execute`: Executes multiple tool operations in a single batch request, reducing round-trips and enabling atomic operations with optional rollback on failure
   > **Example prompt:** "Create 10 empty GameObjects named Enemy_1 through Enemy_10 in a single batch operation"
 
+#### Unity Localization Tools
+
+> Requires the `com.unity.localization` package. The entire Localization assembly is skipped from compilation if the package is not installed, so there is zero impact on projects that do not use Unity Localization.
+
+- `loc_add_locale`: Registers a `Locale` (by code, e.g. `zh-TW`) with Unity Localization, creating the Locale asset if missing. Use this to bootstrap a fresh project before `loc_create_table`
+  > **Example prompt:** "Add zh-TW and en locales to the project"
+
+- `loc_list_tables`: Lists all StringTable collections with their locales and entry counts
+  > **Example prompt:** "Show me all the localization tables in the project"
+
+- `loc_create_table`: Creates a new StringTable collection. Locales must already be configured — missing locales are warned and skipped (never auto-created)
+  > **Example prompt:** "Create a new StringTable called UI_Common with zh-TW and en locales"
+
+- `loc_get_entries`: Reads key/value entries from a StringTable, with optional key-prefix filter
+  > **Example prompt:** "Show me all `cb_ext_` entries in the CB_Tooltip table"
+
+- `loc_set_entry`: Sets a single StringTable entry value. Creates the key if it does not exist. Supports TMP RichText markup in values
+  > **Example prompt:** "Set `cb_buff_power_up` in CB_Tooltip to `<color=#88CCFF>力量上升</color>`"
+
+- `loc_set_entries`: Batch sets multiple StringTable entries in a single operation, saving once at the end
+  > **Example prompt:** "Bulk-update all these Chinese tooltip translations in CB_Tooltip"
+
+- `loc_delete_entry`: Deletes an entry key from a StringTable collection (affects all locales via SharedData)
+  > **Example prompt:** "Remove the old `cb_legacy_key` entry from CB_Tooltip"
+
 - `get_interactable_elements`: Scans the scene for all interactable UI elements (Button, Toggle, InputField, Slider, Dropdown, ScrollRect, etc.) with optional filtering and scope control. Requires Play Mode
   > **Example prompt:** "Show me all interactable UI elements in the current scene"
 

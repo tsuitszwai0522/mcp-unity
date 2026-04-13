@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.9.0] - 2026-04-13
+
+### Added
+
+- **Unity Localization tool suite** — 7 new tools for operating on Unity Localization StringTable collections without leaving the MCP client:
+  - `loc_list_tables` — list all StringTable collections with locales and entry counts
+  - `loc_get_entries` — read key/value entries with optional key-prefix filter
+  - `loc_set_entry` — add or update a single entry (supports TMP RichText)
+  - `loc_set_entries` — batch add/update multiple entries in one save
+  - `loc_delete_entry` — remove a key from SharedData (affects all locales)
+  - `loc_create_table` — create a new StringTable collection; warns and skips locales that are not yet configured in Localization Settings (never auto-creates locales)
+  - `loc_add_locale` — explicit project bootstrap helper that creates a `Locale` asset and registers it via `LocalizationEditorSettings.AddLocale`
+- **Optional-package sub-assembly pattern** — Localization tools live in a dedicated `McpUnity.Localization` assembly (`Editor/Tools/Localization/`) gated by `versionDefines` + `defineConstraints: ["MCP_UNITY_LOCALIZATION"]`, so the entire assembly is skipped from compilation when `com.unity.localization` is not installed. Zero impact on projects that do not use Unity Localization
+- **EditMode NUnit test suite** — `Editor/Tests/Localization/LocTests.cs` with `[OneTimeSetUp]` locale bootstrap, ordered end-to-end scenario, and independent error-path tests, gated by `UNITY_INCLUDE_TESTS + MCP_UNITY_LOCALIZATION`
+
+### Changed
+
+- **`HandleListTools` first-party sub-assembly exclusion** — `McpUnitySocketHandler.HandleListTools` now also excludes tools from any assembly whose name starts with `McpUnity.` (in addition to the main `McpUnity.Editor` assembly). This reserves that namespace for first-party extensions that ship hand-written TypeScript wrappers, preventing the dynamic-registration path from double-registering them
+
 ## [1.8.2] - 2026-04-01
 
 ### Fixed

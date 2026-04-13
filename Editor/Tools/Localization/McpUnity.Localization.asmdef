@@ -1,0 +1,28 @@
+{
+    "name": "McpUnity.Localization",
+    "rootNamespace": "McpUnity.Tools.Localization",
+    "references": [
+        "McpUnity.Editor",
+        "Unity.Localization",
+        "Unity.Localization.Editor"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [
+        "MCP_UNITY_LOCALIZATION"
+    ],
+    "versionDefines": [
+        {
+            "name": "com.unity.localization",
+            "expression": "1.0.0",
+            "define": "MCP_UNITY_LOCALIZATION"
+        }
+    ],
+    "noEngineReferences": false
+}

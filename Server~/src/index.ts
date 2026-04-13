@@ -37,6 +37,15 @@ import { registerGetSelectionTool } from './tools/getSelectionTool.js';
 import { registerReadSerializedFieldsTool, registerWriteSerializedFieldsTool } from './tools/serializedFieldTools.js';
 import { registerUIAutomationTools } from './tools/uiAutomationTools.js';
 import { registerBatchExecuteTool } from './tools/batchExecuteTool.js';
+import {
+  registerLocListTablesTool,
+  registerLocGetEntriesTool,
+  registerLocSetEntryTool,
+  registerLocSetEntriesTool,
+  registerLocDeleteEntryTool,
+  registerLocCreateTableTool,
+  registerLocAddLocaleTool,
+} from './tools/localizationTools.js';
 import { registerDynamicTools } from './tools/dynamicTools.js';
 import { registerGetMenuItemsResource } from './resources/getMenuItemResource.js';
 import { registerGetConsoleLogsResource } from './resources/getConsoleLogsResource.js';
@@ -135,6 +144,17 @@ registerWriteSerializedFieldsTool(server, mcpUnity, toolLogger);
 
 // Register UI Automation Tools
 registerUIAutomationTools(server, mcpUnity, toolLogger);
+
+// Register Localization Tools (Unity Localization package — Unity-side only compiles
+// when com.unity.localization is installed; Node side always registers, calls fall
+// through to "unknown method" if Localization is not present in Unity)
+registerLocAddLocaleTool(server, mcpUnity, toolLogger);
+registerLocListTablesTool(server, mcpUnity, toolLogger);
+registerLocGetEntriesTool(server, mcpUnity, toolLogger);
+registerLocSetEntryTool(server, mcpUnity, toolLogger);
+registerLocSetEntriesTool(server, mcpUnity, toolLogger);
+registerLocDeleteEntryTool(server, mcpUnity, toolLogger);
+registerLocCreateTableTool(server, mcpUnity, toolLogger);
 
 // Register Batch Execute Tool (high-priority for performance)
 registerBatchExecuteTool(server, mcpUnity, toolLogger);
