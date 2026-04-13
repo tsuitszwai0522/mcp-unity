@@ -117,6 +117,68 @@ public class YourTool : McpToolBase {
 - If Unity is not running at startup, dynamic tools are skipped (server doesn't crash; built-in tools remain available)
 - No changes to mcp-unity package needed
 
+## Adding a First-Party Optional Package Tool
+
+When integrating with an *optional* Unity package (e.g. `com.unity.localization`, `com.unity.addressables`, `com.unity.cinemachine`), use a **sub-assembly with version-gated compilation** rather than conditional code inside the main `McpUnity.Editor.asmdef`. The main assembly must remain compilable for users who don't have the optional package installed.
+
+The pattern (reference: `Editor/Tools/Localization/`):
+
+### 1. Sub-assembly definition
+
+`Editor/Tools/{Feature}/McpUnity.{Feature}.asmdef`:
+
+```json
+{
+  "name": "McpUnity.{Feature}",
+  "rootNamespace": "McpUnity.Tools.{Feature}",
+  "references": [
+    "McpUnity.Editor",
+    "{Package.Runtime.Assembly}",
+    "{Package.Editor.Assembly}"
+  ],
+  "includePlatforms": ["Editor"],
+  "defineConstraints": ["MCP_UNITY_{FEATURE}"],
+  "versionDefines": [
+    {
+      "name": "{com.unity.package}",
+      "expression": "1.0.0",
+      "define": "MCP_UNITY_{FEATURE}"
+    }
+  ]
+}
+```
+
+The double gate (`defineConstraints` + `versionDefines`) ensures the assembly only compiles when the optional package is installed. Without the package, the assembly is silently dropped — zero impact on the main package.
+
+### 2. Tools auto-register via DiscoverExternalTools
+
+Sub-assembly tools inherit `McpToolBase` and are picked up by reflection in `McpUnityServer.DiscoverExternalTools()`. **Do NOT add them to `RegisterTools()`** — let the discovery path handle them so the main assembly stays unaware of optional packages.
+
+### 3. TypeScript wrappers are hand-written, not dynamic
+
+First-party sub-assembly tools ship hand-written TS wrappers in `Server~/src/tools/`, registered explicitly in `Server~/src/index.ts`. They are **NOT** exposed via the dynamic `list_tools` registration path used by external plugin tools.
+
+To prevent first-party sub-assemblies from being double-registered, `McpUnitySocketHandler.HandleListTools` excludes assemblies whose name starts with `McpUnity.*`. **`McpUnity.*` is therefore a reserved namespace prefix for first-party sub-assemblies.**
+
+### 4. Test assembly mirrors the same gate
+
+`Editor/Tests/{Feature}/McpUnity.{Feature}.Tests.asmdef` uses identical `defineConstraints` + `versionDefines`, so tests only compile when the optional package is present. Add `[assembly: InternalsVisibleTo("McpUnity.{Feature}.Tests")]` in the production asmdef if tests need to call `internal` helpers.
+
+### 5. Consumer projects must opt into running the package's tests
+
+Unity Test Framework does NOT discover tests inside packages by default. Consumer projects need to add the package to `testables` in their `Packages/manifest.json`:
+
+```json
+{
+  "dependencies": { ... },
+  "testables": [
+    "com.gamelovers.mcp-unity"
+  ]
+}
+```
+
+Without this, both Test Runner UI and `mcp__mcp-unity__run_tests` will report 0 tests — even though the test assembly compiles cleanly.
+
 ## Adding a New Resource
 
 Same pattern as tools:
