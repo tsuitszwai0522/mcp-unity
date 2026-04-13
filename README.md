@@ -225,14 +225,20 @@ The following tools are available for manipulating and querying Unity scenes and
 
 > Requires the `com.unity.localization` package. The entire Localization assembly is skipped from compilation if the package is not installed, so there is zero impact on projects that do not use Unity Localization.
 
-- `loc_add_locale`: Registers a `Locale` (by code, e.g. `zh-TW`) with Unity Localization, creating the Locale asset if missing. Use this to bootstrap a fresh project before `loc_create_table`
+- `loc_add_locale`: Registers a `Locale` (by code, e.g. `zh-TW`) with Unity Localization, creating the Locale asset if missing. Use this to bootstrap a fresh project before `loc_create_table`. Soft-warns on culture codes .NET does not recognise (e.g. `zh-Hant`) but still creates the Locale
   > **Example prompt:** "Add zh-TW and en locales to the project"
+
+- `loc_remove_locale`: Symmetric counterpart to `loc_add_locale`. Unregisters a Locale and (by default) deletes its `.asset` file. Pass `delete_asset: false` to keep the file on disk while detaching the registration
+  > **Example prompt:** "Remove the ko locale from the project"
 
 - `loc_list_tables`: Lists all StringTable collections with their locales and entry counts
   > **Example prompt:** "Show me all the localization tables in the project"
 
 - `loc_create_table`: Creates a new StringTable collection. Locales must already be configured — missing locales are warned and skipped (never auto-created)
   > **Example prompt:** "Create a new StringTable called UI_Common with zh-TW and en locales"
+
+- `loc_delete_table`: Symmetric counterpart to `loc_create_table`. Deletes a StringTable collection along with its SharedTableData and every per-locale StringTable in one call
+  > **Example prompt:** "Delete the obsolete UI_Legacy localization table"
 
 - `loc_get_entries`: Reads key/value entries from a StringTable, with optional key-prefix filter
   > **Example prompt:** "Show me all `cb_ext_` entries in the CB_Tooltip table"

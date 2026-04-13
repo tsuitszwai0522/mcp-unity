@@ -1,8 +1,11 @@
 # Feature: Localization MCP Tools
 
-> **狀態**: 需求整理
-> **前置**: Unity Localization 已安裝、CB_Tooltip StringTable 已建立
-> **建立日期**: 2026-04-10
+> **狀態**: ✅ 已實作
+> - **v1.9.0** (2026-04-13): 7 個工具 — 本文件 1~6 號 spec 工具 + `loc_add_locale`（spec 之外，bootstrap helper）
+> - **v1.11.0** (2026-04-13): 補完 symmetric counterparts — `loc_delete_table` + `loc_remove_locale`；整體 8 個工具
+> - **前置**: Unity Localization 已安裝、CB_Tooltip StringTable 已建立
+> - **建立日期**: 2026-04-10
+> - **參考**: `doc/codeReview/Request_20260413_LocalizationTools.md` + `Response_20260413_LocalizationTools.md`
 
 ---
 
@@ -137,6 +140,58 @@
   "created": true,
   "name": "UI_Common",
   "path": "Assets/ProjectT/Localization/Tables/UI_Common Shared Data.asset"
+}
+```
+
+---
+
+### 7. `loc_add_locale` — 註冊 Locale（v1.9.0 spec 之外補完）
+
+**用途**: Bootstrap helper。`loc_create_table` 故意不會自動建 Locale，所以 fresh project 在第一次跑前需要先 register 至少一個 Locale。
+
+**參數**:
+| 參數 | 類型 | 必填 | 說明 |
+|------|------|------|------|
+| `code` | string | ✅ | Locale identifier code（如 `zh-TW`、`en`、`ja`） |
+| `directory` | string | ❌ | Locale asset 路徑（預設 `Assets/Localization/Locales`） |
+
+**回傳**: `{ action: "created" \| "already_exists", code, path, warnings? }`
+
+**備註**: 若 `code` 不在 .NET CultureInfo / IETF tag 列表（例如 `zh-Hant`），會在回傳裡附 `warnings` 但仍會建立 Locale —— Unity Localization 接受比 .NET 更寬的 identifier。
+
+---
+
+### 8. `loc_remove_locale` — 反註冊 Locale（v1.11.0 補完）
+
+**用途**: `loc_add_locale` 的 symmetric counterpart。
+
+**參數**:
+| 參數 | 類型 | 必填 | 說明 |
+|------|------|------|------|
+| `code` | string | ✅ | 要移除的 Locale code |
+| `delete_asset` | boolean | ❌ | 是否同時刪除 `.asset` 檔（預設 `true`） |
+
+**回傳**: `{ action: "removed" \| "not_registered", code, path }`
+
+---
+
+### 9. `loc_delete_table` — 刪除 StringTable Collection（v1.11.0 補完）
+
+**用途**: `loc_create_table` 的 symmetric counterpart。原子地刪除 Collection、SharedTableData、與每個 per-locale StringTable。透過 `AssetDatabase.DeleteAsset` 走 `LocalizationAssetModificationProcessor` hook，是 Unity Localization 1.x 唯一支援的 collection 刪除路徑（沒有 public `RemoveCollection` API）。
+
+**參數**:
+| 參數 | 類型 | 必填 | 說明 |
+|------|------|------|------|
+| `table_name` | string | ✅ | 要刪除的 Collection 名稱 |
+
+**回傳**:
+```json
+{
+  "deleted": true,
+  "name": "UI_Common",
+  "path": "Assets/Localization/Tables/UI_Common Shared Data.asset",
+  "entryCount": 12,
+  "locales": ["zh-TW", "en"]
 }
 ```
 
