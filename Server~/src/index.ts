@@ -44,10 +44,27 @@ import {
   registerLocSetEntriesTool,
   registerLocDeleteEntryTool,
   registerLocCreateTableTool,
+  registerLocDeleteTableTool,
   registerLocAddLocaleTool,
   registerLocRemoveLocaleTool,
-  registerLocDeleteTableTool,
 } from './tools/localizationTools.js';
+import {
+  registerAddrGetSettingsTool,
+  registerAddrInitSettingsTool,
+  registerAddrListGroupsTool,
+  registerAddrCreateGroupTool,
+  registerAddrRemoveGroupTool,
+  registerAddrSetDefaultGroupTool,
+  registerAddrListEntriesTool,
+  registerAddrAddEntriesTool,
+  registerAddrRemoveEntriesTool,
+  registerAddrMoveEntriesTool,
+  registerAddrSetEntryTool,
+  registerAddrListLabelsTool,
+  registerAddrCreateLabelTool,
+  registerAddrRemoveLabelTool,
+  registerAddrFindAssetTool,
+} from './tools/addressablesTools.js';
 import { registerDynamicTools } from './tools/dynamicTools.js';
 import { registerGetMenuItemsResource } from './resources/getMenuItemResource.js';
 import { registerGetConsoleLogsResource } from './resources/getConsoleLogsResource.js';
@@ -159,6 +176,25 @@ registerLocSetEntriesTool(server, mcpUnity, toolLogger);
 registerLocDeleteEntryTool(server, mcpUnity, toolLogger);
 registerLocCreateTableTool(server, mcpUnity, toolLogger);
 registerLocDeleteTableTool(server, mcpUnity, toolLogger);
+
+// Register Addressables Tools (Unity Addressables package — Unity-side only compiles
+// when com.unity.addressables is installed; Node side always registers, calls fall
+// through to "unknown method" if Addressables is not present in Unity)
+registerAddrGetSettingsTool(server, mcpUnity, toolLogger);
+registerAddrInitSettingsTool(server, mcpUnity, toolLogger);
+registerAddrListGroupsTool(server, mcpUnity, toolLogger);
+registerAddrCreateGroupTool(server, mcpUnity, toolLogger);
+registerAddrRemoveGroupTool(server, mcpUnity, toolLogger);
+registerAddrSetDefaultGroupTool(server, mcpUnity, toolLogger);
+registerAddrListEntriesTool(server, mcpUnity, toolLogger);
+registerAddrAddEntriesTool(server, mcpUnity, toolLogger);
+registerAddrRemoveEntriesTool(server, mcpUnity, toolLogger);
+registerAddrMoveEntriesTool(server, mcpUnity, toolLogger);
+registerAddrSetEntryTool(server, mcpUnity, toolLogger);
+registerAddrListLabelsTool(server, mcpUnity, toolLogger);
+registerAddrCreateLabelTool(server, mcpUnity, toolLogger);
+registerAddrRemoveLabelTool(server, mcpUnity, toolLogger);
+registerAddrFindAssetTool(server, mcpUnity, toolLogger);
 
 // Register Batch Execute Tool (high-priority for performance)
 registerBatchExecuteTool(server, mcpUnity, toolLogger);

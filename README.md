@@ -252,6 +252,55 @@ The following tools are available for manipulating and querying Unity scenes and
 - `loc_delete_entry`: Deletes an entry key from a StringTable collection (affects all locales via SharedData)
   > **Example prompt:** "Remove the old `cb_legacy_key` entry from CB_Tooltip"
 
+#### Unity Addressables Tools
+
+> Requires the `com.unity.addressables` package (≥ 1.19.0). The entire Addressables assembly is skipped from compilation if the package is not installed, so there is zero impact on projects that do not use Unity Addressables.
+
+- `addr_get_settings`: Queries Addressables settings state — returns `initialized` flag, default group, active profile, profile variables, label list, group/entry counts. Use this first; tools branch on whether Addressables is initialised
+  > **Example prompt:** "Is Addressables set up in this project? What's the default group?"
+
+- `addr_init_settings`: Bootstraps `AddressableAssetSettings` for projects that have never opened the Addressables Groups window. Idempotent — safe to call when already initialised
+  > **Example prompt:** "Initialize Addressables in this project"
+
+- `addr_list_groups`: Lists all Addressables groups with their entry counts and attached schemas, marking which one is the default
+  > **Example prompt:** "Show me all the Addressables groups"
+
+- `addr_create_group`: Creates a new group with default Bundled + ContentUpdate schemas. Configurable `packed_mode` (`PackTogether` / `PackSeparately` / `PackTogetherByLabel`), `include_in_build`, and `set_as_default`
+  > **Example prompt:** "Create a 'RemoteContent' group with PackSeparately mode"
+
+- `addr_remove_group`: Removes a group. Refuses to delete the default group and refuses non-empty groups unless `force=true`
+  > **Example prompt:** "Delete the obsolete LegacyAssets group, force if necessary"
+
+- `addr_set_default_group`: Switches the default group; new entries fall into whichever group is default when no group is specified
+  > **Example prompt:** "Make RemoteContent the default Addressables group"
+
+- `addr_list_entries`: Lists entries with optional filters: `group`, `label_filter`, `address_pattern` (glob, supports `*`), `asset_path_prefix`. `limit` guard (default 200) with `truncated` flag
+  > **Example prompt:** "Show me all entries with label 'preload' under address pattern 'ui/*'"
+
+- `addr_add_entries`: Batch-adds assets to a group with per-asset optional `address` and `labels`. Auto-creates missing labels with warnings; one save at the end of the batch
+  > **Example prompt:** "Add all prefabs under Assets/UI to the UI group with the 'preload' label"
+
+- `addr_remove_entries`: Batch-removes entries identified by `guid` or `asset_path`
+  > **Example prompt:** "Remove the deprecated UI prefabs from Addressables"
+
+- `addr_move_entries`: Batch-moves entries between groups
+  > **Example prompt:** "Move all UI prefabs from DefaultGroup to UIGroup"
+
+- `addr_set_entry`: Partial update on a single entry — change `new_address`, and/or `add_labels` / `remove_labels`. Identify the entry by `guid` or `asset_path`. Auto-creates missing labels with warnings
+  > **Example prompt:** "Change MainMenu.prefab's address to 'ui/main_menu' and add the 'preload' label"
+
+- `addr_list_labels`: Lists all registered Addressables labels
+  > **Example prompt:** "What Addressables labels are defined in this project?"
+
+- `addr_create_label`: Registers a new label (idempotent). Labels may not contain spaces or square brackets
+  > **Example prompt:** "Add a 'remote_dlc' label"
+
+- `addr_remove_label`: Removes a label. Refuses if any entry still references it unless `force=true`, which strips the label from affected entries before removal
+  > **Example prompt:** "Remove the 'old_label' from the project, force if needed"
+
+- `addr_find_asset`: Looks up an asset by path and returns its full Addressables entry info (group, address, labels). Returns `found:false` if the asset exists but is not currently addressable
+  > **Example prompt:** "Is Assets/Prefabs/MainMenu.prefab addressable? What's its address and group?"
+
 - `get_interactable_elements`: Scans the scene for all interactable UI elements (Button, Toggle, InputField, Slider, Dropdown, ScrollRect, etc.) with optional filtering and scope control. Requires Play Mode
   > **Example prompt:** "Show me all interactable UI elements in the current scene"
 
