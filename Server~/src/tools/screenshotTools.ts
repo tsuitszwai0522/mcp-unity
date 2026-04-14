@@ -8,11 +8,15 @@ import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 // --- screenshot_game_view ---
 
 const gameViewToolName = 'screenshot_game_view';
-const gameViewToolDescription = 'Captures a screenshot from the Game View, reflecting what the player sees';
+const gameViewToolDescription = 'Captures a screenshot from the Game View, reflecting what the player sees. Set force_focus=true to force-focus the Game View tab before capture (prevents capturing the Scene View when it\'s the active tab).';
 
 const gameViewParamsSchema = z.object({
   width: z.number().int().optional().default(960).describe('Screenshot width in pixels'),
-  height: z.number().int().optional().default(540).describe('Screenshot height in pixels')
+  height: z.number().int().optional().default(540).describe('Screenshot height in pixels'),
+  force_focus: z
+    .boolean()
+    .optional()
+    .describe('Force-focus the Game View tab before capture (adds a 1-frame delay). Use when Scene View is the active tab and you need the actual Game View render. Default: false.')
 });
 
 // --- screenshot_scene_view ---

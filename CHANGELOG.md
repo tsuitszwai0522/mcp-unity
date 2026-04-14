@@ -4,6 +4,40 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.12.0] - 2026-04-14
+
+Usability follow-ups driven by external project feedback. Three small, independent changes that close real friction points when agents inspect scenes and localization content.
+
+### Added
+
+- **`get_gameobjects_by_name` tool** — finds ALL GameObjects whose name matches a glob pattern (`*`, `?`). Returns an array of matches with hierarchical `path` fields, component data, and a `truncated` flag. Complements `get_gameobject`, which only returns the first match — use this when multiple instances share a name (e.g. 7 × `CBCardUI(Clone)`). Parameters: `name` (glob), `includeInactive` (default `true`), `maxDepth` (default `0` — target only), `includeChildren` (default `false`), `limit` (default `100`, max `1000`). In prefab editing mode, the search scopes to the prefab root via `PrefabEditingService`. Scene mode uses `Object.FindObjectsByType<GameObject>` with `FindObjectsInactive` respected.
+- **`loc_get_entries` — `include_values` parameter** — new optional boolean (default `false`). When `true`, the tool renders each entry as `key: value` lines into the MCP text content. When `false` (default), only the count summary is returned, which saves tokens on large tables. Closes the verification gap where agents writing 20+ keys could only see "Read N entries" in the text payload with no way to inspect actual values. C# side is unchanged — the fix lives entirely in the TypeScript wrapper.
+- **`screenshot_game_view` — `force_focus` parameter** — new optional boolean (default `false`). When `true`, the tool force-focuses the Game View tab, repaints, waits one frame via `EditorApplication.delayCall`, then captures. Prevents the common failure mode where `ScreenCapture.CaptureScreenshotAsTexture()` samples whichever EditorWindow is currently focused — if the Scene View was active, the caller got a Scene View render at Game View dimensions instead. The tool is now `IsAsync = true` to accommodate the delayed capture.
+
+### Changed
+
+- **`ScreenshotGameViewTool` lifecycle** — converted from sync `Execute` to async `ExecuteAsync` to support the `force_focus` delay path. The non-`force_focus` (default) path still captures synchronously via `tcs.TrySetResult(CaptureGameView(...))` without any frame delay, so existing callers see no latency regression.
+- **`GetGameObjectsByNameTool` Unity-side validation + early-exit** (review fix) — rejects `limit` outside `[1, 1000]` and `maxDepth < -1` with `validation_error` before scanning, closing the bypass where `batch_execute` or a direct WebSocket caller could skip the TS zod schema (negative `limit` previously crashed `RemoveRange`). Scene loop and prefab recursion now stop collecting as soon as `matches.Count >= limit` and set `truncated=true`, so wide patterns over large scenes no longer enumerate every match before slicing.
+- **`loc_get_entries` `include_values` output cap + newline escape** (review fix) — new `max_entries` parameter (default `200`, hard max `1000`) caps how many entries are rendered into MCP text content; the full `entries` array still ships in the `data` payload. `\r` and `\n` inside keys/values are escaped to `\\r`/`\\n` so multi-line TMP rich text no longer fragments the `key: value` line format. A truncation hint (`... truncated N entries`) is appended whenever the cap fires.
+
+### Tests
+
+- **+14 Jest tests** (now 110 total across 10 suites):
+  - `localizationTools.test.ts` (6) — `include_values` rendering, `\r\n` escaping, `max_entries` cap + default + truncation hint, TS-only param stripping before forwarding to Unity, `data.entries` integrity regardless of cap
+  - `getGameObjectTool.test.ts` (4) — `get_gameobjects_by_name` registration, glob param forwarding, JSON text serialization, Unity-failure → `TOOL_EXECUTION` propagation
+  - `screenshotTools.test.ts` (4) — `screenshot_game_view`/`scene_view`/`camera` registration, `force_focus` forwarding, image content shape, `force_focus` omission default
+- **+7 EditMode tests** (`McpUnity.Tests.GetGameObjectsByNameToolTests`) — validation errors for missing `name`, `limit < 1`, `limit < 0` (negative-limit `RemoveRange` regression), `limit > 1000`, `maxDepth < -1`; truncation respects `limit` and sets `truncated=true`; positive glob match path.
+
+### Documentation
+
+- **`README.md`** — added `get_gameobjects_by_name` to the GameObjects tools list, added `force_focus` note to `screenshot_game_view`, added `include_values` + `max_entries` notes to `loc_get_entries` with updated example prompt.
+- **`AGENTS.md`** — added `get_gameobjects_by_name` to the tool list.
+- **`doc/codeReview/Request_20260414_UsabilityImprovements.md` + `Response_20260414_UsabilityImprovements.md`** — code review round-trip for the v1.12.0 usability improvements drop.
+
+### Release metadata
+
+- **Version alignment** — bumped `Server~/package.json`, `Server~/package-lock.json`, and `server.json` (both root and npm package entry) from their stale `1.0.0`/`1.2.1` values to `1.12.0` to satisfy the `AGENTS.md` release/version-bump checklist.
+
 ## [1.11.2] - 2026-04-13
 
 Addressables code-review follow-up — aligns tool contracts with the spec, closes the first-use regression gap, and hardens the `addr_init_settings` path-handling attack surface. See `doc/codeReview/Response_20260413_AddressablesTools.md`.

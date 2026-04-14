@@ -106,4 +106,80 @@ async function toolHandler(
   };
 }
 
+// ============================================================================
+// get_gameobjects_by_name (plural — glob match)
+// ============================================================================
 
+const byNameToolName = "get_gameobjects_by_name";
+const byNameToolDescription =
+  "Finds ALL GameObjects whose name matches a glob pattern (supports '*' and '?'). Returns an array of matches with hierarchical paths. Use this instead of get_gameobject when multiple instances share the same name (e.g. 'CBCardUI(Clone)').";
+const byNameParamsSchema = z.object({
+  name: z
+    .string()
+    .describe(
+      "Glob pattern matched against GameObject.name. Examples: 'CBCardUI(Clone)' (exact), 'CBCardUI*' (prefix), '*Button*' (contains), '?layer' (single-char wildcard)."
+    ),
+  includeInactive: z
+    .boolean()
+    .optional()
+    .describe("Include inactive GameObjects. Default: true"),
+  maxDepth: z
+    .number()
+    .int()
+    .gte(-1)
+    .optional()
+    .describe(
+      "Max child-traversal depth for each match. 0 = target only (default), 1 = direct children, -1 = unlimited. Deep results can be token-heavy — raise explicitly when needed."
+    ),
+  includeChildren: z
+    .boolean()
+    .optional()
+    .describe("Include child GameObjects in each match. Default: false"),
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .max(1000)
+    .optional()
+    .describe("Max number of matches to return. Default: 100"),
+});
+
+export function registerGetGameObjectsByNameTool(
+  server: McpServer,
+  mcpUnity: McpUnity,
+  logger: Logger
+) {
+  logger.info(`Registering tool: ${byNameToolName}`);
+  server.tool(
+    byNameToolName,
+    byNameToolDescription,
+    byNameParamsSchema.shape,
+    async (params: z.infer<typeof byNameParamsSchema>) => {
+      try {
+        logger.info(`Executing tool: ${byNameToolName}`, params);
+        const response = await mcpUnity.sendRequest({
+          method: byNameToolName,
+          params,
+        });
+        if (!response.success) {
+          throw new McpUnityError(
+            ErrorType.TOOL_EXECUTION,
+            response.message || "Failed to find GameObjects by name"
+          );
+        }
+        logger.info(`Tool execution successful: ${byNameToolName}`);
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(response, null, 2),
+            },
+          ],
+        };
+      } catch (error) {
+        logger.error(`Tool execution failed: ${byNameToolName}`, error);
+        throw error;
+      }
+    }
+  );
+}

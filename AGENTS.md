@@ -137,6 +137,7 @@ Node reads config from `../ProjectSettings/McpUnitySettings.json` relative to **
 - `get_scene_info` — Get active scene info and loaded scenes list
 - `unload_scene` — Unload scene from hierarchy
 - `get_gameobject` — Get detailed GameObject info
+- `get_gameobjects_by_name` — Find ALL GameObjects matching a glob pattern (returns array; complements `get_gameobject`)
 - `get_console_logs` — Retrieve Unity console logs
 - `recompile_scripts` — Recompile all project scripts
 - `duplicate_gameobject` — Duplicate GameObjects with optional rename/reparent

@@ -107,6 +107,9 @@ The following tools are available for manipulating and querying Unity scenes and
 - `get_gameobject`: Gets detailed information about a specific GameObject including all components
   > **Example prompt:** "Get the details of the Player GameObject"
 
+- `get_gameobjects_by_name`: Finds ALL GameObjects whose name matches a glob pattern (`*`, `?`). Returns an array with hierarchical paths — use instead of `get_gameobject` when multiple instances share a name (e.g. `CBCardUI(Clone)`)
+  > **Example prompt:** "Find every CBCardUI clone in the scene"
+
 - `get_console_logs`: Retrieves logs from the Unity console with pagination support
   > **Example prompt:** "Show me the last 20 error logs from the Unity console"
 
@@ -191,7 +194,7 @@ The following tools are available for manipulating and querying Unity scenes and
 - `get_material_info`: Gets detailed information about a material including shader and all properties
   > **Example prompt:** "Show me all the properties of the 'PlayerMaterial'"
 
-- `screenshot_game_view`: Captures a screenshot from the Game View, reflecting what the player sees
+- `screenshot_game_view`: Captures a screenshot from the Game View, reflecting what the player sees. Set `force_focus: true` to force-focus the Game View tab before capture (prevents accidentally capturing the Scene View when it is the active tab)
   > **Example prompt:** "Take a screenshot of the Game View so I can see the current state"
 
 - `screenshot_scene_view`: Captures a screenshot from the Scene View, reflecting the editor camera perspective
@@ -240,8 +243,8 @@ The following tools are available for manipulating and querying Unity scenes and
 - `loc_delete_table`: Symmetric counterpart to `loc_create_table`. Deletes a StringTable collection along with its SharedTableData and every per-locale StringTable in one call
   > **Example prompt:** "Delete the obsolete UI_Legacy localization table"
 
-- `loc_get_entries`: Reads key/value entries from a StringTable, with optional key-prefix filter
-  > **Example prompt:** "Show me all `cb_ext_` entries in the CB_Tooltip table"
+- `loc_get_entries`: Reads key/value entries from a StringTable, with optional key-prefix filter. Set `include_values: true` to render each entry as `key: value` lines (default: false, count summary only, saves tokens). Use `max_entries` to cap rendered output (default: 200, max: 1000); `\r`/`\n` inside values are escaped so multi-line strings stay on a single line
+  > **Example prompt:** "Show me all `cb_ext_` entries in the CB_Tooltip table with their values"
 
 - `loc_set_entry`: Sets a single StringTable entry value. Creates the key if it does not exist. Supports TMP RichText markup in values
   > **Example prompt:** "Set `cb_buff_power_up` in CB_Tooltip to `<color=#88CCFF>力量上升</color>`"

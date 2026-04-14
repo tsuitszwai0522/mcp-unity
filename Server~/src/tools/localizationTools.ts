@@ -67,13 +67,30 @@ export function registerLocListTablesTool(server: McpServer, mcpUnity: McpUnity,
 // loc_get_entries
 // ============================================================================
 
+const LOC_GET_ENTRIES_DEFAULT_MAX = 200;
+const LOC_GET_ENTRIES_HARD_MAX = 1000;
+
+const escapeLocLine = (value: unknown) =>
+  String(value ?? '').replace(/\r/g, '\\r').replace(/\n/g, '\\n');
+
 export function registerLocGetEntriesTool(server: McpServer, mcpUnity: McpUnity, logger: Logger) {
   const name = 'loc_get_entries';
-  const description = 'Reads key/value entries from a Unity Localization StringTable, with optional key-prefix filter';
+  const description = 'Reads key/value entries from a Unity Localization StringTable, with optional key-prefix filter. Set include_values=true to inspect actual values (otherwise only a count summary is returned to save tokens).';
   const schema = z.object({
     table_name: z.string().describe('StringTable collection name (e.g. "CB_Tooltip")'),
     locale: z.string().optional().describe('Locale code (default "zh-TW")'),
     filter: z.string().optional().describe('Optional key-prefix filter (e.g. "cb_ext_")'),
+    include_values: z
+      .boolean()
+      .optional()
+      .describe('If true, render each entry as "key: value" lines in the text content. Default: false (count summary only).'),
+    max_entries: z
+      .number()
+      .int()
+      .min(1)
+      .max(LOC_GET_ENTRIES_HARD_MAX)
+      .optional()
+      .describe(`Max entries to render when include_values=true. Default: ${LOC_GET_ENTRIES_DEFAULT_MAX}, max: ${LOC_GET_ENTRIES_HARD_MAX}.`),
   });
 
   wrap(server, mcpUnity, logger, name, description, schema.shape, async (params) => {
@@ -81,12 +98,28 @@ export function registerLocGetEntriesTool(server: McpServer, mcpUnity: McpUnity,
       throw new McpUnityError(ErrorType.VALIDATION, "Required parameter 'table_name' must be provided");
     }
 
-    const response = await mcpUnity.sendRequest({ method: name, params });
+    // Unity tool ignores unknown keys; strip TS-only params before forwarding
+    const { include_values, max_entries, ...unityParams } = params;
+    const response = await mcpUnity.sendRequest({ method: name, params: unityParams });
     ensureSuccess(response, 'Failed to read StringTable entries');
 
     const entries: Array<{ key: string; value: string }> = response.entries || [];
+    const summary = response.message || `Read ${entries.length} entries`;
+
+    let text = summary;
+    if (include_values && entries.length > 0) {
+      const cap = Math.min(max_entries ?? LOC_GET_ENTRIES_DEFAULT_MAX, LOC_GET_ENTRIES_HARD_MAX);
+      const rendered = entries.slice(0, cap);
+      const lines = rendered.map((e) => `${escapeLocLine(e.key)}: ${escapeLocLine(e.value)}`);
+      const omitted = entries.length - rendered.length;
+      if (omitted > 0) {
+        lines.push(`... truncated ${omitted} entries; refine filter or raise max_entries (max ${LOC_GET_ENTRIES_HARD_MAX}).`);
+      }
+      text = `${summary}\n${lines.join('\n')}`;
+    }
+
     return {
-      content: [{ type: 'text', text: response.message || `Read ${entries.length} entries` }],
+      content: [{ type: 'text', text }],
       data: {
         table: response.table,
         locale: response.locale,

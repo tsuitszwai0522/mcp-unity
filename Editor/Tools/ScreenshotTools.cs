@@ -17,73 +17,106 @@ namespace McpUnity.Tools
         public ScreenshotGameViewTool()
         {
             Name = "screenshot_game_view";
-            Description = "Captures a screenshot from the Game View, reflecting what the player sees";
+            Description = "Captures a screenshot from the Game View, reflecting what the player sees. Set force_focus=true to force-focus the Game View tab before capturing (prevents accidentally capturing the Scene View when it's the active tab).";
+            IsAsync = true;
         }
 
-        public override JObject Execute(JObject parameters)
+        public override void ExecuteAsync(JObject parameters, TaskCompletionSource<JObject> tcs)
         {
             try
             {
                 int width = parameters?["width"]?.ToObject<int>() ?? 960;
                 int height = parameters?["height"]?.ToObject<int>() ?? 540;
+                bool forceFocus = parameters?["force_focus"]?.ToObject<bool?>() ?? false;
 
-                // Ensure Game View is open (without stealing focus)
                 var gameViewType = typeof(Editor).Assembly.GetType("UnityEditor.GameView");
                 if (gameViewType != null)
                 {
-                    EditorWindow.GetWindow(gameViewType, false, null, false);
+                    // focus flag on GetWindow controls whether the window is brought to front + focused
+                    var gameView = EditorWindow.GetWindow(gameViewType, false, null, forceFocus);
+                    if (forceFocus && gameView != null)
+                    {
+                        gameView.Focus();
+                        gameView.Repaint();
+                    }
                 }
 
-                // Try ScreenCapture first (works best during Play Mode)
-                var screenshot = ScreenCapture.CaptureScreenshotAsTexture();
-                if (screenshot != null)
+                if (forceFocus)
                 {
-                    try
+                    // Let focus + repaint settle one frame before ScreenCapture samples the active window
+                    EditorApplication.delayCall += () =>
                     {
-                        var resized = ScreenshotHelper.ResizeTexture(screenshot, width, height);
-                        byte[] pngBytes = resized.EncodeToPNG();
-                        string base64 = Convert.ToBase64String(pngBytes);
-
-                        if (resized != screenshot)
-                            UnityEngine.Object.DestroyImmediate(resized);
-
-                        McpLogger.LogInfo($"Game View screenshot captured ({width}x{height})");
-
-                        return new JObject
+                        try
                         {
-                            ["success"] = true,
-                            ["type"] = "image",
-                            ["mimeType"] = "image/png",
-                            ["data"] = base64,
-                            ["message"] = $"Game View screenshot captured ({width}x{height})"
-                        };
-                    }
-                    finally
-                    {
-                        UnityEngine.Object.DestroyImmediate(screenshot);
-                    }
+                            tcs.TrySetResult(CaptureGameView(width, height));
+                        }
+                        catch (Exception ex)
+                        {
+                            tcs.TrySetResult(McpUnitySocketHandler.CreateErrorResponse(
+                                $"Error capturing Game View screenshot: {ex.Message}",
+                                "tool_execution_error"
+                            ));
+                        }
+                    };
                 }
-
-                // Fallback: render from Main Camera (works in Edit Mode when Game View isn't actively rendering)
-                Camera cam = Camera.main;
-                if (cam == null)
+                else
                 {
-                    return McpUnitySocketHandler.CreateErrorResponse(
-                        "Failed to capture Game View screenshot. ScreenCapture returned null and no Main Camera found as fallback.",
-                        "tool_execution_error"
-                    );
+                    tcs.TrySetResult(CaptureGameView(width, height));
                 }
-
-                McpLogger.LogInfo("ScreenCapture unavailable, falling back to Main Camera render");
-                return ScreenshotHelper.CaptureFromCamera(cam, width, height, "Game View (via Main Camera)");
             }
             catch (Exception ex)
             {
-                return McpUnitySocketHandler.CreateErrorResponse(
+                tcs.TrySetResult(McpUnitySocketHandler.CreateErrorResponse(
                     $"Error capturing Game View screenshot: {ex.Message}",
+                    "tool_execution_error"
+                ));
+            }
+        }
+
+        private static JObject CaptureGameView(int width, int height)
+        {
+            // Try ScreenCapture first (works best during Play Mode)
+            var screenshot = ScreenCapture.CaptureScreenshotAsTexture();
+            if (screenshot != null)
+            {
+                try
+                {
+                    var resized = ScreenshotHelper.ResizeTexture(screenshot, width, height);
+                    byte[] pngBytes = resized.EncodeToPNG();
+                    string base64 = Convert.ToBase64String(pngBytes);
+
+                    if (resized != screenshot)
+                        UnityEngine.Object.DestroyImmediate(resized);
+
+                    McpLogger.LogInfo($"Game View screenshot captured ({width}x{height})");
+
+                    return new JObject
+                    {
+                        ["success"] = true,
+                        ["type"] = "image",
+                        ["mimeType"] = "image/png",
+                        ["data"] = base64,
+                        ["message"] = $"Game View screenshot captured ({width}x{height})"
+                    };
+                }
+                finally
+                {
+                    UnityEngine.Object.DestroyImmediate(screenshot);
+                }
+            }
+
+            // Fallback: render from Main Camera (Edit Mode when Game View isn't actively rendering)
+            Camera cam = Camera.main;
+            if (cam == null)
+            {
+                return McpUnitySocketHandler.CreateErrorResponse(
+                    "Failed to capture Game View screenshot. ScreenCapture returned null and no Main Camera found as fallback.",
                     "tool_execution_error"
                 );
             }
+
+            McpLogger.LogInfo("ScreenCapture unavailable, falling back to Main Camera render");
+            return ScreenshotHelper.CaptureFromCamera(cam, width, height, "Game View (via Main Camera)");
         }
     }
 
