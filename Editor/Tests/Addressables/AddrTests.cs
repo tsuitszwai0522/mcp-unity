@@ -33,6 +33,8 @@ namespace McpUnity.Tests.Addressables
         internal const string TestGroupName2 = TestPrefix + "Group2";
         internal const string TestLabel = TestPrefix + "label";
         internal const string TestLabel2 = TestPrefix + "label2";
+        internal const string TestProfileName = TestPrefix + "Profile";
+        internal const string TestProfileVariable = TestPrefix + "Variable";
 
         // Dummy assets are created by the fixture inside the consumer project
         // so tests are self-contained — no dependency on any particular asset
@@ -52,6 +54,7 @@ namespace McpUnity.Tests.Addressables
         // Track what the fixture mutated so teardown can restore without
         // touching the consumer project's own Addressables state.
         private string _originalDefaultGroup;
+        private string _originalActiveProfileId;
 
         // ------------------------------------------------------------------------
         // Fixture lifecycle
@@ -77,6 +80,7 @@ namespace McpUnity.Tests.Addressables
             }
 
             _originalDefaultGroup = settings.DefaultGroup?.Name;
+            _originalActiveProfileId = settings.activeProfileId;
 
             // Scrub any leftover artefacts from a previous failed run so tests
             // start with a clean slate.
@@ -96,6 +100,7 @@ namespace McpUnity.Tests.Addressables
             }
 
             RestoreDefaultGroup(settings);
+            RestoreActiveProfile(settings);
             CleanupTestArtifacts(settings);
         }
 
@@ -109,6 +114,7 @@ namespace McpUnity.Tests.Addressables
             }
 
             RestoreDefaultGroup(settings);
+            RestoreActiveProfile(settings);
             CleanupTestArtifacts(settings);
 
             DeleteDummyAssets();
@@ -178,6 +184,23 @@ namespace McpUnity.Tests.Addressables
             }
         }
 
+        private void RestoreActiveProfile(AddressableAssetSettings settings)
+        {
+            // Tests may switch the active profile (H-series). Restore on teardown so
+            // the consumer project's active profile never silently drifts.
+            if (string.IsNullOrEmpty(_originalActiveProfileId)) return;
+
+            // If the original profile was removed for some reason (shouldn't happen,
+            // but guard anyway), just bail — don't force an invalid id onto settings.
+            if (string.IsNullOrEmpty(settings.profileSettings.GetProfileName(_originalActiveProfileId))) return;
+
+            if (settings.activeProfileId != _originalActiveProfileId)
+            {
+                settings.activeProfileId = _originalActiveProfileId;
+                EditorUtility.SetDirty(settings);
+            }
+        }
+
         private static void CleanupTestArtifacts(AddressableAssetSettings settings)
         {
             // Remove any addressable entries we may have created on the test sprites,
@@ -212,7 +235,38 @@ namespace McpUnity.Tests.Addressables
                 settings.RemoveLabel(label, false);
             }
 
-            if (testGroups.Count > 0 || testLabels.Count > 0)
+            // Remove test profiles (leave the real profiles alone). Must happen
+            // after RestoreActiveProfile so we don't rip out the currently-active
+            // profile mid-cleanup.
+            var profileSettings = settings.profileSettings;
+            var testProfileIds = profileSettings.GetAllProfileNames()
+                .Where(n => n != null && n.StartsWith(TestPrefix))
+                .Select(n => profileSettings.GetProfileId(n))
+                .Where(id => !string.IsNullOrEmpty(id))
+                .ToList();
+            foreach (var id in testProfileIds)
+            {
+                profileSettings.RemoveProfile(id);
+            }
+
+            // Remove test profile variables (CreateValue lives at the profile-settings
+            // level so it affects every profile — clean up to avoid leaking into the
+            // consumer project's own profiles).
+            var testVariableIds = profileSettings.GetVariableNames()
+                .Where(n => n != null && n.StartsWith(TestPrefix))
+                .Select(n =>
+                {
+                    var data = profileSettings.GetProfileDataByName(n);
+                    return data?.Id;
+                })
+                .Where(id => !string.IsNullOrEmpty(id))
+                .ToList();
+            foreach (var id in testVariableIds)
+            {
+                profileSettings.RemoveValue(id);
+            }
+
+            if (testGroups.Count > 0 || testLabels.Count > 0 || testProfileIds.Count > 0 || testVariableIds.Count > 0)
             {
                 EditorUtility.SetDirty(settings);
                 AssetDatabase.SaveAssets();
@@ -1639,6 +1693,485 @@ namespace McpUnity.Tests.Addressables
             AssertSuccess(settingsAfter);
             Assert.AreEqual(defaultGroupBefore, settingsAfter.Value<string>("defaultGroup"),
                 $"step {step}: default group must not have drifted across the lifecycle");
+        }
+
+        // ========================================================================
+        // G. Group schema tests (addr_set_group_schema / addr_get_group_schema)
+        // ========================================================================
+
+        [Test]
+        public void G1_GetGroupSchema_ReturnsAllExpectedFields()
+        {
+            CreateTestGroup(TestGroupName);
+
+            var result = new AddrGetGroupSchemaTool().Execute(new JObject
+            {
+                ["group"] = TestGroupName
+            });
+            AssertSuccess(result);
+
+            Assert.AreEqual(TestGroupName, result.Value<string>("group"));
+            var values = result["values"] as JObject;
+            Assert.IsNotNull(values);
+
+            // Every tracked field must be present on the read-back.
+            foreach (var key in new[]
+            {
+                "compression", "include_in_build", "packed_mode", "bundle_naming",
+                "use_asset_bundle_cache", "use_unitywebrequest_for_local_bundles",
+                "retry_count", "timeout", "build_path", "load_path",
+                "build_path_value", "load_path_value"
+            })
+            {
+                Assert.IsTrue(values.ContainsKey(key), $"values missing key '{key}'");
+            }
+        }
+
+        [Test]
+        public void G2_SetGroupSchema_PartialUpdate_OnlyChangesProvidedFields()
+        {
+            CreateTestGroup(TestGroupName);
+
+            // Capture baseline so we can confirm non-touched fields are stable.
+            var beforeResult = new AddrGetGroupSchemaTool().Execute(new JObject { ["group"] = TestGroupName });
+            AssertSuccess(beforeResult);
+            var beforeValues = beforeResult["values"] as JObject;
+            var originalIncludeInBuild = beforeValues.Value<bool>("include_in_build");
+            var originalBundleNaming = beforeValues.Value<string>("bundle_naming");
+
+            // Change only compression — leave include_in_build / bundle_naming alone.
+            var setResult = new AddrSetGroupSchemaTool().Execute(new JObject
+            {
+                ["group"] = TestGroupName,
+                ["values"] = new JObject
+                {
+                    ["compression"] = "LZMA"
+                }
+            });
+            AssertSuccess(setResult);
+
+            Assert.AreEqual(false, setResult.Value<bool>("dryRun"));
+            var changed = setResult["changed"] as JArray;
+            Assert.IsNotNull(changed);
+            Assert.AreEqual(1, changed.Count, "Only one field should have changed");
+            Assert.AreEqual("compression", changed[0].ToString());
+
+            var diff = setResult["diff"] as JObject;
+            Assert.IsNotNull(diff);
+            Assert.IsNotNull(diff["compression"]);
+            Assert.AreEqual("LZMA", diff["compression"]["to"].ToString());
+
+            // Read back — compression changed, others stable.
+            var afterResult = new AddrGetGroupSchemaTool().Execute(new JObject { ["group"] = TestGroupName });
+            AssertSuccess(afterResult);
+            var afterValues = afterResult["values"] as JObject;
+            Assert.AreEqual("LZMA", afterValues.Value<string>("compression"));
+            Assert.AreEqual(originalIncludeInBuild, afterValues.Value<bool>("include_in_build"),
+                "include_in_build must not have drifted");
+            Assert.AreEqual(originalBundleNaming, afterValues.Value<string>("bundle_naming"),
+                "bundle_naming must not have drifted");
+        }
+
+        [Test]
+        public void G3_SetGroupSchema_DryRun_ReportsDiffWithoutPersisting()
+        {
+            CreateTestGroup(TestGroupName);
+
+            // Start from a known compression so the dry-run delta is deterministic.
+            new AddrSetGroupSchemaTool().Execute(new JObject
+            {
+                ["group"] = TestGroupName,
+                ["values"] = new JObject { ["compression"] = "LZ4" }
+            });
+
+            var result = new AddrSetGroupSchemaTool().Execute(new JObject
+            {
+                ["group"] = TestGroupName,
+                ["dry_run"] = true,
+                ["values"] = new JObject { ["compression"] = "LZMA" }
+            });
+            AssertSuccess(result);
+            Assert.IsTrue(result.Value<bool>("dryRun"));
+            Assert.AreEqual(1, (result["changed"] as JArray).Count);
+
+            // Read-back must still show LZ4 (not LZMA) — dry-run should not persist.
+            var readBack = new AddrGetGroupSchemaTool().Execute(new JObject { ["group"] = TestGroupName });
+            AssertSuccess(readBack);
+            Assert.AreEqual("LZ4", (readBack["values"] as JObject).Value<string>("compression"),
+                "Dry-run must not persist the change");
+        }
+
+        [Test]
+        public void G4_SetGroupSchema_NoOpWhenValuesMatchCurrent_ReportsZeroChanged()
+        {
+            CreateTestGroup(TestGroupName);
+
+            new AddrSetGroupSchemaTool().Execute(new JObject
+            {
+                ["group"] = TestGroupName,
+                ["values"] = new JObject { ["compression"] = "LZ4" }
+            });
+
+            var result = new AddrSetGroupSchemaTool().Execute(new JObject
+            {
+                ["group"] = TestGroupName,
+                ["values"] = new JObject { ["compression"] = "LZ4" }
+            });
+            AssertSuccess(result);
+            Assert.AreEqual(0, (result["changed"] as JArray).Count,
+                "Repeating the same value should produce no changes");
+        }
+
+        [Test]
+        public void G5_SetGroupSchema_InvalidEnumValue_ReturnsValidationError()
+        {
+            CreateTestGroup(TestGroupName);
+
+            var result = new AddrSetGroupSchemaTool().Execute(new JObject
+            {
+                ["group"] = TestGroupName,
+                ["values"] = new JObject { ["compression"] = "NOPE" }
+            });
+            AssertError(result, "validation_error");
+        }
+
+        [Test]
+        public void G6_SetGroupSchema_UnknownField_ReturnsValidationError()
+        {
+            CreateTestGroup(TestGroupName);
+
+            var result = new AddrSetGroupSchemaTool().Execute(new JObject
+            {
+                ["group"] = TestGroupName,
+                ["values"] = new JObject { ["totally_fake_field"] = "x" }
+            });
+            AssertError(result, "validation_error");
+        }
+
+        [Test]
+        public void G7_SetGroupSchema_NonExistentGroup_ReturnsNotFound()
+        {
+            var result = new AddrSetGroupSchemaTool().Execute(new JObject
+            {
+                ["group"] = TestPrefix + "Nonexistent",
+                ["values"] = new JObject { ["compression"] = "LZ4" }
+            });
+            AssertError(result, "not_found");
+        }
+
+        [Test]
+        public void G8_SetGroupSchema_BuildPath_SwitchesProfileVariable()
+        {
+            CreateTestGroup(TestGroupName);
+
+            // Flip to Remote.BuildPath / Remote.LoadPath — this is the core
+            // Small-Client / CDN workflow the feature was built for.
+            var result = new AddrSetGroupSchemaTool().Execute(new JObject
+            {
+                ["group"] = TestGroupName,
+                ["values"] = new JObject
+                {
+                    ["build_path"] = AddressableAssetSettings.kRemoteBuildPath,
+                    ["load_path"] = AddressableAssetSettings.kRemoteLoadPath
+                }
+            });
+            AssertSuccess(result);
+
+            var readBack = new AddrGetGroupSchemaTool().Execute(new JObject { ["group"] = TestGroupName });
+            AssertSuccess(readBack);
+            var values = readBack["values"] as JObject;
+            Assert.AreEqual(AddressableAssetSettings.kRemoteBuildPath, values.Value<string>("build_path"));
+            Assert.AreEqual(AddressableAssetSettings.kRemoteLoadPath, values.Value<string>("load_path"));
+        }
+
+        [Test]
+        public void G9_SetGroupSchema_UnknownProfileVariable_ReturnsVariableNotFound()
+        {
+            CreateTestGroup(TestGroupName);
+
+            var result = new AddrSetGroupSchemaTool().Execute(new JObject
+            {
+                ["group"] = TestGroupName,
+                ["values"] = new JObject
+                {
+                    ["build_path"] = "Definitely.Not.A.Real.Variable"
+                }
+            });
+            AssertError(result, "variable_not_found");
+        }
+
+        // Regression: a multi-field payload where a LATER field is invalid must
+        // not leave the earlier fields mutated in memory. Before the validate-
+        // all-then-apply refactor, the tool would write LZ4 then error on the
+        // unknown field, leaving the schema half-updated while the caller saw
+        // a validation_error response.
+        [Test]
+        public void G10_SetGroupSchema_LaterFieldInvalid_DoesNotApplyEarlierFields()
+        {
+            CreateTestGroup(TestGroupName);
+
+            // Prime the group with a known compression so we can detect drift.
+            new AddrSetGroupSchemaTool().Execute(new JObject
+            {
+                ["group"] = TestGroupName,
+                ["values"] = new JObject { ["compression"] = "LZ4" }
+            });
+
+            var result = new AddrSetGroupSchemaTool().Execute(new JObject
+            {
+                ["group"] = TestGroupName,
+                ["values"] = new JObject
+                {
+                    ["compression"] = "LZMA",
+                    ["totally_fake_field"] = "x"
+                }
+            });
+            AssertError(result, "validation_error");
+
+            var readBack = new AddrGetGroupSchemaTool().Execute(new JObject { ["group"] = TestGroupName });
+            AssertSuccess(readBack);
+            Assert.AreEqual("LZ4", (readBack["values"] as JObject).Value<string>("compression"),
+                "compression must remain LZ4 — the failed request must not leave a partial in-memory mutation");
+        }
+
+        // Regression: Enum.TryParse accepts numeric strings for typed enums,
+        // so "999" would have been accepted and written into schema.Compression
+        // as an undefined enum member. Enum.IsDefined + numeric-string rejection
+        // closes that gap.
+        [Test]
+        public void G11_SetGroupSchema_NumericEnumString_ReturnsValidationError()
+        {
+            CreateTestGroup(TestGroupName);
+
+            var result = new AddrSetGroupSchemaTool().Execute(new JObject
+            {
+                ["group"] = TestGroupName,
+                ["values"] = new JObject { ["compression"] = "999" }
+            });
+            AssertError(result, "validation_error");
+        }
+
+        // Regression: the Unity-side bool parser must reject non-JSON-boolean
+        // tokens so `batch_execute` and direct WebSocket callers can't bypass
+        // the zod schema via string / integer coercion.
+        [Test]
+        public void G12_SetGroupSchema_StringForBoolField_ReturnsValidationError()
+        {
+            CreateTestGroup(TestGroupName);
+
+            var result = new AddrSetGroupSchemaTool().Execute(new JObject
+            {
+                ["group"] = TestGroupName,
+                ["values"] = new JObject { ["include_in_build"] = "true" }
+            });
+            AssertError(result, "validation_error");
+        }
+
+        // Regression: retry_count / timeout are counts/seconds — negatives are
+        // meaningless and the parser must reject them up-front so the schema
+        // never receives invalid state.
+        [Test]
+        public void G13_SetGroupSchema_NegativeRetryCount_ReturnsValidationError()
+        {
+            CreateTestGroup(TestGroupName);
+
+            var result = new AddrSetGroupSchemaTool().Execute(new JObject
+            {
+                ["group"] = TestGroupName,
+                ["values"] = new JObject { ["retry_count"] = -1 }
+            });
+            AssertError(result, "validation_error");
+        }
+
+        // Regression: integer fields must also reject string coercion ("5" is
+        // not an integer). Closes the same batch_execute bypass as G12 on the
+        // int side.
+        [Test]
+        public void G14_SetGroupSchema_StringForIntField_ReturnsValidationError()
+        {
+            CreateTestGroup(TestGroupName);
+
+            var result = new AddrSetGroupSchemaTool().Execute(new JObject
+            {
+                ["group"] = TestGroupName,
+                ["values"] = new JObject { ["retry_count"] = "5" }
+            });
+            AssertError(result, "validation_error");
+        }
+
+        // ========================================================================
+        // H. Profile tests (list / get_active / set_active / set_variable)
+        // ========================================================================
+
+        [Test]
+        public void H1_ListProfiles_IncludesDefaultAndMarksActive()
+        {
+            var result = new AddrListProfilesTool().Execute(new JObject());
+            AssertSuccess(result);
+
+            var profiles = result["profiles"] as JArray;
+            Assert.IsNotNull(profiles);
+            Assert.Greater(profiles.Count, 0, "At least one profile must exist");
+
+            var active = profiles.OfType<JObject>().Where(p => p.Value<bool>("isActive")).ToList();
+            Assert.AreEqual(1, active.Count, "Exactly one profile must be marked active");
+            Assert.IsFalse(string.IsNullOrEmpty(result.Value<string>("activeProfile")));
+
+            // Variables map should be populated on every profile.
+            foreach (var p in profiles.OfType<JObject>())
+            {
+                var vars = p["variables"] as JObject;
+                Assert.IsNotNull(vars, $"profile '{p.Value<string>("name")}' missing variables");
+            }
+        }
+
+        [Test]
+        public void H2_GetActiveProfile_ReturnsNameIdAndVariables()
+        {
+            var result = new AddrGetActiveProfileTool().Execute(new JObject());
+            AssertSuccess(result);
+
+            Assert.IsFalse(string.IsNullOrEmpty(result.Value<string>("id")));
+            Assert.IsFalse(string.IsNullOrEmpty(result.Value<string>("name")));
+            Assert.IsNotNull(result["variables"] as JObject);
+        }
+
+        [Test]
+        public void H3_SetActiveProfile_NonExistent_ReturnsProfileNotFound()
+        {
+            var result = new AddrSetActiveProfileTool().Execute(new JObject
+            {
+                ["profile"] = TestPrefix + "NoSuchProfile"
+            });
+            AssertError(result, "profile_not_found");
+        }
+
+        [Test]
+        public void H4_SetActiveProfile_SwitchesAndPersists()
+        {
+            // Create a disposable profile copied from the current active profile.
+            var settings = AddressableAssetSettingsDefaultObject.GetSettings(false);
+            var copyFromId = settings.activeProfileId;
+            var newId = settings.profileSettings.AddProfile(TestProfileName, copyFromId);
+            Assert.IsFalse(string.IsNullOrEmpty(newId));
+
+            var originalName = settings.profileSettings.GetProfileName(copyFromId);
+            try
+            {
+                var switchResult = new AddrSetActiveProfileTool().Execute(new JObject
+                {
+                    ["profile"] = TestProfileName
+                });
+                AssertSuccess(switchResult);
+                Assert.IsTrue(switchResult.Value<bool>("changed"));
+                Assert.AreEqual(TestProfileName, switchResult.Value<string>("activeProfile"));
+                Assert.AreEqual(originalName, switchResult.Value<string>("previousProfile"));
+
+                // Read back via get_active_profile to confirm the switch persisted.
+                var getActive = new AddrGetActiveProfileTool().Execute(new JObject());
+                AssertSuccess(getActive);
+                Assert.AreEqual(TestProfileName, getActive.Value<string>("name"));
+
+                // Setting again = no-op (changed=false).
+                var idempotent = new AddrSetActiveProfileTool().Execute(new JObject
+                {
+                    ["profile"] = TestProfileName
+                });
+                AssertSuccess(idempotent);
+                Assert.IsFalse(idempotent.Value<bool>("changed"));
+            }
+            finally
+            {
+                // Ensure we don't leave the test profile as the active one — teardown
+                // also handles this, but being explicit here keeps this test's scope tight.
+                settings.activeProfileId = copyFromId;
+            }
+        }
+
+        [Test]
+        public void H5_SetProfileVariable_OnExistingVariable_UpdatesValue()
+        {
+            var settings = AddressableAssetSettingsDefaultObject.GetSettings(false);
+            // Use the current active profile and an existing built-in variable
+            // (Remote.LoadPath always exists after default initialization). We save
+            // the previous value and restore it so we don't drift the consumer
+            // project's URL.
+            string profileName = settings.profileSettings.GetProfileName(settings.activeProfileId);
+            string previous = settings.profileSettings.GetValueByName(
+                settings.activeProfileId,
+                AddressableAssetSettings.kRemoteLoadPath);
+
+            const string testUrl = "https://mcp-addr-test.invalid/[BuildTarget]";
+            try
+            {
+                var result = new AddrSetProfileVariableTool().Execute(new JObject
+                {
+                    ["profile"] = profileName,
+                    ["variable"] = AddressableAssetSettings.kRemoteLoadPath,
+                    ["value"] = testUrl
+                });
+                AssertSuccess(result);
+                Assert.AreEqual(testUrl, result.Value<string>("value"));
+                Assert.AreEqual(previous, result.Value<string>("previousValue"));
+                Assert.IsFalse(result.Value<bool>("created"));
+
+                // Read back through list_profiles to confirm persistence at the
+                // profile-settings level (not just on the in-memory reference).
+                var listing = new AddrListProfilesTool().Execute(new JObject());
+                AssertSuccess(listing);
+                var profile = (listing["profiles"] as JArray)
+                    .OfType<JObject>()
+                    .First(p => p.Value<string>("name") == profileName);
+                var vars = profile["variables"] as JObject;
+                Assert.AreEqual(testUrl, vars.Value<string>(AddressableAssetSettings.kRemoteLoadPath));
+            }
+            finally
+            {
+                settings.profileSettings.SetValue(
+                    settings.activeProfileId,
+                    AddressableAssetSettings.kRemoteLoadPath,
+                    previous);
+                EditorUtility.SetDirty(settings);
+            }
+        }
+
+        [Test]
+        public void H6_SetProfileVariable_MissingVariable_WithoutCreateFlag_ReturnsVariableNotFound()
+        {
+            var settings = AddressableAssetSettingsDefaultObject.GetSettings(false);
+            string profileName = settings.profileSettings.GetProfileName(settings.activeProfileId);
+
+            var result = new AddrSetProfileVariableTool().Execute(new JObject
+            {
+                ["profile"] = profileName,
+                ["variable"] = TestProfileVariable,
+                ["value"] = "anything"
+            });
+            AssertError(result, "variable_not_found");
+        }
+
+        [Test]
+        public void H7_SetProfileVariable_WithCreateFlag_CreatesAndSets()
+        {
+            var settings = AddressableAssetSettingsDefaultObject.GetSettings(false);
+            string profileName = settings.profileSettings.GetProfileName(settings.activeProfileId);
+
+            var result = new AddrSetProfileVariableTool().Execute(new JObject
+            {
+                ["profile"] = profileName,
+                ["variable"] = TestProfileVariable,
+                ["value"] = "test-cdn",
+                ["create_if_missing"] = true
+            });
+            AssertSuccess(result);
+            Assert.IsTrue(result.Value<bool>("created"));
+            Assert.AreEqual("test-cdn", result.Value<string>("value"));
+
+            // Confirm it actually shows up in GetVariableNames.
+            CollectionAssert.Contains(
+                settings.profileSettings.GetVariableNames(),
+                TestProfileVariable);
+            // (TearDown scrubs TestPrefix variables from profile settings.)
         }
     }
 }

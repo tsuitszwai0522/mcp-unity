@@ -509,6 +509,227 @@ export function registerAddrRemoveLabelTool(server: McpServer, mcpUnity: McpUnit
 }
 
 // ============================================================================
+// addr_get_group_schema
+// ============================================================================
+
+export function registerAddrGetGroupSchemaTool(server: McpServer, mcpUnity: McpUnity, logger: Logger) {
+  const name = 'addr_get_group_schema';
+  const description = 'Read the current BundledAssetGroupSchema values for an Addressables group';
+  const schema = z.object({
+    group: z.string().describe('Group name (must exist)'),
+  });
+
+  wrap(server, mcpUnity, logger, name, description, schema.shape, async (params) => {
+    if (!params.group) {
+      throw new McpUnityError(ErrorType.VALIDATION, "Required parameter 'group' must be provided");
+    }
+
+    const response = await mcpUnity.sendRequest({ method: name, params });
+    ensureSuccess(response, 'Failed to get group schema');
+
+    const values = response.values || {};
+    const lines = [
+      `Group '${response.group}' BundledAssetGroupSchema:`,
+      ...Object.entries(values).map(([k, v]) => `  ${k}: ${v}`),
+    ];
+    return {
+      content: [{ type: 'text', text: lines.join('\n') }],
+      data: {
+        group: response.group,
+        values,
+      },
+    };
+  });
+}
+
+// ============================================================================
+// addr_set_group_schema
+// ============================================================================
+
+export function registerAddrSetGroupSchemaTool(server: McpServer, mcpUnity: McpUnity, logger: Logger) {
+  const name = 'addr_set_group_schema';
+  const description =
+    "Partial update of an Addressables group's BundledAssetGroupSchema — only provided values change. Supports dry_run. Fields: compression, include_in_build, packed_mode, bundle_naming, use_asset_bundle_cache, use_unitywebrequest_for_local_bundles, retry_count, timeout, build_path (profile variable name), load_path (profile variable name).";
+  const schema = z.object({
+    group: z.string().describe('Group name (must exist)'),
+    dry_run: z.boolean().optional().describe('If true, return the diff without saving (default false)'),
+    values: z
+      .object({
+        compression: z.enum(['Uncompressed', 'LZ4', 'LZMA']).optional(),
+        include_in_build: z.boolean().optional(),
+        packed_mode: z.enum(['PackTogether', 'PackSeparately', 'PackTogetherByLabel']).optional(),
+        bundle_naming: z.enum(['AppendHash', 'NoHash', 'OnlyHash', 'FileNameHash']).optional(),
+        use_asset_bundle_cache: z.boolean().optional(),
+        use_unitywebrequest_for_local_bundles: z.boolean().optional(),
+        retry_count: z.number().int().optional(),
+        timeout: z.number().int().optional(),
+        build_path: z
+          .string()
+          .optional()
+          .describe('Profile variable name, e.g. Local.BuildPath or Remote.BuildPath'),
+        load_path: z
+          .string()
+          .optional()
+          .describe('Profile variable name, e.g. Local.LoadPath or Remote.LoadPath'),
+      })
+      .describe('Partial set of schema fields to apply'),
+  });
+
+  wrap(server, mcpUnity, logger, name, description, schema.shape, async (params) => {
+    if (!params.group) {
+      throw new McpUnityError(ErrorType.VALIDATION, "Required parameter 'group' must be provided");
+    }
+    if (!params.values || Object.keys(params.values).length === 0) {
+      throw new McpUnityError(ErrorType.VALIDATION, "Parameter 'values' must be a non-empty object");
+    }
+
+    const response = await mcpUnity.sendRequest({ method: name, params });
+    ensureSuccess(response, 'Failed to set group schema');
+
+    return {
+      content: [{ type: 'text', text: response.message || 'Group schema updated' }],
+      data: {
+        group: response.group,
+        dryRun: response.dryRun,
+        changed: response.changed,
+        diff: response.diff,
+      },
+    };
+  });
+}
+
+// ============================================================================
+// addr_list_profiles
+// ============================================================================
+
+export function registerAddrListProfilesTool(server: McpServer, mcpUnity: McpUnity, logger: Logger) {
+  const name = 'addr_list_profiles';
+  const description = 'List all Unity Addressables profiles with their variable values';
+  const schema = z.object({});
+
+  wrap(server, mcpUnity, logger, name, description, schema.shape, async (_params) => {
+    const response = await mcpUnity.sendRequest({ method: name, params: {} });
+    ensureSuccess(response, 'Failed to list profiles');
+
+    const profiles: Array<any> = response.profiles || [];
+    const text = profiles.length === 0
+      ? 'No Addressables profiles found.'
+      : profiles.map((p) => `- ${p.name}${p.isActive ? ' (active)' : ''}`).join('\n');
+
+    return {
+      content: [{ type: 'text', text }],
+      data: {
+        activeProfile: response.activeProfile,
+        activeProfileId: response.activeProfileId,
+        variableNames: response.variableNames,
+        profiles,
+      },
+    };
+  });
+}
+
+// ============================================================================
+// addr_get_active_profile
+// ============================================================================
+
+export function registerAddrGetActiveProfileTool(server: McpServer, mcpUnity: McpUnity, logger: Logger) {
+  const name = 'addr_get_active_profile';
+  const description = 'Get the currently active Unity Addressables profile with its resolved variable values';
+  const schema = z.object({});
+
+  wrap(server, mcpUnity, logger, name, description, schema.shape, async (_params) => {
+    const response = await mcpUnity.sendRequest({ method: name, params: {} });
+    ensureSuccess(response, 'Failed to get active profile');
+
+    return {
+      content: [{ type: 'text', text: response.message || `Active profile: ${response.name}` }],
+      data: {
+        id: response.id,
+        name: response.name,
+        variables: response.variables,
+      },
+    };
+  });
+}
+
+// ============================================================================
+// addr_set_active_profile
+// ============================================================================
+
+export function registerAddrSetActiveProfileTool(server: McpServer, mcpUnity: McpUnity, logger: Logger) {
+  const name = 'addr_set_active_profile';
+  const description = 'Switch the active Unity Addressables profile by name';
+  const schema = z.object({
+    profile: z.string().describe('Profile name (must exist)'),
+  });
+
+  wrap(server, mcpUnity, logger, name, description, schema.shape, async (params) => {
+    if (!params.profile) {
+      throw new McpUnityError(ErrorType.VALIDATION, "Required parameter 'profile' must be provided");
+    }
+
+    const response = await mcpUnity.sendRequest({ method: name, params });
+    ensureSuccess(response, 'Failed to set active profile');
+
+    return {
+      content: [{ type: 'text', text: response.message || 'Active profile updated' }],
+      data: {
+        changed: response.changed,
+        activeProfile: response.activeProfile,
+        previousProfile: response.previousProfile,
+      },
+    };
+  });
+}
+
+// ============================================================================
+// addr_set_profile_variable
+// ============================================================================
+
+export function registerAddrSetProfileVariableTool(server: McpServer, mcpUnity: McpUnity, logger: Logger) {
+  const name = 'addr_set_profile_variable';
+  const description =
+    'Set an Addressables profile variable (e.g. Remote.LoadPath) on a named profile. Pass create_if_missing=true to create the variable at the profile-settings level; newly-created variables are added to ALL profiles, not only the named profile.';
+  const schema = z.object({
+    profile: z.string().describe('Profile name (must exist)'),
+    variable: z.string().describe('Variable name (e.g. Remote.LoadPath)'),
+    value: z.string().describe('New value (may contain [BuildTarget] tokens)'),
+    create_if_missing: z
+      .boolean()
+      .optional()
+      .describe(
+        'Create the variable at profile-settings level if missing. WARNING: newly-created variables are added to ALL profiles, not only the named profile. Default false.'
+      ),
+  });
+
+  wrap(server, mcpUnity, logger, name, description, schema.shape, async (params) => {
+    if (!params.profile) {
+      throw new McpUnityError(ErrorType.VALIDATION, "Required parameter 'profile' must be provided");
+    }
+    if (!params.variable) {
+      throw new McpUnityError(ErrorType.VALIDATION, "Required parameter 'variable' must be provided");
+    }
+    if (params.value === undefined || params.value === null) {
+      throw new McpUnityError(ErrorType.VALIDATION, "Required parameter 'value' must be provided");
+    }
+
+    const response = await mcpUnity.sendRequest({ method: name, params });
+    ensureSuccess(response, 'Failed to set profile variable');
+
+    return {
+      content: [{ type: 'text', text: response.message || 'Profile variable updated' }],
+      data: {
+        profile: response.profile,
+        variable: response.variable,
+        previousValue: response.previousValue,
+        value: response.value,
+        created: response.created,
+      },
+    };
+  });
+}
+
+// ============================================================================
 // addr_find_asset
 // ============================================================================
 

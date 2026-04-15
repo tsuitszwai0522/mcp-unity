@@ -4,6 +4,38 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.13.0] - 2026-04-15
+
+Addressables group schema and profile management tools — the Small-Client / CDN workflow now has first-class MCP surface for reading and flipping `BundledAssetGroupSchema` fields and switching profile variables without opening the Addressables window.
+
+### Added
+
+- **`addr_get_group_schema` tool** — read all 10 `BundledAssetGroupSchema` fields plus two resolved helpers (`build_path_value` / `load_path_value`) showing the profile-token-expanded URL. Lets agents verify Remote CDN wiring without manually substituting profile variables.
+- **`addr_set_group_schema` tool** — partial update of `BundledAssetGroupSchema` with `dry_run` support and a `diff` payload showing `from` / `to` per changed field. Supports `compression`, `include_in_build`, `packed_mode`, `bundle_naming`, `use_asset_bundle_cache`, `use_unitywebrequest_for_local_bundles`, `retry_count`, `timeout`, `build_path`, `load_path`. **Validate-all then apply**: every field is validated before any mutation, so a failing field aborts the request with zero in-memory side effects — the tool never returns `validation_error` with the schema half-updated.
+- **`addr_list_profiles` tool** — list every Addressables profile with its resolved variable map and an `isActive` flag.
+- **`addr_get_active_profile` tool** — query the currently active profile and its variables.
+- **`addr_set_active_profile` tool** — switch the active profile by name (persisted via `SetDirty` + `SaveAssets`).
+- **`addr_set_profile_variable` tool** — set a profile variable value (e.g. `Remote.LoadPath` on the `Default` profile). Pass `create_if_missing=true` to create the variable at the profile-settings level; **newly-created variables are added to ALL profiles**, not only the named profile — documented explicitly in the tool description and README to prevent accidental global state.
+
+### Changed
+
+- **Addressables schema parsers hardened** — `TryParseEnum` now rejects numeric strings (e.g. `"999"` for `compression`) and runs a final `Enum.IsDefined` check, closing a gap where `Enum.TryParse` would accept undefined enum values via numeric coercion. `TryParseBool` now requires `JTokenType.Boolean` — no string / integer coercion. `TryParseNonNegativeInt` replaces the old `TryParseInt` and rejects both non-integer JSON tokens and negative values for `retry_count` / `timeout`. All three close the `batch_execute` / direct-WebSocket bypass where the Node-side zod schema would not run.
+- **`AddrSetGroupSchemaTool.Execute` refactored to plan-then-apply** — phase 1 walks every field and builds a `List<SchemaChange>` with captured `Apply` delegates; phase 2 runs every `Apply` only if phase 1 completed cleanly. A single profile-variable-names snapshot is reused across field validation, so `build_path` and `load_path` errors reference a consistent candidate list.
+
+### Tests
+
+- **+5 EditMode regression tests** (`G10`–`G14`) covering the failure modes that motivated this release:
+  - `G10` — multi-field payload where a later field is invalid must not leave earlier fields mutated in memory (read-back confirms `compression` is still the primed value).
+  - `G11` — `"999"` for `compression` returns `validation_error` (numeric-string enum bypass closed).
+  - `G12` — `"true"` string for `include_in_build` returns `validation_error` (bool coercion closed).
+  - `G13` — `-1` for `retry_count` returns `validation_error` (non-negative range enforced).
+  - `G14` — `"5"` string for `retry_count` returns `validation_error` (integer coercion closed).
+
+### Docs
+
+- **`AGENTS.md` current tools list** — added all 21 Addressables tools and 9 Localization tools that had accumulated across v1.11.x and this release. The list was previously capped at the v1.10 snapshot; running through the repo's own update policy identified the drift.
+- **`README.md`, `AddrSetProfileVariableTool` C# / TS descriptions** — explicitly call out that `create_if_missing=true` adds the variable to every profile, not only the named one.
+
 ## [1.12.0] - 2026-04-14
 
 Usability follow-ups driven by external project feedback. Three small, independent changes that close real friction points when agents inspect scenes and localization content.

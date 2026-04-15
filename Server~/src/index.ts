@@ -64,6 +64,12 @@ import {
   registerAddrCreateLabelTool,
   registerAddrRemoveLabelTool,
   registerAddrFindAssetTool,
+  registerAddrGetGroupSchemaTool,
+  registerAddrSetGroupSchemaTool,
+  registerAddrListProfilesTool,
+  registerAddrGetActiveProfileTool,
+  registerAddrSetActiveProfileTool,
+  registerAddrSetProfileVariableTool,
 } from './tools/addressablesTools.js';
 import { registerDynamicTools } from './tools/dynamicTools.js';
 import { registerGetMenuItemsResource } from './resources/getMenuItemResource.js';
@@ -196,6 +202,12 @@ registerAddrListLabelsTool(server, mcpUnity, toolLogger);
 registerAddrCreateLabelTool(server, mcpUnity, toolLogger);
 registerAddrRemoveLabelTool(server, mcpUnity, toolLogger);
 registerAddrFindAssetTool(server, mcpUnity, toolLogger);
+registerAddrGetGroupSchemaTool(server, mcpUnity, toolLogger);
+registerAddrSetGroupSchemaTool(server, mcpUnity, toolLogger);
+registerAddrListProfilesTool(server, mcpUnity, toolLogger);
+registerAddrGetActiveProfileTool(server, mcpUnity, toolLogger);
+registerAddrSetActiveProfileTool(server, mcpUnity, toolLogger);
+registerAddrSetProfileVariableTool(server, mcpUnity, toolLogger);
 
 // Register Batch Execute Tool (high-priority for performance)
 registerBatchExecuteTool(server, mcpUnity, toolLogger);

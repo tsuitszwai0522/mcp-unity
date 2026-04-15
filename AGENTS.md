@@ -148,6 +148,40 @@ Node reads config from `../ProjectSettings/McpUnitySettings.json` relative to **
 - `modify_material` — Modify material properties (colors, floats, textures)
 - `get_material_info` — Get material details including all properties
 
+#### Addressables tools (optional package — requires `com.unity.addressables`)
+- `addr_init_settings` — Initialize AddressableAssetSettings if not present
+- `addr_get_settings` — Inspect current AddressableAssetSettings
+- `addr_list_groups` — List all Addressables groups
+- `addr_create_group` — Create a new Addressables group
+- `addr_remove_group` — Remove an Addressables group (errors if `in_use`)
+- `addr_set_default_group` — Set the default group for new entries
+- `addr_list_labels` — List all defined labels
+- `addr_create_label` — Create a new label
+- `addr_remove_label` — Remove a label (errors if `in_use`)
+- `addr_list_entries` — List entries, optionally filtered by group/label
+- `addr_add_entries` — Add assets to a group as Addressables
+- `addr_set_entry` — Update an entry's address / labels
+- `addr_remove_entries` — Remove entries from Addressables
+- `addr_move_entries` — Move entries between groups
+- `addr_find_asset` — Find an Addressable entry by path/address/GUID
+- `addr_get_group_schema` — Read `BundledAssetGroupSchema` fields (including resolved `build_path_value` / `load_path_value`)
+- `addr_set_group_schema` — Partial update of `BundledAssetGroupSchema` with dry-run and diff; validate-all then apply
+- `addr_list_profiles` — List all profiles with resolved variable maps
+- `addr_get_active_profile` — Query currently active profile and its variables
+- `addr_set_active_profile` — Switch the active profile by name
+- `addr_set_profile_variable` — Set a profile variable (optionally creating it at profile-settings level — affects ALL profiles)
+
+#### Localization tools (optional package — requires `com.unity.localization`)
+- `loc_list_tables` — List all String Tables
+- `loc_create_table` — Create a new String Table collection
+- `loc_delete_table` — Delete a String Table collection
+- `loc_add_locale` — Add a locale to a project
+- `loc_remove_locale` — Remove a locale
+- `loc_get_entries` — Read entries from a table (optional `include_values`)
+- `loc_set_entry` — Set a single key's value for a locale
+- `loc_set_entries` — Bulk set entries on a table
+- `loc_delete_entry` — Delete an entry from a table
+
 ### Available resources (current)
 - `unity://menu-items` — List of available menu items
 - `unity://scenes-hierarchy` — Current scene hierarchy

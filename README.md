@@ -304,6 +304,24 @@ The following tools are available for manipulating and querying Unity scenes and
 - `addr_find_asset`: Looks up an asset by path and returns its full Addressables entry info (group, address, labels). Returns `found:false` if the asset exists but is not currently addressable
   > **Example prompt:** "Is Assets/Prefabs/MainMenu.prefab addressable? What's its address and group?"
 
+- `addr_get_group_schema`: Reads a group's current `BundledAssetGroupSchema` values (compression, include_in_build, packed_mode, bundle_naming, cache flags, retry/timeout, and the profile variable names currently bound to `build_path` / `load_path` plus their resolved values)
+  > **Example prompt:** "What compression and load path are the TMP font groups currently using?"
+
+- `addr_set_group_schema`: Partial update of a group's `BundledAssetGroupSchema`. Only fields passed in `values` are changed; response returns a diff of what actually moved. Supported fields: `compression` (`Uncompressed`/`LZ4`/`LZMA`), `include_in_build`, `packed_mode`, `bundle_naming` (`AppendHash`/`NoHash`/`OnlyHash`/`FileNameHash`), `use_asset_bundle_cache`, `use_unitywebrequest_for_local_bundles`, `retry_count`, `timeout`, `build_path` / `load_path` (profile variable names — e.g. `Remote.BuildPath`). Pass `dry_run: true` to preview without saving
+  > **Example prompt:** "Switch all TMP font groups to LZMA compression and Remote.BuildPath / Remote.LoadPath"
+
+- `addr_list_profiles`: Lists every Addressables profile with its resolved variable map, marking which one is active
+  > **Example prompt:** "List all Addressables profiles and their variables"
+
+- `addr_get_active_profile`: Returns the currently active profile plus its resolved variable dictionary
+  > **Example prompt:** "What's the active Addressables profile and its BuildPath / LoadPath values?"
+
+- `addr_set_active_profile`: Switches the active profile by name
+  > **Example prompt:** "Switch the active Addressables profile to 'CDN'"
+
+- `addr_set_profile_variable`: Sets a profile variable on a named profile (e.g. `Remote.LoadPath` to a CDN URL). Pass `create_if_missing: true` to define a brand-new variable at the profile-settings level. **Note:** newly-created variables are added to *all* profiles, not only the named one
+  > **Example prompt:** "Set Remote.LoadPath on the Default profile to https://cdn.example.com/[BuildTarget]"
+
 - `get_interactable_elements`: Scans the scene for all interactable UI elements (Button, Toggle, InputField, Slider, Dropdown, ScrollRect, etc.) with optional filtering and scope control. Requires Play Mode
   > **Example prompt:** "Show me all interactable UI elements in the current scene"
 
