@@ -24,7 +24,8 @@ namespace McpUnity.Services
         /// <param name="returnOnlyFailures">If true, only failed test results are included in the output.</param>
         /// <param name="returnWithLogs">If true, all logs are included in the output.</param>
         /// <param name="testFilter">A filter string to select specific tests to run.</param>
+        /// <param name="assemblyNames">Optional assembly-name filter forwarded to <see cref="Filter.assemblyNames"/>. Each entry may be prefixed with <c>!</c> to exclude that assembly (e.g. <c>!Unity.Multiplayer.Tools.Adapters.Tests</c>) — useful for working around third-party test assemblies that are broken in EditMode.</param>
         /// <returns>Task that resolves with test results when tests are complete</returns>
-        Task<JObject> ExecuteTestsAsync(TestMode testMode, bool returnOnlyFailures, bool returnWithLogs, string testFilter);
+        Task<JObject> ExecuteTestsAsync(TestMode testMode, bool returnOnlyFailures, bool returnWithLogs, string testFilter, string[] assemblyNames = null);
     }
 }

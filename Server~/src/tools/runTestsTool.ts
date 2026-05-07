@@ -11,6 +11,7 @@ const toolDescription = 'Runs Unity\'s Test Runner tests';
 const paramsSchema = z.object({
   testMode: z.string().optional().default('EditMode').describe('The test mode to run (EditMode or PlayMode) - defaults to EditMode (optional)'),
   testFilter: z.string().optional().default('').describe('The specific test filter to run (e.g. specific test name or class name, must include namespace) (optional)'),
+  assemblyNames: z.array(z.string()).optional().describe('Optional assembly-name filter forwarded to Unity Test Framework Filter.assemblyNames. Each entry is matched against the test\'s assembly name (without .dll); prefix an entry with "!" to exclude that assembly. Useful for skipping broken third-party test assemblies (e.g. ["!Unity.Multiplayer.Tools.Adapters.Tests"]) (optional)'),
   returnOnlyFailures: z.boolean().optional().default(true).describe('Whether to show only failed tests in the results (optional)'),
   returnWithLogs: z.boolean().optional().default(false).describe('Whether to return the test logs in the results (optional)')
 });
@@ -57,6 +58,7 @@ async function toolHandler(mcpUnity: McpUnity, params: any = {}): Promise<CallTo
   const {
     testMode = 'EditMode',
     testFilter = '',
+    assemblyNames,
     returnOnlyFailures = true,
     returnWithLogs = false
   } = params;
@@ -64,9 +66,10 @@ async function toolHandler(mcpUnity: McpUnity, params: any = {}): Promise<CallTo
   // Create and wait for the test run
   const response = await mcpUnity.sendRequest({
     method: toolName,
-    params: { 
+    params: {
       testMode,
       testFilter,
+      assemblyNames,
       returnOnlyFailures,
       returnWithLogs
     }

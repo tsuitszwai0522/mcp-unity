@@ -29,7 +29,7 @@ namespace McpUnity.Tools
         /// <summary>
         /// Executes the RunTests tool asynchronously on the main thread.
         /// </summary>
-        /// <param name="parameters">Tool parameters, including optional 'testMode' and 'testFilter'.</param>
+        /// <param name="parameters">Tool parameters, including optional 'testMode', 'testFilter', and 'assemblyNames'.</param>
         /// <param name="tcs">TaskCompletionSource to set the result or exception.</param>
         public override async void ExecuteAsync(JObject parameters, TaskCompletionSource<JObject> tcs)
         {
@@ -39,17 +39,39 @@ namespace McpUnity.Tools
             bool returnOnlyFailures = parameters?["returnOnlyFailures"]?.ToObject<bool>() ?? false; // Optional
             bool returnWithLogs = parameters?["returnWithLogs"]?.ToObject<bool>() ?? false; // Optional
 
+            // Optional assembly-name filter; supports NUnit "!" exclusion prefix per entry
+            // (e.g. "!Unity.Multiplayer.Tools.Adapters.Tests" to skip a broken third-party test assembly).
+            string[] assemblyNames = null;
+            JArray assemblyNamesArr = parameters?["assemblyNames"] as JArray;
+            if (assemblyNamesArr != null && assemblyNamesArr.Count > 0)
+            {
+                var list = new List<string>(assemblyNamesArr.Count);
+                foreach (var token in assemblyNamesArr)
+                {
+                    var name = token?.ToObject<string>();
+                    if (!string.IsNullOrEmpty(name))
+                    {
+                        list.Add(name);
+                    }
+                }
+                if (list.Count > 0)
+                {
+                    assemblyNames = list.ToArray();
+                }
+            }
+
             TestMode testMode = TestMode.EditMode;
-            
+
             if (Enum.TryParse(testModeStr, true, out TestMode parsedMode))
             {
                 testMode = parsedMode;
             }
 
-            McpLogger.LogInfo($"Executing RunTestsTool: Mode={testMode}, Filter={testFilter ?? "(none)"}");
+            string assemblyLog = assemblyNames != null ? string.Join(",", assemblyNames) : "(none)";
+            McpLogger.LogInfo($"Executing RunTestsTool: Mode={testMode}, Filter={testFilter ?? "(none)"}, Assemblies={assemblyLog}");
 
             // Call the service to run tests
-            JObject result = await _testRunnerService.ExecuteTestsAsync(testMode, returnOnlyFailures, returnWithLogs, testFilter);
+            JObject result = await _testRunnerService.ExecuteTestsAsync(testMode, returnOnlyFailures, returnWithLogs, testFilter, assemblyNames);
             tcs.SetResult(result);
         }
     }

@@ -70,8 +70,9 @@ namespace McpUnity.Services
         /// <param name="returnOnlyFailures">If true, only failed test results are included in the output.</param>
         /// <param name="returnWithLogs">If true, all logs are included in the output.</param>
         /// <param name="testFilter">A filter string to select specific tests to run.</param>
+        /// <param name="assemblyNames">Optional assembly-name filter. Forwarded as-is to <see cref="Filter.assemblyNames"/>; each entry supports the NUnit <c>!</c> exclusion prefix.</param>
         /// <returns>Task that resolves with test results when tests are complete</returns>
-        public async Task<JObject> ExecuteTestsAsync(TestMode testMode, bool returnOnlyFailures, bool returnWithLogs, string testFilter = "")
+        public async Task<JObject> ExecuteTestsAsync(TestMode testMode, bool returnOnlyFailures, bool returnWithLogs, string testFilter = "", string[] assemblyNames = null)
         {
             var filter = new Filter { testMode = testMode };
 
@@ -82,6 +83,11 @@ namespace McpUnity.Services
             if (!string.IsNullOrEmpty(testFilter))
             {
                 filter.testNames = new[] { testFilter };
+            }
+
+            if (assemblyNames != null && assemblyNames.Length > 0)
+            {
+                filter.assemblyNames = assemblyNames;
             }
 
             _testRunnerApi.Execute(new ExecutionSettings(filter));

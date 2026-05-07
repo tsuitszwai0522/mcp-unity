@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.14.0] - 2026-05-07
+
+`run_tests` gains an `assemblyNames` filter so callers can scope a run to specific test assemblies — and, more importantly, **exclude broken third-party test assemblies** without having to embed and patch the offending package.
+
+### Added
+
+- **`run_tests` — `assemblyNames` parameter** — optional `string[]` forwarded as-is to Unity Test Framework's `Filter.assemblyNames`. Each entry matches the test's assembly name (without `.dll`); prefix an entry with `!` to exclude that assembly. Multiple entries with `!` are AND-combined (a test must not match any exclusion); inclusion entries are OR-combined; mixed inclusion+exclusion is `(OR of includes) AND (AND of NOT excludes)` per NUnit's standard filter semantics. Combines with the existing `testFilter` (testNames) — both filters are AND-applied.
+
+  Motivating use case: Multiplayer Tools 1.1.1 ships a broken `Unity.Multiplayer.Tools.Adapters.Tests.Ngo1WithUtp2.Ngo1WithUtp2AdapterInitializerTests` whose asmdef declares `includePlatforms: ["Editor"]` but whose body calls `NetworkManager.StartHost()` — the test floods EditMode runs with `EditMode test can only yield null`. Pass `assemblyNames: ["!Unity.Multiplayer.Tools.Adapters.Tests"]` (or any other broken third-party assembly) to skip the offender without touching the package source.
+
+  Example: `run_tests testMode=EditMode assemblyNames=["!Unity.Multiplayer.Tools.Adapters.Tests"]`
+
 ## [1.13.0] - 2026-04-15
 
 Addressables group schema and profile management tools — the Small-Client / CDN workflow now has first-class MCP surface for reading and flipping `BundledAssetGroupSchema` fields and switching profile variables without opening the Addressables window.

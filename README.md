@@ -83,8 +83,8 @@ The following tools are available for manipulating and querying Unity scenes and
 - `add_package`: Installs new packages in the Unity Package Manager
   > **Example prompt:** "Add the TextMeshPro package to my project"
 
-- `run_tests`: Runs tests using the Unity Test Runner
-  > **Example prompt:** "Run all the EditMode tests in my project"
+- `run_tests`: Runs tests using the Unity Test Runner. Supports `testFilter` (testNames) and `assemblyNames` for scoping a run; `assemblyNames` entries accept the NUnit `!` exclusion prefix, e.g. `["!Unity.Multiplayer.Tools.Adapters.Tests"]` to skip a broken third-party test assembly without embedding the package
+  > **Example prompt:** "Run all the EditMode tests in my project, but skip the Unity.Multiplayer.Tools.Adapters.Tests assembly"
 
 - `send_console_log`: Send a console log to Unity
   > **Example prompt:** "Send a console log to Unity Editor"
@@ -701,6 +701,24 @@ Connection failed: Unknown error
 ```
 
 This error occurs because the bridge connection is lost when the domain reloads upon switching to Play Mode.  The workaround is to turn off **Reload Domain** in **Edit > Project Settings > Editor > "Enter Play Mode Settings"**.
+
+</details>
+
+<details>
+<summary><span style="font-size: 1.1em; font-weight: bold;">Why does <code>run_tests testMode=EditMode</code> fail with "EditMode test can only yield null"?</span></summary>
+
+This usually comes from a third-party test assembly that mis-declares an EditMode test which actually requires PlayMode runtime. A common offender is **Multiplayer Tools 1.1.1**, whose `Unity.Multiplayer.Tools.Adapters.Tests` asmdef has `includePlatforms: ["Editor"]` but whose `Ngo1WithUtp2AdapterInitializerTests` calls `NetworkManager.StartHost()`. Unity Test Framework's `EditModeRunner` flags any non-null yield bubbling up and logs `EditMode test can only yield null`.
+
+Workaround — pass an `assemblyNames` exclusion to skip the offending assembly without embedding/patching the package:
+
+```jsonc
+{
+  "testMode": "EditMode",
+  "assemblyNames": ["!Unity.Multiplayer.Tools.Adapters.Tests"]
+}
+```
+
+You can chain more exclusions (e.g. `"!Unity.Multiplayer.Tools.NetStatsMonitor.Tests.Implementation"`) or mix with an inclusion list. Entries are matched against the assembly name without `.dll`. Available since v1.14.0.
 
 </details>
 
