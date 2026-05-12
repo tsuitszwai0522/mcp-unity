@@ -24,7 +24,16 @@ namespace McpUnity.Unity
     public class McpUnitySocketHandler : WebSocketBehavior
     {
         private readonly McpUnityServer _server;
-        
+
+        // In-flight request tracking — populated in OnMessage, read by OnError so the
+        // "WebSocket error: An error has occurred in sending data" log can be attributed
+        // to the request that triggered it (method, id, payload size, elapsed time).
+        private string _lastMethod;
+        private string _lastRequestId;
+        private int _lastResponseSize;
+        private DateTime _lastRequestStartUtc;
+        private bool _lastSendAttempted;
+
         /// <summary>
         /// Default constructor required by WebSocketSharp
         /// </summary>
@@ -112,6 +121,14 @@ namespace McpUnity.Unity
                 var method = requestJson["method"]?.ToString();
                 var parameters = requestJson["params"] as JObject ?? new JObject();
                 var requestId = requestJson["id"]?.ToString();
+
+                // Track for OnError diagnostics. Cleared on the next OnMessage / OnClose.
+                _lastMethod = method;
+                _lastRequestId = requestId;
+                _lastResponseSize = 0;
+                _lastRequestStartUtc = DateTime.UtcNow;
+                _lastSendAttempted = false;
+
                 // We need to dispatch to Unity's main thread and wait for completion
                 var tcs = new TaskCompletionSource<JObject>();
                 
@@ -139,9 +156,13 @@ namespace McpUnity.Unity
                 JObject responseJson = await tcs.Task;
                 JObject jsonRpcResponse = CreateResponse(requestId, responseJson);
                 string responseStr = jsonRpcResponse.ToString(Formatting.None);
-                
+
                 McpLogger.LogInfo($"WebSocket message response for request ID '{requestId}': {responseStr}");
-                
+
+                // Capture payload size before Send so OnError can report it if Send raises.
+                _lastResponseSize = responseStr?.Length ?? 0;
+                _lastSendAttempted = true;
+
                 // Send the response back to the client
                 Send(responseStr);
             }
@@ -204,19 +225,77 @@ namespace McpUnity.Unity
         protected override void OnClose(CloseEventArgs e)
         {
             _server.Clients.TryGetValue(ID, out string clientName);
-            
+
             // Remove the client from the server
             _server.Clients.Remove(ID);
-            
+
             McpLogger.LogInfo($"WebSocket client '{clientName}' disconnected: {e.Reason}");
+
+            // Clear in-flight tracking so a later OnError on a different session
+            // doesn't get misattributed to this session's last request.
+            _lastMethod = null;
+            _lastRequestId = null;
+            _lastResponseSize = 0;
+            _lastSendAttempted = false;
         }
-        
+
         /// <summary>
-        /// Handle WebSocket errors
+        /// Handle WebSocket errors.
+        /// Logs the underlying exception and the in-flight request context so we can
+        /// attribute "An error has occurred in sending data" to a specific tool call,
+        /// payload size, and elapsed time. See doc/lessons/unity-mcp-lessons.md for
+        /// known triggers (oversized payloads, client reconnect kicking stale sessions).
         /// </summary>
         protected override void OnError(ErrorEventArgs e)
         {
-            McpLogger.LogError($"WebSocket error: {e.Message}");
+            var sb = new StringBuilder();
+            sb.Append("WebSocket error: ").Append(e?.Message ?? "(no message)");
+
+            if (e?.Exception != null)
+            {
+                sb.Append("\n  Exception: ").Append(e.Exception.GetType().Name)
+                  .Append(": ").Append(e.Exception.Message);
+                if (e.Exception.InnerException != null)
+                {
+                    sb.Append("\n  InnerException: ").Append(e.Exception.InnerException.GetType().Name)
+                      .Append(": ").Append(e.Exception.InnerException.Message);
+                }
+                if (!string.IsNullOrEmpty(e.Exception.StackTrace))
+                {
+                    sb.Append("\n  StackTrace: ").Append(e.Exception.StackTrace);
+                }
+            }
+
+            if (!string.IsNullOrEmpty(_lastMethod) || !string.IsNullOrEmpty(_lastRequestId))
+            {
+                var elapsedMs = (DateTime.UtcNow - _lastRequestStartUtc).TotalMilliseconds;
+                sb.Append("\n  Last request: method=").Append(_lastMethod ?? "(null)")
+                  .Append(", id=").Append(_lastRequestId ?? "(null)")
+                  .Append(", elapsedMs=").Append(elapsedMs.ToString("F0"))
+                  .Append(", responseSize=").Append(_lastResponseSize)
+                  .Append(", sendAttempted=").Append(_lastSendAttempted);
+            }
+            else
+            {
+                sb.Append("\n  Last request: (none — error not tied to an in-flight OnMessage)");
+            }
+
+            int otherClients = 0;
+            try
+            {
+                foreach (var key in _server.Clients.Keys)
+                {
+                    if (key != ID) otherClients++;
+                }
+            }
+            catch
+            {
+                // Defensive: clients dict shouldn't throw, but error path must stay safe.
+            }
+            sb.Append("\n  Session: ID=").Append(ID)
+              .Append(", otherClients=").Append(otherClients);
+
+            McpLogger.LogError(sb.ToString());
         }
         
         /// <summary>
