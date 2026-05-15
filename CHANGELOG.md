@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.14.1] - 2026-05-15
+
+Upstream merge — cherry-picked four stability/compatibility commits from `CoderGamester/mcp-unity` covering MCP client schema compatibility, request-timeout reconnect behavior, and concurrent client support. No new tools or parameters; behavior changes only.
+
+### Fixed
+
+- **Transform tools no longer emit local JSON pointer refs** (upstream `4828b85`) — `move_gameobject`, `rotate_gameobject`, `scale_gameobject`, and `set_transform` now build a fresh nested Vector3 schema per field via `createVector3Schema()` instead of reusing a single `vector3Schema` constant. The previous shared-schema pattern caused `zod-to-json-schema` to emit `#/properties/position` refs that some MCP clients (notably ones that rejected `KeyError: 'position'` during tool initialization) could not resolve. Fix is TS-only; C# side unaffected.
+- **Request timeouts no longer trigger reconnect cascades** (upstream `265545f`) — a single tool-call timeout previously cascaded into a full WebSocket reconnect attempt, which would tear down every other in-flight request on the same connection. The Node-side WebSocket client now distinguishes per-request timeouts from connection-level failures and leaves the socket open. Includes regression tests in `Server~/src/__tests__/mcpUnity.test.ts` and `unityConnection.test.ts`.
+
+### Changed
+
+- **Multiple concurrent MCP clients are now supported** (upstream `7d505c3`) — previously, opening a second MCP client (e.g. two Claude Code instances against the same Editor) would kick the first client's WebSocket session, which the Node side would then attempt to reconnect, producing an infinite reconnection loop. `McpUnityServer.Clients` is now a `ConcurrentDictionary<string, string>` and `McpUnitySocketHandler.OnClose` uses `TryRemove` (the OnClose merge also preserves the v1.14.0 in-flight-tracking clear from commit `2293747` so OnError still gets attribution context). Connect/disconnect log lines now include the total client count.
+- **Stale WebSocket sessions are cleaned up on new connection** (upstream `a163961`) — `OnOpen` now queries WebSocketSharp's `InactiveIDs` and removes only dead sessions, preserving active connections from other MCP clients. Prevents file descriptor accumulation from crashed Node.js processes without re-introducing the single-client kick from before `7d505c3`. See upstream issue #110 for the FD accumulation history.
+
 ## [1.14.0] - 2026-05-07
 
 `run_tests` gains an `assemblyNames` filter so callers can scope a run to specific test assemblies — and, more importantly, **exclude broken third-party test assemblies** without having to embed and patch the offending package.
