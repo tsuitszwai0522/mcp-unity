@@ -43,9 +43,17 @@ namespace McpUnity.Tools
 
                 if (forceFocus)
                 {
-                    // Let focus + repaint settle one frame before ScreenCapture samples the active window
-                    EditorApplication.delayCall += () =>
+                    // EditorApplication.delayCall can be starved in headless / automated (MCP) contexts
+                    // → the capture lambda never runs → tcs never completes → the MCP request times out.
+                    // EditorApplication.update ticks every editor frame, so use it with a small frame
+                    // counter: this both lets the Game View repaint after Focus() before ScreenCapture
+                    // samples it, and guarantees the result is produced.
+                    int framesToWait = 2;
+                    EditorApplication.CallbackFunction handler = null;
+                    handler = () =>
                     {
+                        if (--framesToWait > 0) return;
+                        EditorApplication.update -= handler;
                         try
                         {
                             tcs.TrySetResult(CaptureGameView(width, height));
@@ -58,6 +66,7 @@ namespace McpUnity.Tools
                             ));
                         }
                     };
+                    EditorApplication.update += handler;
                 }
                 else
                 {
@@ -75,7 +84,16 @@ namespace McpUnity.Tools
 
         private static JObject CaptureGameView(int width, int height)
         {
-            // Try ScreenCapture first (works best during Play Mode)
+            // Primary: capture the real composited Game View via the editor's own render path
+            // (PlayModeView.RenderView). This is focus-independent (no need to bring the Game View tab to
+            // front) and DOES include screen-space-camera overlay UI — unlike camera.Render() / a Standard
+            // render request, which skip the URP overlay stack, and unlike ScreenCapture which samples
+            // whichever editor view currently has focus (often the Scene View).
+            var viaRenderView = TryCaptureViaRenderView(width, height);
+            if (viaRenderView != null)
+                return viaRenderView;
+
+            // Fallback: ScreenCapture (works best during Play Mode; samples the focused view's backbuffer)
             var screenshot = ScreenCapture.CaptureScreenshotAsTexture();
             if (screenshot != null)
             {
@@ -117,6 +135,79 @@ namespace McpUnity.Tools
 
             McpLogger.LogInfo("ScreenCapture unavailable, falling back to Main Camera render");
             return ScreenshotHelper.CaptureFromCamera(cam, width, height, "Game View (via Main Camera)");
+        }
+
+        /// <summary>
+        /// Capture the real composited Game View frame via the editor's own render path
+        /// (UnityEditor.PlayModeView.RenderView), which INCLUDES render-pipeline overlay UI (URP
+        /// ScreenSpace-Camera canvases) — something no off-screen camera render can do, because URP overlay
+        /// cameras only composite into the live Game View swapchain. Focus-independent (RenderView renders on
+        /// demand regardless of which editor tab is active). Reflection because RenderView is protected editor
+        /// API. Returns null (caller falls back) when the Game View / method can't be resolved.
+        /// </summary>
+        private static JObject TryCaptureViaRenderView(int width, int height)
+        {
+            var previousActiveRT = RenderTexture.active;
+            RenderTexture dst = null;
+            Texture2D tex = null;
+            try
+            {
+                var gameViewType = typeof(Editor).Assembly.GetType("UnityEditor.GameView");
+                if (gameViewType == null)
+                    return null;
+
+                var gameView = EditorWindow.GetWindow(gameViewType, false, null, false);
+                if (gameView == null)
+                    return null;
+
+                // UnityEditor.PlayModeView.RenderView(Vector2 mousePosition, bool clearTexture) → RenderTexture
+                var playModeViewType = gameViewType.BaseType;
+                var renderViewMethod = playModeViewType?.GetMethod("RenderView",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                if (renderViewMethod == null)
+                    return null;
+
+                var srcRt = renderViewMethod.Invoke(gameView, new object[] { Vector2.zero, false }) as RenderTexture;
+                if (srcRt == null)
+                    return null;
+
+                dst = RenderTexture.GetTemporary(width, height, 0, RenderTextureFormat.ARGB32);
+                // RenderView's RenderTexture has a flipped Y origin vs Texture2D.ReadPixels → blit with a
+                // vertical flip (scale.y = -1, offset.y = 1) so the readback is upright.
+                Graphics.Blit(srcRt, dst, new Vector2(1f, -1f), new Vector2(0f, 1f));
+
+                RenderTexture.active = dst;
+                tex = new Texture2D(width, height, TextureFormat.RGB24, false);
+                tex.ReadPixels(new Rect(0, 0, width, height), 0, 0);
+                tex.Apply();
+
+                byte[] pngBytes = tex.EncodeToPNG();
+                string base64 = Convert.ToBase64String(pngBytes);
+
+                McpLogger.LogInfo($"Game View screenshot via PlayModeView.RenderView ({width}x{height})");
+
+                return new JObject
+                {
+                    ["success"] = true,
+                    ["type"] = "image",
+                    ["mimeType"] = "image/png",
+                    ["data"] = base64,
+                    ["message"] = $"Game View screenshot captured via RenderView ({width}x{height})"
+                };
+            }
+            catch (Exception ex)
+            {
+                McpLogger.LogWarning($"GameView RenderView capture failed, falling back: {ex.Message}");
+                return null;
+            }
+            finally
+            {
+                RenderTexture.active = previousActiveRT;
+                if (tex != null)
+                    UnityEngine.Object.DestroyImmediate(tex);
+                if (dst != null)
+                    RenderTexture.ReleaseTemporary(dst);
+            }
         }
     }
 
