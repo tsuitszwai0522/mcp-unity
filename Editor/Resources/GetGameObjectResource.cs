@@ -93,13 +93,17 @@ namespace McpUnity.Resources
         /// <param name="maxDepth">Maximum depth for child traversal (-1 = unlimited)</param>
         /// <param name="currentDepth">Current recursion depth (internal use)</param>
         /// <param name="includeChildren">Whether to include child GameObjects</param>
+        /// <param name="detailedTypeFilter">When non-null, only components whose type name is in this set get
+        /// their full property dump; all others fall back to type+enabled only. Null = dump all (current behavior).
+        /// Has no effect when <paramref name="includeDetailedComponents"/> is false.</param>
         /// <returns>A JObject representing the GameObject</returns>
         public static JObject GameObjectToJObject(
             GameObject gameObject,
             bool includeDetailedComponents,
             int maxDepth = -1,
             int currentDepth = 0,
-            bool includeChildren = true)
+            bool includeChildren = true,
+            HashSet<string> detailedTypeFilter = null)
         {
             if (gameObject == null) return null;
 
@@ -113,7 +117,7 @@ namespace McpUnity.Resources
                 ["layer"] = gameObject.layer,
                 ["layerName"] = LayerMask.LayerToName(gameObject.layer),
                 ["instanceId"] = gameObject.GetInstanceID(),
-                ["components"] = GetComponentsInfo(gameObject, includeDetailedComponents)
+                ["components"] = GetComponentsInfo(gameObject, includeDetailedComponents, detailedTypeFilter)
             };
 
             // Add children with depth control
@@ -124,7 +128,7 @@ namespace McpUnity.Resources
                 {
                     childrenArray.Add(GameObjectToJObject(
                         child.gameObject, includeDetailedComponents,
-                        maxDepth, currentDepth + 1, includeChildren));
+                        maxDepth, currentDepth + 1, includeChildren, detailedTypeFilter));
                 }
             }
             else if (gameObject.transform.childCount > 0)
@@ -185,27 +189,33 @@ namespace McpUnity.Resources
         /// </summary>
         /// <param name="gameObject">The GameObject to get components from</param>
         /// <param name="includeDetailedInfo">Whether to include detailed component information</param>
+        /// <param name="detailedTypeFilter">When non-null, only components whose type name is in this set get
+        /// their full property dump; all others fall back to type+enabled only. Null = dump all.</param>
         /// <returns>A JArray containing component information</returns>
-        private static JArray GetComponentsInfo(GameObject gameObject, bool includeDetailedInfo = false)
+        private static JArray GetComponentsInfo(GameObject gameObject, bool includeDetailedInfo = false, HashSet<string> detailedTypeFilter = null)
         {
             Component[] components = gameObject.GetComponents<Component>();
             JArray componentsArray = new JArray();
-            
+
             foreach (Component component in components)
             {
                 if (component == null) continue;
-                
+
                 Type componentType = component.GetType();
                 bool isUnsafe = IsUnsafeNativeComponent(componentType);
-                
+
                 JObject componentJson = new JObject
                 {
                     ["type"] = componentType.Name,
                     ["enabled"] = IsComponentEnabled(component)
                 };
 
+                // Field-projection: skip the property dump for components not in the filter (when one is set)
+                bool wantDetail = includeDetailedInfo
+                    && (detailedTypeFilter == null || detailedTypeFilter.Contains(componentType.Name));
+
                 // Add detailed information if requested and component is safe to inspect
-                if (includeDetailedInfo)
+                if (wantDetail)
                 {
                     if (isUnsafe)
                     {

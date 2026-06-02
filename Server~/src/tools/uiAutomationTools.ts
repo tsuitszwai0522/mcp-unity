@@ -93,19 +93,26 @@ async function getInteractableElementsHandler(
     );
   }
 
+  // Serialize the full element list into the text content. The MCP client only surfaces
+  // `content[]` — a non-standard `data` field is silently dropped, which previously left
+  // callers with just the count and no paths/states.
   return {
     content: [
       {
         type: "text",
-        text:
-          response.message ||
-          `Found ${response.count} interactable element(s)`,
+        text: JSON.stringify(
+          {
+            message:
+              response.message ||
+              `Found ${response.count} interactable element(s)`,
+            count: response.count,
+            elements: response.elements,
+          },
+          null,
+          2
+        ),
       },
     ],
-    data: {
-      elements: response.elements,
-      count: response.count,
-    },
   };
 }
 

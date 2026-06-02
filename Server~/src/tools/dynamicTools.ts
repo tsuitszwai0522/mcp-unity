@@ -43,6 +43,23 @@ export async function registerDynamicTools(
                 params
               });
 
+              // Image-shaped responses (e.g. external screenshot/capture tools) carry base64 pixel
+              // data — emit a real MCP image content block instead of stringifying it (which would
+              // dump the entire base64 as text, or drop the image entirely when a message exists).
+              // Contract: { success, type: 'image', mimeType, data: <base64>, message? }.
+              if (result && result.type === 'image' && typeof result.data === 'string') {
+                const content: Array<{ type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }> = [];
+                if (result.message) {
+                  content.push({ type: 'text' as const, text: result.message });
+                }
+                content.push({
+                  type: 'image' as const,
+                  data: result.data,
+                  mimeType: result.mimeType || 'image/png'
+                });
+                return { content };
+              }
+
               const text = result.message || JSON.stringify(result, null, 2);
               return {
                 content: [{ type: 'text' as const, text }],

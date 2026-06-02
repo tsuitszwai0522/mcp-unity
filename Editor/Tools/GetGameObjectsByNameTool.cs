@@ -22,7 +22,7 @@ namespace McpUnity.Tools
         public GetGameObjectsByNameTool()
         {
             Name = "get_gameobjects_by_name";
-            Description = "Finds ALL GameObjects whose name matches a glob pattern (supports '*' and '?'). Returns an array of matches with hierarchical paths and component data. Use this instead of get_gameobject when there are multiple instances of the same name (e.g. 'CBCardUI(Clone)').";
+            Description = "Finds ALL GameObjects whose name matches a glob pattern (supports '*' and '?'). Returns an array of matches with hierarchical paths and component data. Use this instead of get_gameobject when there are multiple instances of the same name (e.g. 'CBCardUI(Clone)'). Use 'compact' to drop component property dumps (type+enabled only), or 'componentFilter' to keep dumps only for specific component types (e.g. ['RectTransform']) — both cut output size dramatically.";
         }
 
         public override JObject Execute(JObject parameters)
@@ -40,6 +40,20 @@ namespace McpUnity.Tools
             int maxDepth = parameters?["maxDepth"]?.ToObject<int?>() ?? 0;
             bool includeChildren = parameters?["includeChildren"]?.ToObject<bool?>() ?? false;
             int limit = parameters?["limit"]?.ToObject<int?>() ?? DefaultLimit;
+
+            // Output-size controls (default off = current verbose behavior):
+            //  - compact: drop every component's property dump, keeping only { type, enabled }.
+            //  - componentFilter: keep property dumps only for the listed component types (e.g. ["RectTransform"]),
+            //    everything else collapses to { type, enabled }. Ignored when compact is true.
+            bool compact = parameters?["compact"]?.ToObject<bool?>() ?? false;
+            HashSet<string> componentFilter = null;
+            if (parameters?["componentFilter"] is JArray componentFilterArray && componentFilterArray.Count > 0)
+            {
+                componentFilter = new HashSet<string>();
+                foreach (var item in componentFilterArray)
+                    componentFilter.Add(item.ToString());
+            }
+            bool includeDetailed = !compact;
 
             if (maxDepth < -1)
             {
@@ -103,7 +117,7 @@ namespace McpUnity.Tools
             foreach (var go in matches)
             {
                 JObject data = GetGameObjectResource.GameObjectToJObject(
-                    go, true, maxDepth, 0, includeChildren);
+                    go, includeDetailed, maxDepth, 0, includeChildren, componentFilter);
                 if (data != null)
                 {
                     data["path"] = GetHierarchicalPath(go);

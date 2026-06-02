@@ -32,6 +32,13 @@ namespace McpUnity.Services
         // Constants for log management
         private const int MaxLogEntries = 1000;
         private const int CleanupThreshold = 200; // Remove oldest entries when exceeding max
+
+        // MCP Unity's own framework logs (WebSocket traffic echo, connection events, etc.) are
+        // prefixed with this. At info level they flood get_console_logs with self-referential noise
+        // (e.g. "[MCP Unity] WebSocket message response for request ID ...: {full payload}"), so we
+        // skip storing them. Warnings/errors keep their prefix but are still captured (they may flag
+        // real framework problems).
+        private const string McpFrameworkLogPrefix = "[MCP Unity] ";
         
         // Collection to store all log messages
         private readonly List<LogEntry> _logEntries = new List<LogEntry>();
@@ -237,6 +244,14 @@ namespace McpUnity.Services
         /// <param name="type">The log type</param>
         private void OnLogMessageReceived(string logString, string stackTrace, LogType type)
         {
+            // Drop MCP Unity's own info-level framework chatter so get_console_logs stays focused on
+            // the project's logs. Only Log-level (info) entries are filtered — warnings/errors are kept
+            // because they may surface genuine MCP problems.
+            if (type == LogType.Log && logString != null && logString.StartsWith(McpFrameworkLogPrefix, StringComparison.Ordinal))
+            {
+                return;
+            }
+
             // Add the log entry to our collection
             lock (_logEntries)
             {

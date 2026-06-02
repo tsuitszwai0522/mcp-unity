@@ -112,7 +112,7 @@ async function toolHandler(
 
 const byNameToolName = "get_gameobjects_by_name";
 const byNameToolDescription =
-  "Finds ALL GameObjects whose name matches a glob pattern (supports '*' and '?'). Returns an array of matches with hierarchical paths. Use this instead of get_gameobject when multiple instances share the same name (e.g. 'CBCardUI(Clone)').";
+  "Finds ALL GameObjects whose name matches a glob pattern (supports '*' and '?'). Returns an array of matches with hierarchical paths. Use this instead of get_gameobject when multiple instances share the same name (e.g. 'CBCardUI(Clone)'). Pass 'compact' to drop component property dumps, or 'componentFilter' (e.g. ['RectTransform']) to keep dumps only for specific component types — both slash output size.";
 const byNameParamsSchema = z.object({
   name: z
     .string()
@@ -142,6 +142,18 @@ const byNameParamsSchema = z.object({
     .max(1000)
     .optional()
     .describe("Max number of matches to return. Default: 100"),
+  compact: z
+    .boolean()
+    .optional()
+    .describe(
+      "Drop every component's property dump, keeping only { type, enabled }. Cuts output size dramatically — use when you only need the hierarchy/component list, not field values. Default: false"
+    ),
+  componentFilter: z
+    .array(z.string())
+    .optional()
+    .describe(
+      "Keep full property dumps only for these component type names (e.g. ['RectTransform']); all other components collapse to { type, enabled }. Ideal for reading geometry across many objects without the matrix/serialization noise. Ignored when 'compact' is true."
+    ),
 });
 
 export function registerGetGameObjectsByNameTool(
