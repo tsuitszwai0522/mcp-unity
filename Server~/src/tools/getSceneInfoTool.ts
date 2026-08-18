@@ -3,6 +3,7 @@ import { McpUnity } from '../unity/mcpUnity.js';
 import { McpUnityError, ErrorType } from '../utils/errors.js';
 import * as z from 'zod';
 import { Logger } from '../utils/logger.js';
+import { payloadContent } from '../utils/toolPayload.js';
 
 const toolName = 'get_scene_info';
 const toolDescription = 'Gets information about the active scene including name, path, dirty state, root object count, and loaded state. Also returns info about all currently loaded scenes.';
@@ -60,14 +61,16 @@ async function toolHandler(mcpUnity: McpUnity, params: any) {
   }
 
   return {
-    content: [{
-      type: response.type as "text",
-      text: text
-    }],
-    data: {
-      activeScene: response.activeScene,
-      loadedSceneCount: response.loadedSceneCount,
-      loadedScenes: response.loadedScenes
-    }
+    content: [
+      {
+        type: response.type as "text",
+        text: text
+      },
+      payloadContent({
+          activeScene: response.activeScene,
+          loadedSceneCount: response.loadedSceneCount,
+          loadedScenes: response.loadedScenes
+        })
+    ]
   };
 }

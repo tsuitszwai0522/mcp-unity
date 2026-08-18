@@ -4,6 +4,7 @@ import { McpUnityError, ErrorType } from "../utils/errors.js";
 import * as z from "zod";
 import { Logger } from "../utils/logger.js";
 import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import { payloadContent } from '../utils/toolPayload.js';
 
 // ==================== get_interactable_elements ====================
 
@@ -198,12 +199,12 @@ async function simulatePointerClickHandler(
           response.message ||
           `Successfully clicked ${response.targetPath}`,
       },
+      payloadContent({
+          targetPath: response.targetPath,
+          eventsDispatched: response.eventsDispatched,
+          stateAfter: response.stateAfter,
+        }),
     ],
-    data: {
-      targetPath: response.targetPath,
-      eventsDispatched: response.eventsDispatched,
-      stateAfter: response.stateAfter,
-    },
   };
 }
 
@@ -300,14 +301,14 @@ async function simulateInputFieldHandler(
           response.message ||
           `Successfully set text on ${response.inputFieldType} at ${response.targetPath}`,
       },
+      payloadContent({
+          targetPath: response.targetPath,
+          inputFieldType: response.inputFieldType,
+          previousText: response.previousText,
+          currentText: response.currentText,
+          submitted: response.submitted,
+        }),
     ],
-    data: {
-      targetPath: response.targetPath,
-      inputFieldType: response.inputFieldType,
-      previousText: response.previousText,
-      currentText: response.currentText,
-      submitted: response.submitted,
-    },
   };
 }
 
@@ -393,16 +394,16 @@ async function getUIElementStateHandler(
           response.message ||
           `UI element state for ${response.path}`,
       },
+      payloadContent({
+          path: response.path,
+          instanceId: response.instanceId,
+          active: response.active,
+          activeInHierarchy: response.activeInHierarchy,
+          components: response.components,
+          rectTransform: response.rectTransform,
+          displayText: response.displayText,
+        }),
     ],
-    data: {
-      path: response.path,
-      instanceId: response.instanceId,
-      active: response.active,
-      activeInHierarchy: response.activeInHierarchy,
-      components: response.components,
-      rectTransform: response.rectTransform,
-      displayText: response.displayText,
-    },
   };
 }
 
@@ -517,14 +518,14 @@ async function waitForConditionHandler(
           ? response.message || `Condition '${params.condition}' met on '${params.objectPath}'`
           : response.error?.message || `Timeout waiting for '${params.condition}' on '${params.objectPath}'`,
       },
+      payloadContent({
+          success: isSuccess,
+          condition: response.condition,
+          objectPath: response.objectPath,
+          elapsed: response.elapsed,
+          finalState: response.finalState,
+        }),
     ],
-    data: {
-      success: isSuccess,
-      condition: response.condition,
-      objectPath: response.objectPath,
-      elapsed: response.elapsed,
-      finalState: response.finalState,
-    },
     isError: !isSuccess,
   };
 }
@@ -646,15 +647,15 @@ async function simulateDragHandler(
           response.message ||
           `Successfully dragged ${response.sourcePath}`,
       },
+      payloadContent({
+          sourcePath: response.sourcePath,
+          startPosition: response.startPosition,
+          endPosition: response.endPosition,
+          totalDelta: response.totalDelta,
+          steps: response.steps,
+          dropReceiver: response.dropReceiver,
+        }),
     ],
-    data: {
-      sourcePath: response.sourcePath,
-      startPosition: response.startPosition,
-      endPosition: response.endPosition,
-      totalDelta: response.totalDelta,
-      steps: response.steps,
-      dropReceiver: response.dropReceiver,
-    },
   };
 }
 

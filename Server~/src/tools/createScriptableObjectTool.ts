@@ -3,6 +3,7 @@ import { McpUnity } from '../unity/mcpUnity.js';
 import { McpUnityError, ErrorType } from '../utils/errors.js';
 import * as z from 'zod';
 import { Logger } from '../utils/logger.js';
+import { payloadContent } from '../utils/toolPayload.js';
 
 // Constants for the tool
 const toolName = 'create_scriptable_object';
@@ -79,14 +80,15 @@ async function toolHandler(mcpUnity: McpUnity, params: any) {
   }
 
   return {
-    content: [{
-      type: response.type,
-      text: response.message || `Successfully created ScriptableObject`
-    }],
-    // Include the asset path in the result for programmatic access
-    data: {
-      assetPath: response.assetPath,
-      typeName: response.typeName
-    }
+    content: [
+      {
+        type: response.type,
+        text: response.message || `Successfully created ScriptableObject`
+      },
+      payloadContent({
+          assetPath: response.assetPath,
+          typeName: response.typeName
+        })
+    ]
   };
 }

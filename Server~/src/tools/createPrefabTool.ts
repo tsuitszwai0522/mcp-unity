@@ -3,6 +3,7 @@ import { McpUnity } from '../unity/mcpUnity.js';
 import { McpUnityError, ErrorType } from '../utils/errors.js';
 import * as z from 'zod';
 import { Logger } from '../utils/logger.js';
+import { payloadContent } from '../utils/toolPayload.js';
 
 // Constants for the tool
 const toolName = 'create_prefab';
@@ -73,13 +74,14 @@ async function toolHandler(mcpUnity: McpUnity, params: any) {
   }
   
   return {
-    content: [{
-      type: response.type,
-      text: response.message || `Successfully created prefab`
-    }],
-    // Include the prefab path in the result for programmatic access
-    data: {
-      prefabPath: response.prefabPath
-    }
+    content: [
+      {
+        type: response.type,
+        text: response.message || `Successfully created prefab`
+      },
+      payloadContent({
+          prefabPath: response.prefabPath
+        })
+    ]
   };
 }

@@ -3,6 +3,7 @@ import { McpUnity } from '../unity/mcpUnity.js';
 import { McpUnityError, ErrorType } from '../utils/errors.js';
 import * as z from 'zod';
 import { Logger } from '../utils/logger.js';
+import { payloadContent } from '../utils/toolPayload.js';
 
 // --- get_editor_state ---
 
@@ -52,13 +53,15 @@ export function registerEditorStateTools(server: McpServer, mcpUnity: McpUnity, 
 
         logger.info(`Tool execution successful: ${getStateName}`);
         return {
-          content: [{
-            type: 'text' as const,
-            text
-          }],
-          data: {
-            state: response.state
-          }
+          content: [
+            {
+              type: 'text' as const,
+              text
+            },
+            payloadContent({
+                state: response.state
+              })
+          ]
         };
       } catch (error) {
         logger.error(`Tool execution failed: ${getStateName}`, error);
@@ -92,13 +95,15 @@ export function registerEditorStateTools(server: McpServer, mcpUnity: McpUnity, 
 
         logger.info(`Tool execution successful: ${setStateName}`);
         return {
-          content: [{
-            type: 'text' as const,
-            text: response.message
-          }],
-          data: {
-            state: response.state
-          }
+          content: [
+            {
+              type: 'text' as const,
+              text: response.message
+            },
+            payloadContent({
+                state: response.state
+              })
+          ]
         };
       } catch (error) {
         // play/stop triggers Domain Reload → expected disconnection
@@ -117,13 +122,15 @@ export function registerEditorStateTools(server: McpServer, mcpUnity: McpUnity, 
             if (verifyResponse.success) {
               logger.info(`Tool execution successful: ${setStateName} (after reconnection)`);
               return {
-                content: [{
-                  type: 'text' as const,
-                  text: `Editor state action '${action}' executed successfully`
-                }],
-                data: {
-                  state: verifyResponse.state
-                }
+                content: [
+                  {
+                    type: 'text' as const,
+                    text: `Editor state action '${action}' executed successfully`
+                  },
+                  payloadContent({
+                      state: verifyResponse.state
+                    })
+                ]
               };
             }
           } catch (reconnectError) {

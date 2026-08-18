@@ -3,6 +3,7 @@ import { McpUnity } from '../unity/mcpUnity.js';
 import { McpUnityError, ErrorType } from '../utils/errors.js';
 import * as z from 'zod';
 import { Logger } from '../utils/logger.js';
+import { payloadContent } from '../utils/toolPayload.js';
 
 const toolName = 'get_selection';
 const toolDescription = 'Gets the currently selected objects in the Unity Editor (GameObjects in hierarchy and/or assets in Project window)';
@@ -71,12 +72,14 @@ async function toolHandler(mcpUnity: McpUnity, params: any) {
   }
 
   return {
-    content: [{
-      type: 'text' as const,
-      text
-    }],
-    data: {
-      selection: response.selection
-    }
+    content: [
+      {
+        type: 'text' as const,
+        text
+      },
+      payloadContent({
+          selection: response.selection
+        })
+    ]
   };
 }

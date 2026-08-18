@@ -3,6 +3,7 @@ import { McpUnity } from '../unity/mcpUnity.js';
 import { McpUnityError, ErrorType } from '../utils/errors.js';
 import * as z from 'zod';
 import { Logger } from '../utils/logger.js';
+import { payloadContent } from '../utils/toolPayload.js';
 
 // ============================================================================
 // OPEN PREFAB CONTENTS TOOL
@@ -73,16 +74,18 @@ async function openPrefabContentsHandler(mcpUnity: McpUnity, params: any) {
   }
 
   return {
-    content: [{
-      type: 'text' as const,
-      text
-    }],
-    data: {
-      prefabPath: response.prefabPath,
-      rootInstanceId: response.rootInstanceId,
-      rootName: response.rootName,
-      children: response.children
-    }
+    content: [
+      {
+        type: 'text' as const,
+        text
+      },
+      payloadContent({
+          prefabPath: response.prefabPath,
+          rootInstanceId: response.rootInstanceId,
+          rootName: response.rootName,
+          children: response.children
+        })
+    ]
   };
 }
 
@@ -156,13 +159,15 @@ async function savePrefabContentsHandler(mcpUnity: McpUnity, params: any) {
   }
 
   return {
-    content: [{
-      type: response.type,
-      text: response.message || `Prefab contents ${params.discard ? 'discarded' : 'saved'}`
-    }],
-    data: {
-      prefabPath: response.prefabPath,
-      discarded: response.discarded
-    }
+    content: [
+      {
+        type: response.type,
+        text: response.message || `Prefab contents ${params.discard ? 'discarded' : 'saved'}`
+      },
+      payloadContent({
+          prefabPath: response.prefabPath,
+          discarded: response.discarded
+        })
+    ]
   };
 }

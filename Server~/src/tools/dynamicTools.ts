@@ -2,6 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { McpUnity } from '../unity/mcpUnity.js';
 import { Logger } from '../utils/logger.js';
 import { jsonSchemaToZodShape } from '../utils/schemaConverter.js';
+import { payloadContent } from '../utils/toolPayload.js';
 
 /**
  * Query Unity for external tools and register them dynamically.
@@ -60,11 +61,12 @@ export async function registerDynamicTools(
                 return { content };
               }
 
-              const text = result.message || JSON.stringify(result, null, 2);
-              return {
-                content: [{ type: 'text' as const, text }],
-                ...(result.success !== undefined ? { data: result } : {})
-              };
+              const content = [];
+              if (typeof result.message === 'string' && result.message.length > 0) {
+                content.push({ type: 'text' as const, text: result.message });
+              }
+              content.push(payloadContent(result));
+              return { content };
             } catch (error) {
               logger.error(`External tool ${tool.name} failed`, error);
               throw error;

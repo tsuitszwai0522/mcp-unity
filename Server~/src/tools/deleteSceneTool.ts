@@ -3,6 +3,7 @@ import { McpUnity } from '../unity/mcpUnity.js';
 import { McpUnityError, ErrorType } from '../utils/errors.js';
 import * as z from 'zod';
 import { Logger } from '../utils/logger.js';
+import { payloadContent } from '../utils/toolPayload.js';
 
 const toolName = 'delete_scene';
 const toolDescription = 'Deletes a scene by path or name and removes it from Build Settings';
@@ -55,13 +56,15 @@ async function toolHandler(mcpUnity: McpUnity, params: any) {
   }
 
   return {
-    content: [{
-      type: response.type,
-      text: response.message || 'Successfully deleted scene'
-    }],
-    data: {
-      scenePath: response.scenePath
-    }
+    content: [
+      {
+        type: response.type,
+        text: response.message || 'Successfully deleted scene'
+      },
+      payloadContent({
+          scenePath: response.scenePath
+        })
+    ]
   };
 }
 

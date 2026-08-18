@@ -4,6 +4,7 @@ import { McpUnity } from '../unity/mcpUnity.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { McpUnityError, ErrorType } from '../utils/errors.js';
 import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+import { payloadContent } from '../utils/toolPayload.js';
 
 // Common helper to wrap registration boilerplate
 function wrap(
@@ -57,8 +58,10 @@ export function registerLocListTablesTool(server: McpServer, mcpUnity: McpUnity,
       : tables.map((t) => `- ${t.name}  locales=[${t.locales.join(', ')}]  entries=${t.entryCount}`).join('\n');
 
     return {
-      content: [{ type: 'text', text }],
-      data: { tables },
+      content: [
+        { type: 'text', text },
+        payloadContent({ tables }),
+      ],
     };
   });
 }
@@ -105,11 +108,12 @@ export function registerLocGetEntriesTool(server: McpServer, mcpUnity: McpUnity,
 
     const entries: Array<{ key: string; value: string }> = response.entries || [];
     const summary = response.message || `Read ${entries.length} entries`;
+    const cap = Math.max(1, Math.min(max_entries ?? LOC_GET_ENTRIES_DEFAULT_MAX, LOC_GET_ENTRIES_HARD_MAX));
+    const rendered = include_values ? entries.slice(0, cap) : [];
+    const wasCapped = Boolean(include_values) && rendered.length < entries.length;
 
     let text = summary;
     if (include_values && entries.length > 0) {
-      const cap = Math.min(max_entries ?? LOC_GET_ENTRIES_DEFAULT_MAX, LOC_GET_ENTRIES_HARD_MAX);
-      const rendered = entries.slice(0, cap);
       const lines = rendered.map((e) => `${escapeLocLine(e.key)}: ${escapeLocLine(e.value)}`);
       const omitted = entries.length - rendered.length;
       if (omitted > 0) {
@@ -119,12 +123,17 @@ export function registerLocGetEntriesTool(server: McpServer, mcpUnity: McpUnity,
     }
 
     return {
-      content: [{ type: 'text', text }],
-      data: {
-        table: response.table,
-        locale: response.locale,
-        entries,
-      },
+      content: [
+        { type: 'text', text },
+        payloadContent({
+            table: response.table,
+            locale: response.locale,
+            ...(include_values ? { entries: rendered } : {}),
+            totalEntries: entries.length,
+            valuesIncluded: Boolean(include_values),
+            truncated: wasCapped,
+          }),
+      ],
     };
   });
 }
@@ -158,12 +167,14 @@ export function registerLocSetEntryTool(server: McpServer, mcpUnity: McpUnity, l
     ensureSuccess(response, 'Failed to set entry');
 
     return {
-      content: [{ type: 'text', text: response.message || 'Entry set' }],
-      data: {
-        action: response.action,
-        key: response.key,
-        value: response.value,
-      },
+      content: [
+        { type: 'text', text: response.message || 'Entry set' },
+        payloadContent({
+            action: response.action,
+            key: response.key,
+            value: response.value,
+          }),
+      ],
     };
   });
 }
@@ -201,12 +212,14 @@ export function registerLocSetEntriesTool(server: McpServer, mcpUnity: McpUnity,
     ensureSuccess(response, 'Failed to set entries');
 
     return {
-      content: [{ type: 'text', text: response.message || 'Entries set' }],
-      data: {
-        created: response.created,
-        updated: response.updated,
-        total: response.total,
-      },
+      content: [
+        { type: 'text', text: response.message || 'Entries set' },
+        payloadContent({
+            created: response.created,
+            updated: response.updated,
+            total: response.total,
+          }),
+      ],
     };
   });
 }
@@ -235,11 +248,13 @@ export function registerLocDeleteEntryTool(server: McpServer, mcpUnity: McpUnity
     ensureSuccess(response, 'Failed to delete entry');
 
     return {
-      content: [{ type: 'text', text: response.message || 'Entry deleted' }],
-      data: {
-        deleted: response.deleted,
-        key: response.key,
-      },
+      content: [
+        { type: 'text', text: response.message || 'Entry deleted' },
+        payloadContent({
+            deleted: response.deleted,
+            key: response.key,
+          }),
+      ],
     };
   });
 }
@@ -264,14 +279,16 @@ export function registerLocDeleteTableTool(server: McpServer, mcpUnity: McpUnity
     ensureSuccess(response, 'Failed to delete StringTable');
 
     return {
-      content: [{ type: 'text', text: response.message || `StringTable '${params.table_name}' deleted` }],
-      data: {
-        deleted: response.deleted,
-        name: response.name,
-        path: response.path,
-        entryCount: response.entryCount,
-        locales: response.locales,
-      },
+      content: [
+        { type: 'text', text: response.message || `StringTable '${params.table_name}' deleted` },
+        payloadContent({
+            deleted: response.deleted,
+            name: response.name,
+            path: response.path,
+            entryCount: response.entryCount,
+            locales: response.locales,
+          }),
+      ],
     };
   });
 }
@@ -303,13 +320,15 @@ export function registerLocCreateTableTool(server: McpServer, mcpUnity: McpUnity
     }
 
     return {
-      content: [{ type: 'text', text }],
-      data: {
-        created: response.created,
-        name: response.name,
-        path: response.path,
-        warnings: response.warnings,
-      },
+      content: [
+        { type: 'text', text },
+        payloadContent({
+            created: response.created,
+            name: response.name,
+            path: response.path,
+            warnings: response.warnings,
+          }),
+      ],
     };
   });
 }
@@ -335,12 +354,14 @@ export function registerLocRemoveLocaleTool(server: McpServer, mcpUnity: McpUnit
     ensureSuccess(response, 'Failed to remove locale');
 
     return {
-      content: [{ type: 'text', text: response.message || `Locale '${params.code}' removed` }],
-      data: {
-        action: response.action,
-        code: response.code,
-        path: response.path,
-      },
+      content: [
+        { type: 'text', text: response.message || `Locale '${params.code}' removed` },
+        payloadContent({
+            action: response.action,
+            code: response.code,
+            path: response.path,
+          }),
+      ],
     };
   });
 }
@@ -366,12 +387,14 @@ export function registerLocAddLocaleTool(server: McpServer, mcpUnity: McpUnity, 
     ensureSuccess(response, 'Failed to add locale');
 
     return {
-      content: [{ type: 'text', text: response.message || `Locale '${params.code}' registered` }],
-      data: {
-        action: response.action,
-        code: response.code,
-        path: response.path,
-      },
+      content: [
+        { type: 'text', text: response.message || `Locale '${params.code}' registered` },
+        payloadContent({
+            action: response.action,
+            code: response.code,
+            path: response.path,
+          }),
+      ],
     };
   });
 }

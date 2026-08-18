@@ -4,6 +4,7 @@ import { Logger } from '../utils/logger.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { McpUnityError, ErrorType } from '../utils/errors.js';
 import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+import { payloadContent } from '../utils/toolPayload.js';
 
 // ============================================================================
 // Duplicate GameObject Tool
@@ -295,9 +296,19 @@ async function reparentHandler(mcpUnity: McpUnity, params: any): Promise<CallToo
   }
 
   return {
-    content: [{
-      type: response.type || 'text',
-      text: response.message || 'Successfully reparented the GameObject'
-    }]
+    content: [
+      {
+        type: response.type || 'text',
+        text: response.message || 'Successfully reparented the GameObject'
+      },
+      payloadContent({
+          instanceId: response.instanceId,
+          name: response.name,
+          path: response.path,
+          oldPath: response.oldPath,
+          newPath: response.newPath,
+          changed: response.changed
+        })
+    ]
   };
 }

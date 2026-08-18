@@ -3,6 +3,7 @@ import { McpUnity } from '../unity/mcpUnity.js';
 import { McpUnityError, ErrorType } from '../utils/errors.js';
 import * as z from 'zod';
 import { Logger } from '../utils/logger.js';
+import { payloadContent } from '../utils/toolPayload.js';
 
 // Constants for the tool
 const toolName = 'update_scriptable_object';
@@ -78,13 +79,15 @@ async function toolHandler(mcpUnity: McpUnity, params: any) {
   }
 
   return {
-    content: [{
-      type: response.type,
-      text: response.message || `Successfully updated ScriptableObject`
-    }],
-    data: {
-      assetPath: response.assetPath,
-      typeName: response.typeName
-    }
+    content: [
+      {
+        type: response.type,
+        text: response.message || `Successfully updated ScriptableObject`
+      },
+      payloadContent({
+          assetPath: response.assetPath,
+          typeName: response.typeName
+        })
+    ]
   };
 }

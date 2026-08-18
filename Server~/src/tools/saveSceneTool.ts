@@ -3,6 +3,7 @@ import { McpUnity } from '../unity/mcpUnity.js';
 import { McpUnityError, ErrorType } from '../utils/errors.js';
 import * as z from 'zod';
 import { Logger } from '../utils/logger.js';
+import { payloadContent } from '../utils/toolPayload.js';
 
 const toolName = 'save_scene';
 const toolDescription = 'Saves the current active scene. Optionally saves to a new path (Save As)';
@@ -55,13 +56,15 @@ async function toolHandler(mcpUnity: McpUnity, params: any) {
   }
 
   return {
-    content: [{
-      type: response.type,
-      text: response.message || 'Successfully saved scene'
-    }],
-    data: {
-      scenePath: response.scenePath,
-      sceneName: response.sceneName
-    }
+    content: [
+      {
+        type: response.type,
+        text: response.message || 'Successfully saved scene'
+      },
+      payloadContent({
+          scenePath: response.scenePath,
+          sceneName: response.sceneName
+        })
+    ]
   };
 }

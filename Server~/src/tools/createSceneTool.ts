@@ -3,6 +3,7 @@ import { McpUnity } from "../unity/mcpUnity.js";
 import { McpUnityError, ErrorType } from "../utils/errors.js";
 import * as z from "zod";
 import { Logger } from "../utils/logger.js";
+import { payloadContent } from '../utils/toolPayload.js';
 
 const toolName = "create_scene";
 const toolDescription =
@@ -77,9 +78,9 @@ async function toolHandler(mcpUnity: McpUnity, params: any) {
         type: response.type,
         text: response.message || "Successfully created scene",
       },
+      payloadContent({
+          scenePath: response.scenePath,
+        }),
     ],
-    data: {
-      scenePath: response.scenePath,
-    },
   };
 }

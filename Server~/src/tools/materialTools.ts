@@ -4,6 +4,7 @@ import { McpUnity } from '../unity/mcpUnity.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { McpUnityError, ErrorType } from '../utils/errors.js';
 import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+import { payloadContent } from '../utils/toolPayload.js';
 
 // Color schema for material properties
 const colorSchema = z.object({
@@ -335,20 +336,22 @@ async function getMaterialInfoHandler(mcpUnity: McpUnity, params: any): Promise<
   }
 
   return {
-    content: [{
-      type: 'text',
-      text: text
-    }],
-    data: {
-      materialName: response.materialName,
-      materialPath: response.materialPath,
-      shaderName: response.shaderName,
-      renderQueue: response.renderQueue,
-      renderQueueCategory: response.renderQueueCategory,
-      enableInstancing: response.enableInstancing,
-      doubleSidedGI: response.doubleSidedGI,
-      passCount: response.passCount,
-      properties: response.properties
-    }
+    content: [
+      {
+        type: 'text',
+        text: text
+      },
+      payloadContent({
+          materialName: response.materialName,
+          materialPath: response.materialPath,
+          shaderName: response.shaderName,
+          renderQueue: response.renderQueue,
+          renderQueueCategory: response.renderQueueCategory,
+          enableInstancing: response.enableInstancing,
+          doubleSidedGI: response.doubleSidedGI,
+          passCount: response.passCount,
+          properties: response.properties
+        })
+    ]
   };
 }

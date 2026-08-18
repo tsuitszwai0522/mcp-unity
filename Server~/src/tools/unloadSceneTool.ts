@@ -3,6 +3,7 @@ import { McpUnity } from '../unity/mcpUnity.js';
 import { McpUnityError, ErrorType } from '../utils/errors.js';
 import * as z from 'zod';
 import { Logger } from '../utils/logger.js';
+import { payloadContent } from '../utils/toolPayload.js';
 
 const toolName = 'unload_scene';
 const toolDescription = 'Unloads a scene by path or name (does not delete the scene asset, just closes it from the hierarchy)';
@@ -56,15 +57,17 @@ async function toolHandler(mcpUnity: McpUnity, params: any) {
   }
 
   return {
-    content: [{
-      type: response.type,
-      text: response.message || 'Successfully unloaded scene'
-    }],
-    data: {
-      sceneName: response.sceneName,
-      scenePath: response.scenePath,
-      wasDirty: response.wasDirty,
-      removed: response.removed
-    }
+    content: [
+      {
+        type: response.type,
+        text: response.message || 'Successfully unloaded scene'
+      },
+      payloadContent({
+          sceneName: response.sceneName,
+          scenePath: response.scenePath,
+          wasDirty: response.wasDirty,
+          removed: response.removed
+        })
+    ]
   };
 }

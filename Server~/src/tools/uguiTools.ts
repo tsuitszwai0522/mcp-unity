@@ -4,6 +4,7 @@ import { McpUnityError, ErrorType } from "../utils/errors.js";
 import * as z from "zod";
 import { Logger } from "../utils/logger.js";
 import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import { payloadContent } from '../utils/toolPayload.js';
 
 // ==================== Shared Schemas ====================
 
@@ -128,11 +129,11 @@ async function createCanvasHandler(
         type: response.type || "text",
         text: response.message || `Successfully created Canvas at '${params.objectPath}'`,
       },
+      payloadContent({
+          instanceId: response.instanceId,
+          path: response.path,
+        }),
     ],
-    data: {
-      instanceId: response.instanceId,
-      path: response.path,
-    },
   };
 }
 
@@ -234,12 +235,12 @@ async function createUIElementHandler(
         type: response.type || "text",
         text: response.message || `Successfully created ${params.elementType} at '${params.objectPath}'`,
       },
+      payloadContent({
+          instanceId: response.instanceId,
+          path: response.path,
+          usedFallback: response.usedFallback,
+        }),
     ],
-    data: {
-      instanceId: response.instanceId,
-      path: response.path,
-      usedFallback: response.usedFallback,
-    },
   };
 }
 
@@ -324,12 +325,12 @@ async function setRectTransformHandler(
         type: response.type || "text",
         text: response.message || `Successfully updated RectTransform with ${targetDescription}`,
       },
+      payloadContent({
+          instanceId: response.instanceId,
+          path: response.path,
+          rectTransform: response.rectTransform,
+        }),
     ],
-    data: {
-      instanceId: response.instanceId,
-      path: response.path,
-      rectTransform: response.rectTransform,
-    },
   };
 }
 
@@ -455,11 +456,11 @@ async function addLayoutComponentHandler(
         type: response.type || "text",
         text: response.message || `Successfully added ${params.layoutType} to ${targetDescription}`,
       },
+      payloadContent({
+          instanceId: response.instanceId,
+          path: response.path,
+        }),
     ],
-    data: {
-      instanceId: response.instanceId,
-      path: response.path,
-    },
   };
 }
 
@@ -535,10 +536,10 @@ async function getUIElementInfoHandler(
         type: response.type || "text",
         text: response.message || `Retrieved UI element info for ${targetDescription}`,
       },
+      payloadContent({
+          elementInfo: response.elementInfo,
+        }),
     ],
-    data: {
-      elementInfo: response.elementInfo,
-    },
   };
 }
 

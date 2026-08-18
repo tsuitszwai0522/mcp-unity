@@ -4,6 +4,7 @@ import { Logger } from '../utils/logger.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { McpUnityError, ErrorType } from '../utils/errors.js';
 import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+import { payloadContent } from '../utils/toolPayload.js';
 
 // ============================================================================
 // Read Serialized Fields Tool
@@ -83,15 +84,16 @@ async function readHandler(mcpUnity: McpUnity, params: any): Promise<CallToolRes
   }
 
   return {
-    content: [{
-      type: 'text',
-      text
-    }],
-    data: {
-      instanceId: response.instanceId,
-      componentName: response.componentName,
-      fields: response.fields
-    }
+    content: [
+      {
+        type: 'text',
+        text
+      },
+      payloadContent({
+          instanceId: response.instanceId,
+          componentName: response.componentName
+        })
+    ]
   };
 }
 
@@ -180,14 +182,16 @@ async function writeHandler(mcpUnity: McpUnity, params: any): Promise<CallToolRe
   }
 
   return {
-    content: [{
-      type: 'text',
-      text
-    }],
-    data: {
-      instanceId: response.instanceId,
-      updatedFields: response.updatedFields,
-      warnings: response.warnings
-    }
+    content: [
+      {
+        type: 'text',
+        text
+      },
+      payloadContent({
+          instanceId: response.instanceId,
+          updatedFields: response.updatedFields,
+          warnings: response.warnings
+        })
+    ]
   };
 }

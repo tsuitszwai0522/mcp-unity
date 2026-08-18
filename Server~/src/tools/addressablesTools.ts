@@ -4,6 +4,7 @@ import { McpUnity } from '../unity/mcpUnity.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { McpUnityError, ErrorType } from '../utils/errors.js';
 import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+import { payloadContent } from '../utils/toolPayload.js';
 
 // Common helper to wrap registration boilerplate
 function wrap(
@@ -53,17 +54,19 @@ export function registerAddrGetSettingsTool(server: McpServer, mcpUnity: McpUnit
 
     const text = response.message || 'Addressables settings fetched';
     return {
-      content: [{ type: 'text', text }],
-      data: {
-        initialized: response.initialized,
-        defaultGroup: response.defaultGroup,
-        activeProfile: response.activeProfile,
-        profileVariables: response.profileVariables,
-        groupCount: response.groupCount,
-        entryCount: response.entryCount,
-        labels: response.labels,
-        version: response.version,
-      },
+      content: [
+        { type: 'text', text },
+        payloadContent({
+            initialized: response.initialized,
+            defaultGroup: response.defaultGroup,
+            activeProfile: response.activeProfile,
+            profileVariables: response.profileVariables,
+            groupCount: response.groupCount,
+            entryCount: response.entryCount,
+            labels: response.labels,
+            version: response.version,
+          }),
+      ],
     };
   });
 }
@@ -84,12 +87,14 @@ export function registerAddrInitSettingsTool(server: McpServer, mcpUnity: McpUni
     ensureSuccess(response, 'Failed to initialize Addressables');
 
     return {
-      content: [{ type: 'text', text: response.message || 'Addressables initialized' }],
-      data: {
-        created: response.created,
-        settingsPath: response.settingsPath,
-        defaultGroup: response.defaultGroup,
-      },
+      content: [
+        { type: 'text', text: response.message || 'Addressables initialized' },
+        payloadContent({
+            created: response.created,
+            settingsPath: response.settingsPath,
+            defaultGroup: response.defaultGroup,
+          }),
+      ],
     };
   });
 }
@@ -113,8 +118,10 @@ export function registerAddrListGroupsTool(server: McpServer, mcpUnity: McpUnity
       : groups.map((g) => `- ${g.name}${g.isDefault ? ' (default)' : ''}  entries=${g.entryCount}  schemas=[${(g.schemas || []).join(', ')}]`).join('\n');
 
     return {
-      content: [{ type: 'text', text }],
-      data: { groups },
+      content: [
+        { type: 'text', text },
+        payloadContent({ groups }),
+      ],
     };
   });
 }
@@ -145,12 +152,14 @@ export function registerAddrCreateGroupTool(server: McpServer, mcpUnity: McpUnit
     ensureSuccess(response, 'Failed to create group');
 
     return {
-      content: [{ type: 'text', text: response.message || 'Group created' }],
-      data: {
-        created: response.created,
-        name: response.name,
-        isDefault: response.isDefault,
-      },
+      content: [
+        { type: 'text', text: response.message || 'Group created' },
+        payloadContent({
+            created: response.created,
+            name: response.name,
+            isDefault: response.isDefault,
+          }),
+      ],
     };
   });
 }
@@ -176,12 +185,14 @@ export function registerAddrRemoveGroupTool(server: McpServer, mcpUnity: McpUnit
     ensureSuccess(response, 'Failed to remove group');
 
     return {
-      content: [{ type: 'text', text: response.message || 'Group removed' }],
-      data: {
-        deleted: response.deleted,
-        name: response.name,
-        removedEntryCount: response.removedEntryCount,
-      },
+      content: [
+        { type: 'text', text: response.message || 'Group removed' },
+        payloadContent({
+            deleted: response.deleted,
+            name: response.name,
+            removedEntryCount: response.removedEntryCount,
+          }),
+      ],
     };
   });
 }
@@ -206,11 +217,13 @@ export function registerAddrSetDefaultGroupTool(server: McpServer, mcpUnity: Mcp
     ensureSuccess(response, 'Failed to set default group');
 
     return {
-      content: [{ type: 'text', text: response.message || 'Default group updated' }],
-      data: {
-        defaultGroup: response.defaultGroup,
-        previousDefault: response.previousDefault,
-      },
+      content: [
+        { type: 'text', text: response.message || 'Default group updated' },
+        payloadContent({
+            defaultGroup: response.defaultGroup,
+            previousDefault: response.previousDefault,
+          }),
+      ],
     };
   });
 }
@@ -240,12 +253,14 @@ export function registerAddrListEntriesTool(server: McpServer, mcpUnity: McpUnit
     const text = [header, ...lines].join('\n');
 
     return {
-      content: [{ type: 'text', text }],
-      data: {
-        total: response.total,
-        truncated: response.truncated,
-        entries,
-      },
+      content: [
+        { type: 'text', text },
+        payloadContent({
+            total: response.total,
+            truncated: response.truncated,
+            entries,
+          }),
+      ],
     };
   });
 }
@@ -292,14 +307,16 @@ export function registerAddrAddEntriesTool(server: McpServer, mcpUnity: McpUnity
     }
 
     return {
-      content: [{ type: 'text', text }],
-      data: {
-        added: response.added,
-        skipped: response.skipped,
-        entries: response.entries,
-        warnings: response.warnings,
-        missingAssets: response.missingAssets,
-      },
+      content: [
+        { type: 'text', text },
+        payloadContent({
+            added: response.added,
+            skipped: response.skipped,
+            entries: response.entries,
+            warnings: response.warnings,
+            missingAssets: response.missingAssets,
+          }),
+      ],
     };
   });
 }
@@ -332,11 +349,13 @@ export function registerAddrRemoveEntriesTool(server: McpServer, mcpUnity: McpUn
     ensureSuccess(response, 'Failed to remove entries');
 
     return {
-      content: [{ type: 'text', text: response.message || 'Entries removed' }],
-      data: {
-        removed: response.removed,
-        notFound: response.notFound,
-      },
+      content: [
+        { type: 'text', text: response.message || 'Entries removed' },
+        payloadContent({
+            removed: response.removed,
+            notFound: response.notFound,
+          }),
+      ],
     };
   });
 }
@@ -373,12 +392,14 @@ export function registerAddrMoveEntriesTool(server: McpServer, mcpUnity: McpUnit
     ensureSuccess(response, 'Failed to move entries');
 
     return {
-      content: [{ type: 'text', text: response.message || 'Entries moved' }],
-      data: {
-        moved: response.moved,
-        targetGroup: response.targetGroup,
-        notFound: response.notFound,
-      },
+      content: [
+        { type: 'text', text: response.message || 'Entries moved' },
+        payloadContent({
+            moved: response.moved,
+            targetGroup: response.targetGroup,
+            notFound: response.notFound,
+          }),
+      ],
     };
   });
 }
@@ -412,15 +433,17 @@ export function registerAddrSetEntryTool(server: McpServer, mcpUnity: McpUnity, 
     }
 
     return {
-      content: [{ type: 'text', text }],
-      data: {
-        guid: response.guid,
-        assetPath: response.assetPath,
-        address: response.address,
-        labels: response.labels,
-        group: response.group,
-        warnings: response.warnings,
-      },
+      content: [
+        { type: 'text', text },
+        payloadContent({
+            guid: response.guid,
+            assetPath: response.assetPath,
+            address: response.address,
+            labels: response.labels,
+            group: response.group,
+            warnings: response.warnings,
+          }),
+      ],
     };
   });
 }
@@ -442,8 +465,10 @@ export function registerAddrListLabelsTool(server: McpServer, mcpUnity: McpUnity
     const text = labels.length === 0 ? 'No labels found.' : `Labels: ${labels.join(', ')}`;
 
     return {
-      content: [{ type: 'text', text }],
-      data: { labels },
+      content: [
+        { type: 'text', text },
+        payloadContent({ labels }),
+      ],
     };
   });
 }
@@ -468,11 +493,13 @@ export function registerAddrCreateLabelTool(server: McpServer, mcpUnity: McpUnit
     ensureSuccess(response, 'Failed to create label');
 
     return {
-      content: [{ type: 'text', text: response.message || 'Label created' }],
-      data: {
-        created: response.created,
-        label: response.label,
-      },
+      content: [
+        { type: 'text', text: response.message || 'Label created' },
+        payloadContent({
+            created: response.created,
+            label: response.label,
+          }),
+      ],
     };
   });
 }
@@ -498,12 +525,14 @@ export function registerAddrRemoveLabelTool(server: McpServer, mcpUnity: McpUnit
     ensureSuccess(response, 'Failed to remove label');
 
     return {
-      content: [{ type: 'text', text: response.message || 'Label removed' }],
-      data: {
-        deleted: response.deleted,
-        label: response.label,
-        affectedEntries: response.affectedEntries,
-      },
+      content: [
+        { type: 'text', text: response.message || 'Label removed' },
+        payloadContent({
+            deleted: response.deleted,
+            label: response.label,
+            affectedEntries: response.affectedEntries,
+          }),
+      ],
     };
   });
 }
@@ -533,11 +562,13 @@ export function registerAddrGetGroupSchemaTool(server: McpServer, mcpUnity: McpU
       ...Object.entries(values).map(([k, v]) => `  ${k}: ${v}`),
     ];
     return {
-      content: [{ type: 'text', text: lines.join('\n') }],
-      data: {
-        group: response.group,
-        values,
-      },
+      content: [
+        { type: 'text', text: lines.join('\n') },
+        payloadContent({
+            group: response.group,
+            values,
+          }),
+      ],
     };
   });
 }
@@ -587,13 +618,15 @@ export function registerAddrSetGroupSchemaTool(server: McpServer, mcpUnity: McpU
     ensureSuccess(response, 'Failed to set group schema');
 
     return {
-      content: [{ type: 'text', text: response.message || 'Group schema updated' }],
-      data: {
-        group: response.group,
-        dryRun: response.dryRun,
-        changed: response.changed,
-        diff: response.diff,
-      },
+      content: [
+        { type: 'text', text: response.message || 'Group schema updated' },
+        payloadContent({
+            group: response.group,
+            dryRun: response.dryRun,
+            changed: response.changed,
+            diff: response.diff,
+          }),
+      ],
     };
   });
 }
@@ -617,13 +650,15 @@ export function registerAddrListProfilesTool(server: McpServer, mcpUnity: McpUni
       : profiles.map((p) => `- ${p.name}${p.isActive ? ' (active)' : ''}`).join('\n');
 
     return {
-      content: [{ type: 'text', text }],
-      data: {
-        activeProfile: response.activeProfile,
-        activeProfileId: response.activeProfileId,
-        variableNames: response.variableNames,
-        profiles,
-      },
+      content: [
+        { type: 'text', text },
+        payloadContent({
+            activeProfile: response.activeProfile,
+            activeProfileId: response.activeProfileId,
+            variableNames: response.variableNames,
+            profiles,
+          }),
+      ],
     };
   });
 }
@@ -642,12 +677,14 @@ export function registerAddrGetActiveProfileTool(server: McpServer, mcpUnity: Mc
     ensureSuccess(response, 'Failed to get active profile');
 
     return {
-      content: [{ type: 'text', text: response.message || `Active profile: ${response.name}` }],
-      data: {
-        id: response.id,
-        name: response.name,
-        variables: response.variables,
-      },
+      content: [
+        { type: 'text', text: response.message || `Active profile: ${response.name}` },
+        payloadContent({
+            id: response.id,
+            name: response.name,
+            variables: response.variables,
+          }),
+      ],
     };
   });
 }
@@ -672,12 +709,14 @@ export function registerAddrSetActiveProfileTool(server: McpServer, mcpUnity: Mc
     ensureSuccess(response, 'Failed to set active profile');
 
     return {
-      content: [{ type: 'text', text: response.message || 'Active profile updated' }],
-      data: {
-        changed: response.changed,
-        activeProfile: response.activeProfile,
-        previousProfile: response.previousProfile,
-      },
+      content: [
+        { type: 'text', text: response.message || 'Active profile updated' },
+        payloadContent({
+            changed: response.changed,
+            activeProfile: response.activeProfile,
+            previousProfile: response.previousProfile,
+          }),
+      ],
     };
   });
 }
@@ -717,14 +756,16 @@ export function registerAddrSetProfileVariableTool(server: McpServer, mcpUnity: 
     ensureSuccess(response, 'Failed to set profile variable');
 
     return {
-      content: [{ type: 'text', text: response.message || 'Profile variable updated' }],
-      data: {
-        profile: response.profile,
-        variable: response.variable,
-        previousValue: response.previousValue,
-        value: response.value,
-        created: response.created,
-      },
+      content: [
+        { type: 'text', text: response.message || 'Profile variable updated' },
+        payloadContent({
+            profile: response.profile,
+            variable: response.variable,
+            previousValue: response.previousValue,
+            value: response.value,
+            created: response.created,
+          }),
+      ],
     };
   });
 }
@@ -749,11 +790,13 @@ export function registerAddrFindAssetTool(server: McpServer, mcpUnity: McpUnity,
     ensureSuccess(response, 'Failed to look up asset');
 
     return {
-      content: [{ type: 'text', text: response.message || (response.found ? 'Entry found' : 'Entry not found') }],
-      data: {
-        found: response.found,
-        entry: response.entry,
-      },
+      content: [
+        { type: 'text', text: response.message || (response.found ? 'Entry found' : 'Entry not found') },
+        payloadContent({
+            found: response.found,
+            entry: response.entry,
+          }),
+      ],
     };
   });
 }

@@ -409,7 +409,7 @@ describe('Material Tools', () => {
       expect(result.content[0].text).toContain('_Metallic');
     });
 
-    it('should include data object in response', async () => {
+    it('should include payload content in response', async () => {
       mockSendRequest.mockResolvedValue({
         success: true,
         type: 'text',
@@ -428,9 +428,9 @@ describe('Material Tools', () => {
       const params = { materialPath: 'Assets/Materials/Test.mat' };
       const result = await handler(params);
 
-      expect(result.data).toBeDefined();
-      expect(result.data.materialName).toBe('TestMaterial');
-      expect(result.data.shaderName).toBe('Standard');
+      expect(result.content).toHaveLength(2);
+      expect(JSON.parse(result.content[1].text).materialName).toBe('TestMaterial');
+      expect(JSON.parse(result.content[1].text).shaderName).toBe('Standard');
     });
   });
 });

@@ -3,6 +3,7 @@ import { McpUnity } from '../unity/mcpUnity.js';
 import { McpUnityError, ErrorType } from '../utils/errors.js';
 import * as z from 'zod';
 import { Logger } from '../utils/logger.js';
+import { payloadContent } from '../utils/toolPayload.js';
 
 const toolName = 'load_scene';
 const toolDescription = 'Loads a scene by path or name. Supports additive loading (default: false)';
@@ -56,14 +57,16 @@ async function toolHandler(mcpUnity: McpUnity, params: any) {
   }
 
   return {
-    content: [{
-      type: response.type,
-      text: response.message || 'Successfully loaded scene'
-    }],
-    data: {
-      scenePath: response.scenePath,
-      additive: response.additive
-    }
+    content: [
+      {
+        type: response.type,
+        text: response.message || 'Successfully loaded scene'
+      },
+      payloadContent({
+          scenePath: response.scenePath,
+          additive: response.additive
+        })
+    ]
   };
 }
 
