@@ -85,11 +85,11 @@ namespace McpUnity.Tools
             }
 
             var matches = new List<GameObject>();
-            var truncated = false;
+            var total = 0;
 
             if (PrefabEditingService.IsEditing && PrefabEditingService.PrefabRoot != null)
             {
-                truncated = CollectMatchesRecursive(
+                total = CollectMatchesRecursive(
                     PrefabEditingService.PrefabRoot, regex, includeInactive, limit, matches);
             }
             else
@@ -103,15 +103,13 @@ namespace McpUnity.Tools
                     if (!regex.IsMatch(go.name))
                         continue;
 
-                    if (matches.Count >= limit)
-                    {
-                        truncated = true;
-                        break;
-                    }
-
-                    matches.Add(go);
+                    total++;
+                    if (matches.Count < limit)
+                        matches.Add(go);
                 }
             }
+
+            var truncated = total > matches.Count;
 
             var results = new JArray();
             foreach (var go in matches)
@@ -129,39 +127,40 @@ namespace McpUnity.Tools
             {
                 ["success"] = true,
                 ["message"] = truncated
-                    ? $"Found {results.Count} GameObject(s) matching '{pattern}' (limit {limit} reached — results truncated)"
+                    ? $"Found {results.Count} of {total} GameObject(s) matching '{pattern}' (limit {limit} reached — results truncated)"
                     : $"Found {results.Count} GameObject(s) matching '{pattern}'",
                 ["pattern"] = pattern,
                 ["count"] = results.Count,
+                ["total"] = total,
                 ["truncated"] = truncated,
                 ["gameObjects"] = results
             };
         }
 
-        private static bool CollectMatchesRecursive(
+        private static int CollectMatchesRecursive(
             GameObject root,
             Regex regex,
             bool includeInactive,
             int limit,
             List<GameObject> matches)
         {
-            if (root == null) return false;
-            if (!includeInactive && !root.activeInHierarchy) return false;
+            if (root == null) return 0;
+            if (!includeInactive && !root.activeInHierarchy) return 0;
+
+            var total = 0;
 
             if (regex.IsMatch(root.name))
             {
-                if (matches.Count >= limit)
-                    return true;
-                matches.Add(root);
+                total++;
+                if (matches.Count < limit)
+                    matches.Add(root);
             }
 
             foreach (Transform child in root.transform)
-            {
-                if (CollectMatchesRecursive(child.gameObject, regex, includeInactive, limit, matches))
-                    return true;
-            }
+                total += CollectMatchesRecursive(
+                    child.gameObject, regex, includeInactive, limit, matches);
 
-            return false;
+            return total;
         }
 
         private static string GetHierarchicalPath(GameObject go)

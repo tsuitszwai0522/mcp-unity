@@ -1,12 +1,15 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
 using McpUnity.Utils;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEditor.Compilation;
 using UnityEngine;
+
+[assembly: InternalsVisibleTo("McpUnity.Editor.Tests")]
 
 namespace McpUnity.Tools {
     /// <summary>
@@ -155,8 +158,25 @@ namespace McpUnity.Tools {
         /// </summary>
         private static void CompleteRequest(CompilationRequest request, CompilationResult result)
         {
+            request.CompletionSource.SetResult(BuildResponse(
+                result.SortedLogs,
+                result.WarningsCount,
+                result.ErrorsCount,
+                request.ReturnWithLogs,
+                request.LogsLimit));
+        }
+
+        internal static JObject BuildResponse(
+            IReadOnlyList<CompilerMessage> sortedLogs,
+            int warningsCount,
+            int errorsCount,
+            bool returnWithLogs,
+            int logsLimit)
+        {
             JArray logsArray = new JArray();
-            IEnumerable<CompilerMessage> logsToReturn = request.ReturnWithLogs ? result.SortedLogs.Take(request.LogsLimit) : Enumerable.Empty<CompilerMessage>();
+            IEnumerable<CompilerMessage> logsToReturn = returnWithLogs
+                ? sortedLogs.Take(logsLimit)
+                : Enumerable.Empty<CompilerMessage>();
 
             foreach (var message in logsToReturn)
             {
@@ -177,21 +197,25 @@ namespace McpUnity.Tools {
                 logsArray.Add(logObject);
             }
 
-            string summaryMessage = result.HasErrors
-                                        ? $"Recompilation completed with {result.ErrorsCount} error(s) and {result.WarningsCount} warning(s)"
-                                        : $"Successfully recompiled all scripts with {result.WarningsCount} warning(s)";
+            string summaryMessage = errorsCount > 0
+                                        ? $"Recompilation completed with {errorsCount} error(s) and {warningsCount} warning(s)"
+                                        : $"Successfully recompiled all scripts with {warningsCount} warning(s)";
 
-            summaryMessage += $" (returnWithLogs: {request.ReturnWithLogs}, logsLimit: {request.LogsLimit})";
+            summaryMessage += $" (returnWithLogs: {returnWithLogs}, logsLimit: {logsLimit})";
 
-            var response = new JObject 
+            int totalLogs = sortedLogs.Count;
+            int returnedLogs = logsArray.Count;
+
+            return new JObject
             {
                 ["success"] = true,
                 ["type"] = "text",
                 ["message"] = summaryMessage,
-                ["logs"] = logsArray
+                ["logs"] = logsArray,
+                ["totalLogs"] = totalLogs,
+                ["returnedLogs"] = returnedLogs,
+                ["truncated"] = returnedLogs < totalLogs
             };
-
-            request.CompletionSource.SetResult(response);
         }
 
         /// <summary>

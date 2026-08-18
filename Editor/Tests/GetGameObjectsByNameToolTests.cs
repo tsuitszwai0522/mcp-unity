@@ -1,6 +1,8 @@
 using System.Collections.Generic;
 using NUnit.Framework;
+using McpUnity.Services;
 using McpUnity.Tools;
+using UnityEditor;
 using UnityEngine;
 using Newtonsoft.Json.Linq;
 
@@ -8,6 +10,8 @@ namespace McpUnity.Tests
 {
     public class GetGameObjectsByNameToolTests
     {
+        private const string TestPrefabDirectory = "Assets/McpUnityGetGameObjectsByNameTests";
+        private const string TestPrefabPath = TestPrefabDirectory + "/NestedMatches.prefab";
         private GetGameObjectsByNameTool _tool;
         private readonly List<GameObject> _spawned = new List<GameObject>();
 
@@ -16,16 +20,27 @@ namespace McpUnity.Tests
         {
             _tool = new GetGameObjectsByNameTool();
             _spawned.Clear();
+
+            if (!AssetDatabase.IsValidFolder(TestPrefabDirectory))
+                AssetDatabase.CreateFolder("Assets", "McpUnityGetGameObjectsByNameTests");
         }
 
         [TearDown]
         public void TearDown()
         {
+            if (PrefabEditingService.IsEditing)
+                PrefabEditingService.Discard();
+
             foreach (var go in _spawned)
             {
                 if (go != null) Object.DestroyImmediate(go);
             }
             _spawned.Clear();
+
+            AssetDatabase.DeleteAsset(TestPrefabPath);
+            if (AssetDatabase.IsValidFolder(TestPrefabDirectory))
+                AssetDatabase.DeleteAsset(TestPrefabDirectory);
+            AssetDatabase.Refresh();
         }
 
         private GameObject Spawn(string name)
@@ -100,6 +115,7 @@ namespace McpUnity.Tests
 
             Assert.IsTrue(result["success"]?.ToObject<bool>() ?? false);
             Assert.AreEqual(3, result["count"]?.ToObject<int>());
+            Assert.AreEqual(5, result["total"]?.ToObject<int>());
             Assert.IsTrue(result["truncated"]?.ToObject<bool>() ?? false);
             Assert.AreEqual(3, ((JArray)result["gameObjects"]).Count);
         }
@@ -115,7 +131,35 @@ namespace McpUnity.Tests
 
             Assert.IsTrue(result["success"]?.ToObject<bool>() ?? false);
             Assert.AreEqual(2, result["count"]?.ToObject<int>());
+            Assert.AreEqual(2, result["total"]?.ToObject<int>());
             Assert.IsFalse(result["truncated"]?.ToObject<bool>() ?? true);
+        }
+
+        [Test]
+        public void Execute_PrefabTreeCountsAllMatchesBeyondLimit()
+        {
+            var root = Spawn("GgbnT_PrefabRoot");
+            var parent = root.transform;
+            for (int i = 0; i < 5; i++)
+            {
+                var child = Spawn($"GgbnT_PrefabMatch_{i}");
+                child.transform.SetParent(parent);
+                parent = child.transform;
+            }
+
+            PrefabUtility.SaveAsPrefabAsset(root, TestPrefabPath);
+            PrefabEditingService.Open(TestPrefabPath);
+
+            var result = _tool.Execute(new JObject
+            {
+                ["name"] = "GgbnT_PrefabMatch_*",
+                ["limit"] = 3
+            });
+
+            Assert.IsTrue(result["success"]?.ToObject<bool>() ?? false);
+            Assert.AreEqual(3, result["count"]?.ToObject<int>());
+            Assert.AreEqual(5, result["total"]?.ToObject<int>());
+            Assert.IsTrue(result["truncated"]?.ToObject<bool>() ?? false);
         }
 
     }
