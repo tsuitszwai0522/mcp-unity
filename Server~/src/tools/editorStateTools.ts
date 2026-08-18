@@ -59,7 +59,8 @@ export function registerEditorStateTools(server: McpServer, mcpUnity: McpUnity, 
               text
             },
             payloadContent({
-                state: response.state
+                state: response.state,
+                message: response.message
               })
           ]
         };
@@ -98,10 +99,11 @@ export function registerEditorStateTools(server: McpServer, mcpUnity: McpUnity, 
           content: [
             {
               type: 'text' as const,
-              text: response.message
+              text: response.message || `Editor state action '${action}' executed successfully`
             },
             payloadContent({
-                state: response.state
+                state: response.state,
+                message: response.message
               })
           ]
         };
@@ -128,7 +130,8 @@ export function registerEditorStateTools(server: McpServer, mcpUnity: McpUnity, 
                     text: `Editor state action '${action}' executed successfully`
                   },
                   payloadContent({
-                      state: verifyResponse.state
+                      state: verifyResponse.state,
+                      message: verifyResponse.message
                     })
                 ]
               };

@@ -76,7 +76,7 @@ async function moveToolHandler(mcpUnity: McpUnity, params: z.infer<typeof movePa
 
   return {
     content: [{
-      type: response.type,
+      type: response.type || 'text',
       text: response.message || 'GameObject moved successfully'
     }]
   };
@@ -143,7 +143,7 @@ async function rotateToolHandler(mcpUnity: McpUnity, params: z.infer<typeof rota
 
   return {
     content: [{
-      type: response.type,
+      type: response.type || 'text',
       text: response.message || 'GameObject rotated successfully'
     }]
   };
@@ -208,7 +208,7 @@ async function scaleToolHandler(mcpUnity: McpUnity, params: z.infer<typeof scale
 
   return {
     content: [{
-      type: response.type,
+      type: response.type || 'text',
       text: response.message || 'GameObject scaled successfully'
     }]
   };
@@ -295,7 +295,7 @@ async function setTransformToolHandler(mcpUnity: McpUnity, params: any): Promise
 
   return {
     content: [{
-      type: response.type,
+      type: response.type || 'text',
       text: response.message || 'Transform updated successfully'
     }]
   };

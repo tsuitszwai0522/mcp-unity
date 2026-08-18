@@ -21,10 +21,10 @@ function resolveItemType(items: any): z.ZodTypeAny {
 }
 
 export function jsonSchemaToZodShape(schema: any): z.ZodRawShape {
-  const shape: z.ZodRawShape = {};
+  const shape: Record<string, z.ZodTypeAny> = {};
 
   if (!schema?.properties || typeof schema.properties !== 'object') {
-    return shape;
+    return shape as z.ZodRawShape;
   }
 
   const required = new Set<string>(Array.isArray(schema.required) ? schema.required : []);
@@ -53,7 +53,7 @@ export function jsonSchemaToZodShape(schema: any): z.ZodRawShape {
         zodType = z.array(resolveItemType(prop.items));
         break;
       case 'object':
-        zodType = z.record(z.any());
+        zodType = z.record(z.string(), z.any());
         break;
       default:
         zodType = z.any();
@@ -71,5 +71,5 @@ export function jsonSchemaToZodShape(schema: any): z.ZodRawShape {
     shape[key] = zodType;
   }
 
-  return shape;
+  return shape as z.ZodRawShape;
 }

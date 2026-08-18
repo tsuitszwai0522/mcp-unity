@@ -3,6 +3,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { McpUnity } from './unity/mcpUnity.js';
 import { Logger, LogLevel } from './utils/logger.js';
+import { installStructuredContentSeam } from './utils/structuredContentSeam.js';
 import { registerCreateSceneTool } from './tools/createSceneTool.js';
 import { registerMenuItemTool } from './tools/menuItemTool.js';
 import { registerSelectGameObjectTool } from './tools/selectGameObjectTool.js';
@@ -102,6 +103,8 @@ const server = new McpServer (
     },
   }
 );
+
+installStructuredContentSeam(server);
 
 // Initialize MCP HTTP bridge with Unity editor
 const mcpUnity = new McpUnity(unityLogger);

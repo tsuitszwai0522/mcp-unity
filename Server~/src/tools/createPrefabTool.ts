@@ -13,7 +13,7 @@ const toolDescription = 'Creates a prefab with optional MonoBehaviour script and
 const paramsSchema = z.object({
   componentName: z.string().optional().describe('The name of the MonoBehaviour Component to add to the prefab (optional)'),
   prefabName: z.string().describe('The name of the prefab to create'),
-  fieldValues: z.record(z.any()).optional().describe('Optional JSON object of serialized field values to apply to the prefab'),
+  fieldValues: z.record(z.string(), z.any()).optional().describe('Optional JSON object of serialized field values to apply to the prefab'),
   basePrefabPath: z.string().optional().describe('Asset path to a base prefab to create a Prefab Variant from (e.g., "Assets/Prefabs/Base.prefab"). When provided, the new prefab will be a Variant of the base prefab.')
 });
 
@@ -76,11 +76,12 @@ async function toolHandler(mcpUnity: McpUnity, params: any) {
   return {
     content: [
       {
-        type: response.type,
+        type: response.type || 'text',
         text: response.message || `Successfully created prefab`
       },
       payloadContent({
-          prefabPath: response.prefabPath
+          prefabPath: response.prefabPath,
+          message: response.message
         })
     ]
   };

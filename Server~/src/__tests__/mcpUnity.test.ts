@@ -5,7 +5,8 @@ import { McpUnity, ConnectionState } from '../unity/mcpUnity.js';
 import { registerTransformTools } from '../tools/transformTools.js';
 import path from 'path';
 import { z } from 'zod';
-import { zodToJsonSchema } from 'zod-to-json-schema';
+// Intentional SDK-internal import: an SDK upgrade must fail loudly if production's converter moves.
+import { toJsonSchemaCompat } from '@modelcontextprotocol/sdk/server/zod-json-schema-compat.js';
 
 describe('McpUnityError integration', () => {
   it('should create proper error for connection issues', () => {
@@ -196,7 +197,7 @@ describe('Transform schema compatibility', () => {
 
     for (const call of mockServerTool.mock.calls) {
       const paramsShape = call[2];
-      const schemaJson = zodToJsonSchema(z.object(paramsShape), { strictUnions: true });
+      const schemaJson = toJsonSchemaCompat(z.object(paramsShape), { strictUnions: true });
       const refs = collectLocalPropertyRefs(schemaJson);
 
       expect(refs).toEqual([]);

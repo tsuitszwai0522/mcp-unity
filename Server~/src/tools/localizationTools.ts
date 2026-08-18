@@ -60,7 +60,7 @@ export function registerLocListTablesTool(server: McpServer, mcpUnity: McpUnity,
     return {
       content: [
         { type: 'text', text },
-        payloadContent({ tables }),
+        payloadContent({ tables, message: response.message }),
       ],
     };
   });
@@ -132,6 +132,7 @@ export function registerLocGetEntriesTool(server: McpServer, mcpUnity: McpUnity,
             totalEntries: entries.length,
             valuesIncluded: Boolean(include_values),
             truncated: wasCapped,
+            message: response.message,
           }),
       ],
     };
@@ -173,6 +174,7 @@ export function registerLocSetEntryTool(server: McpServer, mcpUnity: McpUnity, l
             action: response.action,
             key: response.key,
             value: response.value,
+            message: response.message,
           }),
       ],
     };
@@ -218,6 +220,7 @@ export function registerLocSetEntriesTool(server: McpServer, mcpUnity: McpUnity,
             created: response.created,
             updated: response.updated,
             total: response.total,
+            message: response.message,
           }),
       ],
     };
@@ -253,6 +256,7 @@ export function registerLocDeleteEntryTool(server: McpServer, mcpUnity: McpUnity
         payloadContent({
             deleted: response.deleted,
             key: response.key,
+            message: response.message,
           }),
       ],
     };
@@ -287,6 +291,7 @@ export function registerLocDeleteTableTool(server: McpServer, mcpUnity: McpUnity
             path: response.path,
             entryCount: response.entryCount,
             locales: response.locales,
+            message: response.message,
           }),
       ],
     };
@@ -327,6 +332,7 @@ export function registerLocCreateTableTool(server: McpServer, mcpUnity: McpUnity
             name: response.name,
             path: response.path,
             warnings: response.warnings,
+            message: response.message,
           }),
       ],
     };
@@ -360,6 +366,7 @@ export function registerLocRemoveLocaleTool(server: McpServer, mcpUnity: McpUnit
             action: response.action,
             code: response.code,
             path: response.path,
+            message: response.message,
           }),
       ],
     };
@@ -393,6 +400,7 @@ export function registerLocAddLocaleTool(server: McpServer, mcpUnity: McpUnity, 
             action: response.action,
             code: response.code,
             path: response.path,
+            message: response.message,
           }),
       ],
     };

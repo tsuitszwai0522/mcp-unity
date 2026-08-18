@@ -75,11 +75,12 @@ async function toolHandler(mcpUnity: McpUnity, params: any) {
   return {
     content: [
       {
-        type: response.type,
+        type: response.type || 'text',
         text: response.message || `Successfully saved as prefab`
       },
       payloadContent({
-          prefabPath: response.prefabPath
+          prefabPath: response.prefabPath,
+          message: response.message
         })
     ]
   };

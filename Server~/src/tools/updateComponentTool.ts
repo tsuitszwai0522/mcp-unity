@@ -14,7 +14,7 @@ const paramsSchema = z.object({
   instanceId: z.number().optional().describe('The instance ID of the GameObject to update'),
   objectPath: z.string().optional().describe('The path of the GameObject in the hierarchy to update (alternative to instanceId)'),
   componentName: z.string().describe('The name of the component to update or add'),
-  componentData: z.record(z.any()).optional().describe('An object containing the fields to update on the component (optional). For asset references (Sprite, Material, Font, AudioClip, etc.), use the asset path as a string value (e.g., {"sprite": "Assets/Sprites/icon.png"}). For scene object references (Transform, other MonoBehaviours, GameObject), use the instance ID as an integer value (e.g., {"target": 12345}) or a structured reference (e.g., {"target": {"instanceId": 12345}} or {"target": {"objectPath": "Path/To/Object"}})')
+  componentData: z.record(z.string(), z.any()).optional().describe('An object containing the fields to update on the component (optional). For asset references (Sprite, Material, Font, AudioClip, etc.), use the asset path as a string value (e.g., {"sprite": "Assets/Sprites/icon.png"}). For scene object references (Transform, other MonoBehaviours, GameObject), use the instance ID as an integer value (e.g., {"target": 12345}) or a structured reference (e.g., {"target": {"instanceId": 12345}} or {"target": {"objectPath": "Path/To/Object"}})')
 });
 
 /**
@@ -97,7 +97,7 @@ async function toolHandler(mcpUnity: McpUnity, params: any): Promise<CallToolRes
   
   return {
     content: [{
-      type: response.type,
+      type: response.type || 'text',
       text: response.message || `Successfully updated component on GameObject with ${targetDescription}`
     }]
   };

@@ -132,6 +132,7 @@ async function createCanvasHandler(
       payloadContent({
           instanceId: response.instanceId,
           path: response.path,
+          message: response.message,
         }),
     ],
   };
@@ -239,6 +240,7 @@ async function createUIElementHandler(
           instanceId: response.instanceId,
           path: response.path,
           usedFallback: response.usedFallback,
+          message: response.message,
         }),
     ],
   };
@@ -329,6 +331,7 @@ async function setRectTransformHandler(
           instanceId: response.instanceId,
           path: response.path,
           rectTransform: response.rectTransform,
+          message: response.message,
         }),
     ],
   };
@@ -459,6 +462,7 @@ async function addLayoutComponentHandler(
       payloadContent({
           instanceId: response.instanceId,
           path: response.path,
+          message: response.message,
         }),
     ],
   };
@@ -538,6 +542,7 @@ async function getUIElementInfoHandler(
       },
       payloadContent({
           elementInfo: response.elementInfo,
+          message: response.message,
         }),
     ],
   };

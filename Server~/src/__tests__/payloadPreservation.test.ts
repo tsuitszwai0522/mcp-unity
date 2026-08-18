@@ -51,7 +51,10 @@ describe('payload preservation in MCP content', () => {
     });
 
     expect(result.content).toHaveLength(2);
-    expect(JSON.parse(result.content[1].text)).toEqual({ elementInfo });
+    expect(JSON.parse(result.content[1].text)).toEqual({
+      elementInfo,
+      message: 'Retrieved UI element info for PlayButton',
+    });
     expect(result).not.toHaveProperty('data');
   });
 
@@ -83,6 +86,7 @@ describe('payload preservation in MCP content', () => {
       components: response.components,
       rectTransform: response.rectTransform,
       displayText: response.displayText,
+      message: response.message,
     });
     expect(result).not.toHaveProperty('data');
   });
@@ -171,6 +175,7 @@ describe('payload preservation in MCP content', () => {
       oldPath: 'OldParent/Child',
       newPath: 'NewParent/Child',
       changed: true,
+      message: "Successfully reparented GameObject 'Child' to 'NewParent'.",
     });
     expect(result).not.toHaveProperty('data');
   });

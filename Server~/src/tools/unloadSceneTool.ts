@@ -59,14 +59,15 @@ async function toolHandler(mcpUnity: McpUnity, params: any) {
   return {
     content: [
       {
-        type: response.type,
+        type: response.type || 'text',
         text: response.message || 'Successfully unloaded scene'
       },
       payloadContent({
           sceneName: response.sceneName,
           scenePath: response.scenePath,
           wasDirty: response.wasDirty,
-          removed: response.removed
+          removed: response.removed,
+          message: response.message
         })
     ]
   };

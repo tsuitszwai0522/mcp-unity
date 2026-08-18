@@ -69,7 +69,8 @@ async function toolHandler(mcpUnity: McpUnity, params: any) {
       payloadContent({
           activeScene: response.activeScene,
           loadedSceneCount: response.loadedSceneCount,
-          loadedScenes: response.loadedScenes
+          loadedScenes: response.loadedScenes,
+          message: response.message
         })
     ]
   };

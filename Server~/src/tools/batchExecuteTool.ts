@@ -12,7 +12,7 @@ Performance improvement: 10-100x for repetitive operations.`;
 
 const operationSchema = z.object({
   tool: z.string().describe('The name of the tool to execute'),
-  params: z.record(z.any()).optional().default({}).describe('Parameters to pass to the tool'),
+  params: z.record(z.string(), z.any()).optional().default({}).describe('Parameters to pass to the tool'),
   id: z.string().optional().describe('Optional identifier for this operation (for tracking in results)')
 });
 

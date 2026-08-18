@@ -12,7 +12,7 @@ const toolDescription = 'Updates field values on an existing ScriptableObject as
 // Parameter schema for the tool
 const paramsSchema = z.object({
   assetPath: z.string().describe('The asset path of the existing ScriptableObject (e.g., "Assets/ScriptableObjects/MyAsset.asset")'),
-  fieldValues: z.record(z.any()).describe('JSON object of serialized field values to update on the ScriptableObject')
+  fieldValues: z.record(z.string(), z.any()).describe('JSON object of serialized field values to update on the ScriptableObject')
 });
 
 /**
@@ -81,12 +81,13 @@ async function toolHandler(mcpUnity: McpUnity, params: any) {
   return {
     content: [
       {
-        type: response.type,
+        type: response.type || 'text',
         text: response.message || `Successfully updated ScriptableObject`
       },
       payloadContent({
           assetPath: response.assetPath,
-          typeName: response.typeName
+          typeName: response.typeName,
+          message: response.message
         })
     ]
   };

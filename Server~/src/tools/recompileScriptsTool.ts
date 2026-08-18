@@ -76,7 +76,7 @@ async function toolHandler(mcpUnity: McpUnity, params: z.infer<typeof paramsSche
     content: [
       {
         type: 'text',
-        text: response.message
+        text: response.message || 'Scripts recompiled successfully'
       },
       {
         type: 'text',

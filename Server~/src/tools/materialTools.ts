@@ -33,7 +33,7 @@ const createMaterialParamsSchema = z.object({
   shader: z.string().optional().describe('The shader name. Auto-detects render pipeline if not specified (URP: "Universal Render Pipeline/Lit", Built-in: "Standard")'),
   savePath: z.string().describe('The asset path to save the material (e.g., "Assets/Materials/MyMaterial.mat")'),
   color: colorSchema.optional().describe('The base color of the material. Auto-detects correct property name (_BaseColor for URP, _Color for Standard)'),
-  properties: z.record(z.any()).optional().describe('Optional initial property values as key-value pairs (advanced usage)')
+  properties: z.record(z.string(), z.any()).optional().describe('Optional initial property values as key-value pairs (advanced usage)')
 });
 
 /**
@@ -95,7 +95,7 @@ async function createMaterialHandler(mcpUnity: McpUnity, params: any): Promise<C
 
   return {
     content: [{
-      type: response.type,
+      type: response.type || 'text',
       text: response.message || `Successfully created material '${params.name}'`
     }]
   };
@@ -173,7 +173,7 @@ async function assignMaterialHandler(mcpUnity: McpUnity, params: any): Promise<C
 
   return {
     content: [{
-      type: response.type,
+      type: response.type || 'text',
       text: response.message || `Successfully assigned material`
     }]
   };
@@ -187,7 +187,7 @@ const modifyMaterialToolName = 'modify_material';
 const modifyMaterialToolDescription = 'Modifies properties of an existing material. Supports colors (e.g., _Color), floats (e.g., _Metallic), and textures (e.g., _MainTex path)';
 const modifyMaterialParamsSchema = z.object({
   materialPath: z.string().describe('The asset path to the material (e.g., "Assets/Materials/MyMaterial.mat")'),
-  properties: z.record(z.any()).describe('Property name to value mapping. Colors: {r,g,b,a}, Vectors: {x,y,z,w}, Floats: number, Textures: asset path string')
+  properties: z.record(z.string(), z.any()).describe('Property name to value mapping. Colors: {r,g,b,a}, Vectors: {x,y,z,w}, Floats: number, Textures: asset path string')
 });
 
 /**
@@ -246,7 +246,7 @@ async function modifyMaterialHandler(mcpUnity: McpUnity, params: any): Promise<C
 
   return {
     content: [{
-      type: response.type,
+      type: response.type || 'text',
       text: response.message || `Successfully modified material`
     }]
   };
@@ -350,7 +350,8 @@ async function getMaterialInfoHandler(mcpUnity: McpUnity, params: any): Promise<
           enableInstancing: response.enableInstancing,
           doubleSidedGI: response.doubleSidedGI,
           passCount: response.passCount,
-          properties: response.properties
+          properties: response.properties,
+          message: response.message
         })
     ]
   };

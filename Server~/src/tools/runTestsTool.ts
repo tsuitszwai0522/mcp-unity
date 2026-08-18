@@ -94,7 +94,7 @@ async function toolHandler(mcpUnity: McpUnity, params: any = {}): Promise<CallTo
     content: [
       {
         type: 'text',
-        text: response.message
+        text: response.message || 'Tests completed successfully'
       },
       {
         type: 'text',

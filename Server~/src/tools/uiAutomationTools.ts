@@ -203,6 +203,7 @@ async function simulatePointerClickHandler(
           targetPath: response.targetPath,
           eventsDispatched: response.eventsDispatched,
           stateAfter: response.stateAfter,
+          message: response.message,
         }),
     ],
   };
@@ -307,6 +308,7 @@ async function simulateInputFieldHandler(
           previousText: response.previousText,
           currentText: response.currentText,
           submitted: response.submitted,
+          message: response.message,
         }),
     ],
   };
@@ -402,6 +404,7 @@ async function getUIElementStateHandler(
           components: response.components,
           rectTransform: response.rectTransform,
           displayText: response.displayText,
+          message: response.message,
         }),
     ],
   };
@@ -524,6 +527,8 @@ async function waitForConditionHandler(
           objectPath: response.objectPath,
           elapsed: response.elapsed,
           finalState: response.finalState,
+          error: response.error,
+          message: response.message,
         }),
     ],
     isError: !isSuccess,
@@ -654,6 +659,7 @@ async function simulateDragHandler(
           totalDelta: response.totalDelta,
           steps: response.steps,
           dropReceiver: response.dropReceiver,
+          message: response.message,
         }),
     ],
   };

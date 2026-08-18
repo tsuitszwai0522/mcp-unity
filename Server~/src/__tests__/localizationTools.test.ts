@@ -70,6 +70,7 @@ describe('loc_get_entries', () => {
       totalEntries: 2,
       valuesIncluded: false,
       truncated: false,
+      message: "Read 2 entries from 'CB_Tooltip' (zh-TW)",
     });
   });
 
@@ -92,6 +93,7 @@ describe('loc_get_entries', () => {
       totalEntries: 0,
       valuesIncluded: false,
       truncated: false,
+      message: "Read 0 entries from 'Empty' (zh-TW)",
     });
   });
 

@@ -13,7 +13,7 @@ const toolDescription = 'Creates a ScriptableObject asset with optional field va
 const paramsSchema = z.object({
   typeName: z.string().describe('The name of the ScriptableObject class to instantiate (e.g., "GameSettings", "MyNamespace.MyScriptableObject")'),
   savePath: z.string().describe('The asset path to save the ScriptableObject (e.g., "Assets/ScriptableObjects/MyAsset.asset")'),
-  fieldValues: z.record(z.any()).optional().describe('Optional JSON object of serialized field values to apply to the ScriptableObject')
+  fieldValues: z.record(z.string(), z.any()).optional().describe('Optional JSON object of serialized field values to apply to the ScriptableObject')
 });
 
 /**
@@ -82,12 +82,13 @@ async function toolHandler(mcpUnity: McpUnity, params: any) {
   return {
     content: [
       {
-        type: response.type,
+        type: response.type || 'text',
         text: response.message || `Successfully created ScriptableObject`
       },
       payloadContent({
           assetPath: response.assetPath,
-          typeName: response.typeName
+          typeName: response.typeName,
+          message: response.message
         })
     ]
   };

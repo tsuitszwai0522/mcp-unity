@@ -78,7 +78,8 @@ async function toolHandler(mcpUnity: McpUnity, params: any) {
         text
       },
       payloadContent({
-          selection: response.selection
+          selection: response.selection,
+          message: response.message
         })
     ]
   };

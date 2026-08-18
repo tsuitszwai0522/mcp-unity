@@ -75,11 +75,12 @@ async function toolHandler(mcpUnity: McpUnity, params: any) {
   return {
     content: [
       {
-        type: response.type,
+        type: response.type || 'text',
         text: response.message || "Successfully created scene",
       },
       payloadContent({
           scenePath: response.scenePath,
+          message: response.message,
         }),
     ],
   };

@@ -65,6 +65,7 @@ export function registerAddrGetSettingsTool(server: McpServer, mcpUnity: McpUnit
             entryCount: response.entryCount,
             labels: response.labels,
             version: response.version,
+            message: response.message,
           }),
       ],
     };
@@ -93,6 +94,7 @@ export function registerAddrInitSettingsTool(server: McpServer, mcpUnity: McpUni
             created: response.created,
             settingsPath: response.settingsPath,
             defaultGroup: response.defaultGroup,
+            message: response.message,
           }),
       ],
     };
@@ -120,7 +122,7 @@ export function registerAddrListGroupsTool(server: McpServer, mcpUnity: McpUnity
     return {
       content: [
         { type: 'text', text },
-        payloadContent({ groups }),
+        payloadContent({ groups, message: response.message }),
       ],
     };
   });
@@ -158,6 +160,7 @@ export function registerAddrCreateGroupTool(server: McpServer, mcpUnity: McpUnit
             created: response.created,
             name: response.name,
             isDefault: response.isDefault,
+            message: response.message,
           }),
       ],
     };
@@ -191,6 +194,7 @@ export function registerAddrRemoveGroupTool(server: McpServer, mcpUnity: McpUnit
             deleted: response.deleted,
             name: response.name,
             removedEntryCount: response.removedEntryCount,
+            message: response.message,
           }),
       ],
     };
@@ -222,6 +226,7 @@ export function registerAddrSetDefaultGroupTool(server: McpServer, mcpUnity: Mcp
         payloadContent({
             defaultGroup: response.defaultGroup,
             previousDefault: response.previousDefault,
+            message: response.message,
           }),
       ],
     };
@@ -259,6 +264,7 @@ export function registerAddrListEntriesTool(server: McpServer, mcpUnity: McpUnit
             total: response.total,
             truncated: response.truncated,
             entries,
+            message: response.message,
           }),
       ],
     };
@@ -315,6 +321,7 @@ export function registerAddrAddEntriesTool(server: McpServer, mcpUnity: McpUnity
             entries: response.entries,
             warnings: response.warnings,
             missingAssets: response.missingAssets,
+            message: response.message,
           }),
       ],
     };
@@ -354,6 +361,7 @@ export function registerAddrRemoveEntriesTool(server: McpServer, mcpUnity: McpUn
         payloadContent({
             removed: response.removed,
             notFound: response.notFound,
+            message: response.message,
           }),
       ],
     };
@@ -398,6 +406,7 @@ export function registerAddrMoveEntriesTool(server: McpServer, mcpUnity: McpUnit
             moved: response.moved,
             targetGroup: response.targetGroup,
             notFound: response.notFound,
+            message: response.message,
           }),
       ],
     };
@@ -442,6 +451,7 @@ export function registerAddrSetEntryTool(server: McpServer, mcpUnity: McpUnity, 
             labels: response.labels,
             group: response.group,
             warnings: response.warnings,
+            message: response.message,
           }),
       ],
     };
@@ -467,7 +477,7 @@ export function registerAddrListLabelsTool(server: McpServer, mcpUnity: McpUnity
     return {
       content: [
         { type: 'text', text },
-        payloadContent({ labels }),
+        payloadContent({ labels, message: response.message }),
       ],
     };
   });
@@ -498,6 +508,7 @@ export function registerAddrCreateLabelTool(server: McpServer, mcpUnity: McpUnit
         payloadContent({
             created: response.created,
             label: response.label,
+            message: response.message,
           }),
       ],
     };
@@ -531,6 +542,7 @@ export function registerAddrRemoveLabelTool(server: McpServer, mcpUnity: McpUnit
             deleted: response.deleted,
             label: response.label,
             affectedEntries: response.affectedEntries,
+            message: response.message,
           }),
       ],
     };
@@ -567,6 +579,7 @@ export function registerAddrGetGroupSchemaTool(server: McpServer, mcpUnity: McpU
         payloadContent({
             group: response.group,
             values,
+            message: response.message,
           }),
       ],
     };
@@ -625,6 +638,7 @@ export function registerAddrSetGroupSchemaTool(server: McpServer, mcpUnity: McpU
             dryRun: response.dryRun,
             changed: response.changed,
             diff: response.diff,
+            message: response.message,
           }),
       ],
     };
@@ -657,6 +671,7 @@ export function registerAddrListProfilesTool(server: McpServer, mcpUnity: McpUni
             activeProfileId: response.activeProfileId,
             variableNames: response.variableNames,
             profiles,
+            message: response.message,
           }),
       ],
     };
@@ -683,6 +698,7 @@ export function registerAddrGetActiveProfileTool(server: McpServer, mcpUnity: Mc
             id: response.id,
             name: response.name,
             variables: response.variables,
+            message: response.message,
           }),
       ],
     };
@@ -715,6 +731,7 @@ export function registerAddrSetActiveProfileTool(server: McpServer, mcpUnity: Mc
             changed: response.changed,
             activeProfile: response.activeProfile,
             previousProfile: response.previousProfile,
+            message: response.message,
           }),
       ],
     };
@@ -764,6 +781,7 @@ export function registerAddrSetProfileVariableTool(server: McpServer, mcpUnity: 
             previousValue: response.previousValue,
             value: response.value,
             created: response.created,
+            message: response.message,
           }),
       ],
     };
@@ -795,6 +813,7 @@ export function registerAddrFindAssetTool(server: McpServer, mcpUnity: McpUnity,
         payloadContent({
             found: response.found,
             entry: response.entry,
+            message: response.message,
           }),
       ],
     };

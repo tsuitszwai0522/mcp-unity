@@ -1,5 +1,7 @@
 export const PAYLOAD_MAX_CHARS = 20000;
 
+export const PAYLOAD_STRUCTURED = Symbol.for('mcpUnity.structuredPayload');
+
 const PAYLOAD_PREVIEW_CHARS = 2000;
 const PAYLOAD_MAX_KEYS = 50;
 
@@ -13,6 +15,44 @@ export type PayloadTextContent = {
   type: 'text';
   text: string;
 };
+
+const withStructured = (text: string): PayloadTextContent => {
+  const item: PayloadTextContent = { type: 'text', text };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return item;
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return item;
+  }
+  Object.defineProperty(item, PAYLOAD_STRUCTURED, { value: parsed, enumerable: false });
+  return item;
+};
+
+export function attachStructuredContent(result: unknown): unknown {
+  if (result === null || typeof result !== 'object' || Array.isArray(result)) {
+    return result;
+  }
+
+  const toolResult = result as Record<string, unknown>;
+  if (toolResult.structuredContent !== undefined || !Array.isArray(toolResult.content)) {
+    return result;
+  }
+
+  for (const item of toolResult.content) {
+    if (item === null || typeof item !== 'object') {
+      continue;
+    }
+    if (Object.prototype.hasOwnProperty.call(item, PAYLOAD_STRUCTURED)) {
+      const structuredContent = (item as Record<PropertyKey, unknown>)[PAYLOAD_STRUCTURED];
+      return { ...toolResult, structuredContent };
+    }
+  }
+
+  return result;
+}
 
 const payloadKeys = (payload: unknown): string[] => {
   if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
@@ -55,12 +95,12 @@ export function payloadContent(payload: unknown, limits?: PayloadLimits): Payloa
   const pretty = JSON.stringify(payload, null, 2) ?? 'null';
 
   if (pretty.length <= maxChars) {
-    return { type: 'text', text: pretty };
+    return withStructured(pretty);
   }
 
   const compact = JSON.stringify(payload) ?? 'null';
   if (compact.length <= maxChars) {
-    return { type: 'text', text: compact };
+    return withStructured(compact);
   }
 
   const allKeys = payloadKeys(payload);
@@ -152,5 +192,5 @@ export function payloadContent(payload: unknown, limits?: PayloadLimits): Payloa
     metadata = fitted;
   }
 
-  return { type: 'text', text: metadata };
+  return withStructured(metadata);
 }

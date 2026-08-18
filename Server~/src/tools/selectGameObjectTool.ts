@@ -75,7 +75,7 @@ async function toolHandler(mcpUnity: McpUnity, params: any): Promise<CallToolRes
   
   return {
     content: [{
-      type: response.type,
+      type: response.type || 'text',
       text: response.message || `Successfully selected GameObject`
     }]
   };

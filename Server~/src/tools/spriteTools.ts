@@ -69,7 +69,7 @@ async function importTextureAsSpriteHandler(mcpUnity: McpUnity, params: any): Pr
 
   return {
     content: [{
-      type: response.type,
+      type: response.type || 'text',
       text: response.message || `Successfully imported texture as sprite`
     }]
   };
@@ -157,7 +157,7 @@ async function createSpriteAtlasHandler(mcpUnity: McpUnity, params: any): Promis
 
   return {
     content: [{
-      type: response.type,
+      type: response.type || 'text',
       text: response.message || `Successfully created SpriteAtlas '${params.atlasName}'`
     }]
   };

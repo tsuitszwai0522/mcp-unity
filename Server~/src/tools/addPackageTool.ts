@@ -91,8 +91,8 @@ async function toolHandler(mcpUnity: McpUnity, params: any): Promise<CallToolRes
   
   return {
     content: [{
-      type: response.type,
-      text: response.message
+      type: response.type || 'text',
+      text: response.message || 'Package added successfully'
     }]
   };
 }

@@ -91,7 +91,9 @@ async function readHandler(mcpUnity: McpUnity, params: any): Promise<CallToolRes
       },
       payloadContent({
           instanceId: response.instanceId,
-          componentName: response.componentName
+          componentName: response.componentName,
+          fields: response.fields,
+          message: response.message
         })
     ]
   };
@@ -112,7 +114,7 @@ const writeParamsSchema = z.object({
   instanceId: z.number().optional().describe('The instance ID of the GameObject'),
   objectPath: z.string().optional().describe('The path of the GameObject in the hierarchy (alternative to instanceId)'),
   componentName: z.string().describe('The name of the component to write to (e.g., "Image", "Text", "Button")'),
-  fieldData: z.record(z.any()).describe('Object mapping field names to values. Accepts both serialized names (m_Color) and property names (color). For colors: {r, g, b, a}. For vectors: {x, y, z}. For object refs: asset path string or instance ID.'),
+  fieldData: z.record(z.string(), z.any()).describe('Object mapping field names to values. Accepts both serialized names (m_Color) and property names (color). For colors: {r, g, b, a}. For vectors: {x, y, z}. For object refs: asset path string or instance ID.'),
 });
 
 export function registerWriteSerializedFieldsTool(server: McpServer, mcpUnity: McpUnity, logger: Logger) {
@@ -190,7 +192,8 @@ async function writeHandler(mcpUnity: McpUnity, params: any): Promise<CallToolRe
       payloadContent({
           instanceId: response.instanceId,
           updatedFields: response.updatedFields,
-          warnings: response.warnings
+          warnings: response.warnings,
+          message: response.message
         })
     ]
   };

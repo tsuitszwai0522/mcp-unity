@@ -307,7 +307,8 @@ async function reparentHandler(mcpUnity: McpUnity, params: any): Promise<CallToo
           path: response.path,
           oldPath: response.oldPath,
           newPath: response.newPath,
-          changed: response.changed
+          changed: response.changed,
+          message: response.message
         })
     ]
   };

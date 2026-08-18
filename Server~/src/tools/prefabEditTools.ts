@@ -83,7 +83,8 @@ async function openPrefabContentsHandler(mcpUnity: McpUnity, params: any) {
           prefabPath: response.prefabPath,
           rootInstanceId: response.rootInstanceId,
           rootName: response.rootName,
-          children: response.children
+          children: response.children,
+          message: response.message
         })
     ]
   };
@@ -161,12 +162,13 @@ async function savePrefabContentsHandler(mcpUnity: McpUnity, params: any) {
   return {
     content: [
       {
-        type: response.type,
+        type: response.type || 'text',
         text: response.message || `Prefab contents ${params.discard ? 'discarded' : 'saved'}`
       },
       payloadContent({
           prefabPath: response.prefabPath,
-          discarded: response.discarded
+          discarded: response.discarded,
+          message: response.message
         })
     ]
   };
