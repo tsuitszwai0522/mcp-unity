@@ -20,7 +20,10 @@ namespace McpUnity.Tools
         public ReadSerializedFieldsTool()
         {
             Name = "read_serialized_fields";
-            Description = "Reads serialized fields from a component using Unity's SerializedProperty API. Supports both serialized names (m_Color) and property names (color). Returns field names, types, and current values.";
+            Description = "Reads serialized fields from a component using Unity's SerializedProperty API. " +
+                "Supports both serialized names (m_Color) and property names (color). Returns field names, " +
+                "types, and current values. For enums, 'value' is the underlying enum value and 'index' " +
+                "is the enumValueIndex.";
         }
 
         public override JObject Execute(JObject parameters)
@@ -134,10 +137,11 @@ namespace McpUnity.Tools
 #pragma warning restore CS0618
                     return new JObject
                     {
-                        ["value"] = prop.enumValueIndex,
+                        ["value"] = prop.intValue,
+                        ["index"] = prop.enumValueIndex,
                         ["name"] = enumNames != null && prop.enumValueIndex >= 0 && prop.enumValueIndex < enumNames.Length
                             ? enumNames[prop.enumValueIndex]
-                            : prop.enumValueIndex.ToString()
+                            : prop.intValue.ToString()
                     };
                 case SerializedPropertyType.ObjectReference:
                     if (prop.objectReferenceValue != null)
@@ -185,7 +189,13 @@ namespace McpUnity.Tools
         public WriteSerializedFieldsTool()
         {
             Name = "write_serialized_fields";
-            Description = "Writes serialized fields on a component using Unity's SerializedProperty API. Accepts both serialized names (m_Color, m_Sprite) and property names (color, sprite). More reliable than update_component for Unity built-in component fields.";
+            Description = "Writes serialized fields on a component using Unity's SerializedProperty API. " +
+                "Accepts both serialized names (m_Color, m_Sprite) and property names (color, sprite). " +
+                "Integer enum input is treated as the underlying enum value (not an index); invalid values " +
+                "are rejected with the valid names listed. Partial struct writes (for example, {\"r\":1}) " +
+                "preserve unmentioned components of the current value; on freshly-created objects, " +
+                "unmentioned components are the type's default. More reliable than update_component for " +
+                "Unity built-in component fields.";
         }
 
         public override JObject Execute(JObject parameters)
@@ -267,6 +277,8 @@ namespace McpUnity.Tools
                         continue;
                     }
 
+                    warnings.AddRange(fieldWarnings);
+
                     serializedObject.ApplyModifiedProperties();
                     if (!SerializedPropertyHelper.VerifyObjectReferenceWrite(
                         component,
@@ -289,7 +301,10 @@ namespace McpUnity.Tools
                 }
             }
 
-            EditorUtility.SetDirty(gameObject);
+            if (updatedFields.Count > 0)
+            {
+                EditorUtility.SetDirty(gameObject);
+            }
 
             string message = $"Updated fields on '{componentName}' on '{gameObject.name}': " +
                 $"{updatedFields.Count} field(s) succeeded, {failedFields.Count} field(s) failed";

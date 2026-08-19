@@ -68,8 +68,11 @@ namespace McpUnity.Tools
                 var warnings = new List<string>();
                 ApplyFieldValues(scriptableObject, fieldValues, updatedFields, failedFields, warnings);
 
-                // Save changes
-                AssetDatabase.SaveAssets();
+                if (updatedFields.Count > 0)
+                {
+                    EditorUtility.SetDirty(scriptableObject);
+                    AssetDatabase.SaveAssets();
+                }
 
                 string message = $"Updated ScriptableObject at '{assetPath}' (type: {scriptableObject.GetType().Name}): " +
                     $"{updatedFields.Count} field(s) succeeded, {failedFields.Count} field(s) failed";
@@ -139,8 +142,12 @@ namespace McpUnity.Tools
 
                     var conversionFailures = new List<string>();
                     object convertedValue = SerializedFieldConverter.ConvertJTokenToValue(
-                        value, field.FieldType, conversionFailures);
-                    if (CannotAssignConvertedValue(convertedValue, value, field.FieldType))
+                        value,
+                        field.FieldType,
+                        SerializedFieldConverter.CloneClassSeed(field.GetValue(scriptableObject)),
+                        conversionFailures,
+                        warnings);
+                    if (SerializedFieldConverter.CannotAssignConvertedValue(conversionFailures))
                     {
                         string reason = conversionFailures.Count > 0
                             ? string.Join("; ", conversionFailures.ToArray())
@@ -159,19 +166,6 @@ namespace McpUnity.Tools
                     Debug.LogWarning($"[MCP] Failed to set field '{fieldName}': {ex.Message}");
                 }
             }
-
-            EditorUtility.SetDirty(scriptableObject);
-        }
-
-        private static bool CannotAssignConvertedValue(object value, JToken token, Type targetType)
-        {
-            if (value != null)
-            {
-                return false;
-            }
-
-            return token.Type != JTokenType.Null
-                || (targetType.IsValueType && Nullable.GetUnderlyingType(targetType) == null);
         }
 
         private static JObject CreateFieldFailure(string fieldName, string reason)

@@ -87,23 +87,64 @@ namespace McpUnity.Tools
                     // Add component
                     Component component = AddComponent(tempObject, componentName);
 
+                    if (component == null)
+                    {
+                        Undo.DestroyObjectImmediate(tempObject);
+                        return McpUnitySocketHandler.CreateErrorResponse(
+                            $"Component '{componentName}' could not be added: type not found or not a MonoBehaviour",
+                            "component_error"
+                        );
+                    }
+
                     // Apply field values if provided and component exists
                     ApplyFieldValues(fieldValues, component, updatedFields, failedFields, warnings);
                 }
                 catch (Exception)
                 {
-                    UnityEngine.Object.DestroyImmediate(tempObject);
+                    Undo.DestroyObjectImmediate(tempObject);
                     return McpUnitySocketHandler.CreateErrorResponse(
                         $"Failed to add component '{componentName}' to GameObject",
                         "component_error"
                     );
                 }
             }
+            else if (fieldValues != null && fieldValues.Count > 0)
+            {
+                foreach (JProperty property in fieldValues.Properties())
+                {
+                    failedFields.Add(CreateFieldFailure(
+                        property.Name,
+                        "Cannot apply field values because no componentName was provided"));
+                }
+            }
+
+            if (failedFields.Count > 0)
+            {
+                Undo.DestroyObjectImmediate(tempObject);
+                bool failedVariant = !string.IsNullOrEmpty(basePrefabPath);
+                var failedResponse = new JObject
+                {
+                    ["success"] = false,
+                    ["type"] = "text",
+                    ["message"] =
+                        $"Prefab '{prefabName}' was not created because " +
+                        $"{failedFields.Count} field(s) failed; nothing was created.",
+                    ["isVariant"] = failedVariant,
+                    ["updatedFields"] = new JArray(updatedFields.ToArray()),
+                    ["failedFields"] = new JArray(failedFields.ToArray())
+                };
+                if (warnings.Count > 0)
+                {
+                    failedResponse["warnings"] = new JArray(warnings.ToArray());
+                }
+                return failedResponse;
+            }
 
             // For safety, we'll create a unique name if prefab already exists
             int counter = 1;
             string prefabPath = $"{prefabName}.prefab";
-            while (AssetDatabase.AssetPathToGUID(prefabPath) != "")
+            while (AssetDatabase.AssetPathToGUID(
+                prefabPath, AssetPathToGUIDOptions.OnlyExistingAssets) != "")
             {
                 prefabPath = $"{prefabName}_{counter}.prefab";
                 counter++;
@@ -114,7 +155,7 @@ namespace McpUnity.Tools
             PrefabUtility.SaveAsPrefabAsset(tempObject, prefabPath, out success);
 
             // Clean up temporary object
-            UnityEngine.Object.DestroyImmediate(tempObject);
+            Undo.DestroyObjectImmediate(tempObject);
 
             // Refresh the asset database
             AssetDatabase.Refresh();
@@ -205,6 +246,11 @@ namespace McpUnity.Tools
             List<JObject> failedFields,
             List<string> warnings)
         {
+            if (component == null)
+            {
+                return;
+            }
+
             // Apply field values if provided and component exists
             if (fieldValues == null || fieldValues.Count == 0)
             {
@@ -230,8 +276,12 @@ namespace McpUnity.Tools
                     {
                         var conversionFailures = new List<string>();
                         object value = SerializedFieldConverter.ConvertJTokenToValue(
-                            fieldValue, fieldInfo.FieldType, conversionFailures);
-                        if (CannotAssignConvertedValue(value, fieldValue, fieldInfo.FieldType))
+                            fieldValue,
+                            fieldInfo.FieldType,
+                            SerializedFieldConverter.CloneClassSeed(fieldInfo.GetValue(component)),
+                            conversionFailures,
+                            warnings);
+                        if (SerializedFieldConverter.CannotAssignConvertedValue(conversionFailures))
                         {
                             failedFields.Add(CreateFieldFailure(
                                 fieldName,
@@ -261,8 +311,13 @@ namespace McpUnity.Tools
 
                     var propertyConversionFailures = new List<string>();
                     object propertyValue = SerializedFieldConverter.ConvertJTokenToValue(
-                        fieldValue, propInfo.PropertyType, propertyConversionFailures);
-                    if (CannotAssignConvertedValue(propertyValue, fieldValue, propInfo.PropertyType))
+                        fieldValue,
+                        propInfo.PropertyType,
+                        SerializedFieldConverter.CloneClassSeed(
+                            SerializedFieldConverter.GetSafePropertySeed(propInfo, component)),
+                        propertyConversionFailures,
+                        warnings);
+                    if (SerializedFieldConverter.CannotAssignConvertedValue(propertyConversionFailures))
                     {
                         failedFields.Add(CreateFieldFailure(
                             fieldName,
@@ -278,17 +333,6 @@ namespace McpUnity.Tools
                     failedFields.Add(CreateFieldFailure(fieldName, $"Exception while setting field: {ex.Message}"));
                 }
             }
-        }
-
-        private static bool CannotAssignConvertedValue(object value, JToken token, Type targetType)
-        {
-            if (value != null)
-            {
-                return false;
-            }
-
-            return token.Type != JTokenType.Null
-                || (targetType.IsValueType && Nullable.GetUnderlyingType(targetType) == null);
         }
 
         private static string GetConversionFailureReason(Type targetType, List<string> conversionFailures)

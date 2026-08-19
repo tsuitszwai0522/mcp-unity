@@ -104,3 +104,9 @@ This file accumulates pitfalls, undocumented behaviours, and confirmed-working a
 - **Issue**: First run completed and returned 60/61 passing. Subsequent runs (after fixing the one failure) timed out with `[MCP Unity] WebSocket error: An error has occurred in sending data` repeating in the Unity console every 18-30 seconds. Single-test runs (`testFilter: "...AddrTests.A1_..."`) worked fine on the same Unity session. The Unity test runner finishes cleanly but the response payload — even with `returnOnlyFailures: true, returnWithLogs: false` — exceeds whatever buffer the WebSocket layer can handle in one frame, so the result never reaches the Node side and the MCP request times out.
 - **Fix**: For test classes with more than ~30 tests, run them **one at a time** by using fully-qualified `testFilter` (e.g. `McpUnity.Tests.Addressables.AddrTests.D17_SetEntry_RemoveLabels_StripsSpecified`). Tedious but reliable. Don't waste time retrying the broad filter — the failure is deterministic for large suites.
 - **Diagnosis tip**: If `run_tests` times out but `get_editor_state` responds fine immediately afterwards, the WebSocket itself is healthy — it's the test response payload that's the issue. Drop to single-test filters.
+
+### [Better Way] Resolve structured Unity references by locator durability
+- **Date**: 2026-08-19
+- **Context**: Preserving `read_serialized_fields` → writer round-trips across Unity domain reloads.
+- **Issue**: Reader-shaped references may contain both a durable `assetPath` and a volatile `instanceId`. Trying `instanceId` first makes a stale ID terminal even though the asset path still resolves; silently falling through to another key also hides which identity was used.
+- **Fix**: Resolve provided locators in `assetPath → instanceId → objectPath` order. If one locator fails and a later locator succeeds, return a warning naming both keys and values. If all provided locators fail, report every attempted key.

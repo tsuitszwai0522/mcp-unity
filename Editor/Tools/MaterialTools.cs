@@ -112,63 +112,155 @@ namespace McpUnity.Tools
         /// <summary>
         /// Convert a JToken to a shader property value
         /// </summary>
-        public static object ConvertPropertyValue(JToken token, ShaderUtil.ShaderPropertyType propertyType)
+        public static object ConvertPropertyValue(
+            JToken token,
+            ShaderUtil.ShaderPropertyType propertyType,
+            object seed,
+            List<string> failures)
         {
+            failures ??= new List<string>();
             if (token == null)
             {
+                failures.Add($"Missing value for shader property type {propertyType}");
+                return null;
+            }
+
+            try
+            {
+                switch (propertyType)
+                {
+                    case ShaderUtil.ShaderPropertyType.Color:
+                        return SerializedFieldConverter.TryConvertUnityStruct(
+                            token, typeof(Color), seed, failures, out object colorValue)
+                            ? colorValue
+                            : null;
+
+                    case ShaderUtil.ShaderPropertyType.Vector:
+                        return SerializedFieldConverter.TryConvertUnityStruct(
+                            token, typeof(Vector4), seed, failures, out object vectorValue)
+                            ? vectorValue
+                            : null;
+
+                    case ShaderUtil.ShaderPropertyType.Float:
+                    case ShaderUtil.ShaderPropertyType.Range:
+                        if (token.Type != JTokenType.Integer && token.Type != JTokenType.Float)
+                        {
+                            failures.Add($"Expected a number for shader property type {propertyType}");
+                            return null;
+                        }
+                        return token.ToObject<float>();
+
+                    case ShaderUtil.ShaderPropertyType.TexEnv:
+                        if (token.Type == JTokenType.Null)
+                        {
+                            return null;
+                        }
+                        if (token.Type != JTokenType.String)
+                        {
+                            failures.Add("Expected an asset path string or null for texture property");
+                            return null;
+                        }
+                        string texPath = token.ToObject<string>();
+                        if (string.IsNullOrEmpty(texPath))
+                        {
+                            failures.Add("Texture asset path cannot be empty");
+                            return null;
+                        }
+                        if (!texPath.StartsWith("Assets/"))
+                        {
+                            texPath = "Assets/" + texPath;
+                        }
+                        Texture texture = AssetDatabase.LoadAssetAtPath<Texture>(texPath);
+                        if (texture == null)
+                        {
+                            failures.Add($"Texture was not found at '{texPath}'");
+                            return null;
+                        }
+                        return texture;
+
+                    case ShaderUtil.ShaderPropertyType.Int:
+                        if (token.Type == JTokenType.Integer)
+                        {
+                            return token.ToObject<int>();
+                        }
+                        if (token.Type == JTokenType.Float)
+                        {
+                            double numericValue = token.ToObject<double>();
+                            if (double.IsNaN(numericValue)
+                                || double.IsInfinity(numericValue)
+                                || numericValue < int.MinValue
+                                || numericValue > int.MaxValue
+                                || Math.Truncate(numericValue) != numericValue)
+                            {
+                                failures.Add(
+                                    "Expected a whole-number JSON value within Int32 range for shader property type Int");
+                                return null;
+                            }
+                            return Convert.ToInt32(numericValue);
+                        }
+                        else
+                        {
+                            failures.Add(
+                                "Expected an integer or whole-number JSON float for shader property type Int");
+                            return null;
+                        }
+                }
+            }
+            catch (Exception ex)
+            {
+                failures.Add($"Failed to convert shader property value to {propertyType}: {ex.Message}");
+                return null;
+            }
+
+            failures.Add($"Shader property type {propertyType} is not supported");
+            return null;
+        }
+
+        /// <summary>
+        /// Read a material property's current value for partial-write seeding.
+        /// </summary>
+        public static object GetPropertySeed(
+            Material material,
+            string propertyName,
+            ShaderUtil.ShaderPropertyType propertyType,
+            List<string> failures)
+        {
+            if (!material.HasProperty(propertyName))
+            {
+                failures.Add(
+                    $"'{propertyName}' is not a property of shader {material.shader.name}");
                 return null;
             }
 
             switch (propertyType)
             {
                 case ShaderUtil.ShaderPropertyType.Color:
-                    if (token.Type == JTokenType.Object)
-                    {
-                        JObject color = (JObject)token;
-                        return new Color(
-                            color["r"]?.ToObject<float>() ?? 0f,
-                            color["g"]?.ToObject<float>() ?? 0f,
-                            color["b"]?.ToObject<float>() ?? 0f,
-                            color["a"]?.ToObject<float>() ?? 1f
-                        );
-                    }
-                    break;
-
+                    return material.GetColor(propertyName);
                 case ShaderUtil.ShaderPropertyType.Vector:
-                    if (token.Type == JTokenType.Object)
-                    {
-                        JObject vec = (JObject)token;
-                        return new Vector4(
-                            vec["x"]?.ToObject<float>() ?? 0f,
-                            vec["y"]?.ToObject<float>() ?? 0f,
-                            vec["z"]?.ToObject<float>() ?? 0f,
-                            vec["w"]?.ToObject<float>() ?? 0f
-                        );
-                    }
-                    break;
-
+                    return material.GetVector(propertyName);
                 case ShaderUtil.ShaderPropertyType.Float:
                 case ShaderUtil.ShaderPropertyType.Range:
-                    return token.ToObject<float>();
-
+                    return material.GetFloat(propertyName);
                 case ShaderUtil.ShaderPropertyType.TexEnv:
-                    // Texture path
-                    string texPath = token.ToObject<string>();
-                    if (!string.IsNullOrEmpty(texPath))
-                    {
-                        if (!texPath.StartsWith("Assets/"))
-                        {
-                            texPath = "Assets/" + texPath;
-                        }
-                        return AssetDatabase.LoadAssetAtPath<Texture>(texPath);
-                    }
-                    break;
-
+                    return material.GetTexture(propertyName);
                 case ShaderUtil.ShaderPropertyType.Int:
-                    return token.ToObject<int>();
+                    return material.GetInt(propertyName);
+                default:
+                    failures.Add($"Shader property type {propertyType} is not supported");
+                    return null;
             }
+        }
 
-            return null;
+        /// <summary>
+        /// Create a structured shader-property failure.
+        /// </summary>
+        public static JObject CreatePropertyFailure(string propertyName, string reason)
+        {
+            return new JObject
+            {
+                ["property"] = propertyName,
+                ["reason"] = reason
+            };
         }
 
         /// <summary>
@@ -257,8 +349,9 @@ namespace McpUnity.Tools
             string name = parameters["name"]?.ToObject<string>();
             string shaderName = parameters["shader"]?.ToObject<string>();
             string savePath = parameters["savePath"]?.ToObject<string>();
-            JObject properties = parameters["properties"] as JObject;
-            JObject colorParam = parameters["color"] as JObject;
+            JToken propertiesToken = parameters["properties"];
+            JObject properties = propertiesToken as JObject;
+            JToken colorParam = parameters["color"];
 
             // Validate required parameters
             if (string.IsNullOrEmpty(name))
@@ -303,33 +396,89 @@ namespace McpUnity.Tools
                 savePath += ".mat";
             }
 
-            // Ensure directory exists
-            string directory = System.IO.Path.GetDirectoryName(savePath);
-            if (!System.IO.Directory.Exists(directory))
-            {
-                System.IO.Directory.CreateDirectory(directory);
-            }
-
             // Create the material
             Material material = new Material(shader);
             material.name = name;
+            var modifiedProperties = new List<string>();
+            var failedProperties = new List<JObject>();
+            var unknownProperties = new List<string>();
+
+            if (propertiesToken != null && properties == null)
+            {
+                failedProperties.Add(MaterialToolUtils.CreatePropertyFailure(
+                    "properties", "Expected an object containing shader property values"));
+            }
 
             // Apply color if provided (auto-detect correct property name)
             if (colorParam != null)
             {
-                Color color = new Color(
-                    colorParam["r"]?.ToObject<float>() ?? 1f,
-                    colorParam["g"]?.ToObject<float>() ?? 1f,
-                    colorParam["b"]?.ToObject<float>() ?? 1f,
-                    colorParam["a"]?.ToObject<float>() ?? 1f
-                );
-                ApplyBaseColor(material, color);
+                string baseColorProperty = FindBaseColorPropertyName(material);
+                if (baseColorProperty == null)
+                {
+                    failedProperties.Add(MaterialToolUtils.CreatePropertyFailure(
+                        "color", $"Shader {shader.name} has no color property"));
+                }
+                else
+                {
+                    var colorFailures = new List<string>();
+                    object colorSeed = MaterialToolUtils.GetPropertySeed(
+                        material,
+                        baseColorProperty,
+                        ShaderUtil.ShaderPropertyType.Color,
+                        colorFailures);
+                    object colorValue = MaterialToolUtils.ConvertPropertyValue(
+                        colorParam,
+                        ShaderUtil.ShaderPropertyType.Color,
+                        colorSeed,
+                        colorFailures);
+                    if (colorFailures.Count > 0)
+                    {
+                        failedProperties.Add(MaterialToolUtils.CreatePropertyFailure(
+                            "color", string.Join("; ", colorFailures.ToArray())));
+                    }
+                    else
+                    {
+                        material.SetColor(baseColorProperty, (Color)colorValue);
+                        modifiedProperties.Add("color");
+                    }
+                }
             }
 
             // Apply initial properties if provided
             if (properties != null && properties.Count > 0)
             {
-                ApplyMaterialProperties(material, properties);
+                ApplyMaterialProperties(
+                    material,
+                    properties,
+                    modifiedProperties,
+                    failedProperties,
+                    unknownProperties);
+            }
+
+            if (failedProperties.Count > 0)
+            {
+                UnityEngine.Object.DestroyImmediate(material);
+                return new JObject
+                {
+                    ["success"] = false,
+                    ["type"] = "text",
+                    ["message"] =
+                        $"Material '{name}' was not created because " +
+                        $"{failedProperties.Count} property value(s) failed; no asset was created.",
+                    ["materialPath"] = savePath,
+                    ["materialName"] = name,
+                    ["shaderName"] = shader.name,
+                    ["modifiedProperties"] = new JArray(modifiedProperties),
+                    ["failedProperties"] = new JArray(failedProperties),
+                    ["unknownProperties"] = new JArray(unknownProperties)
+                };
+            }
+
+            // Create the parent directory only after all property validation succeeds.
+            string directory = System.IO.Path.GetDirectoryName(savePath);
+            if (!System.IO.Directory.Exists(directory))
+            {
+                System.IO.Directory.CreateDirectory(directory);
             }
 
             // Save the material as an asset
@@ -346,11 +495,19 @@ namespace McpUnity.Tools
                 ["message"] = $"Successfully created material '{name}' with shader '{shaderName}'",
                 ["materialPath"] = savePath,
                 ["materialName"] = name,
-                ["shaderName"] = shader.name
+                ["shaderName"] = shader.name,
+                ["modifiedProperties"] = new JArray(modifiedProperties),
+                ["failedProperties"] = new JArray(failedProperties),
+                ["unknownProperties"] = new JArray(unknownProperties)
             };
         }
 
-        private void ApplyMaterialProperties(Material material, JObject properties)
+        private void ApplyMaterialProperties(
+            Material material,
+            JObject properties,
+            List<string> modifiedProperties,
+            List<JObject> failedProperties,
+            List<string> unknownProperties)
         {
             Shader shader = material.shader;
             int propertyCount = ShaderUtil.GetPropertyCount(shader);
@@ -359,6 +516,7 @@ namespace McpUnity.Tools
             {
                 string propName = prop.Name;
                 JToken propValue = prop.Value;
+                bool found = false;
 
                 // Find the property in the shader
                 for (int i = 0; i < propertyCount; i++)
@@ -366,15 +524,41 @@ namespace McpUnity.Tools
                     string shaderPropName = ShaderUtil.GetPropertyName(shader, i);
                     if (shaderPropName == propName)
                     {
+                        found = true;
                         ShaderUtil.ShaderPropertyType propType = ShaderUtil.GetPropertyType(shader, i);
-                        object value = MaterialToolUtils.ConvertPropertyValue(propValue, propType);
+                        var conversionFailures = new List<string>();
+                        object seed = MaterialToolUtils.GetPropertySeed(
+                            material, propName, propType, conversionFailures);
+                        object value = MaterialToolUtils.ConvertPropertyValue(
+                            propValue, propType, seed, conversionFailures);
 
-                        if (value != null)
+                        if (conversionFailures.Count > 0)
                         {
-                            SetMaterialProperty(material, propName, propType, value);
+                            failedProperties.Add(MaterialToolUtils.CreatePropertyFailure(
+                                propName, string.Join("; ", conversionFailures.ToArray())));
+                        }
+                        else
+                        {
+                            try
+                            {
+                                SetMaterialProperty(material, propName, propType, value);
+                                modifiedProperties.Add(propName);
+                            }
+                            catch (Exception ex)
+                            {
+                                failedProperties.Add(MaterialToolUtils.CreatePropertyFailure(
+                                    propName, $"Failed to set material property: {ex.Message}"));
+                            }
                         }
                         break;
                     }
+                }
+
+                if (!found)
+                {
+                    string reason = $"'{propName}' is not a property of shader {shader.name}";
+                    unknownProperties.Add(propName);
+                    failedProperties.Add(MaterialToolUtils.CreatePropertyFailure(propName, reason));
                 }
             }
         }
@@ -405,7 +589,7 @@ namespace McpUnity.Tools
         /// <summary>
         /// Apply base color to material, auto-detecting the correct property name
         /// </summary>
-        private void ApplyBaseColor(Material material, Color color)
+        private string FindBaseColorPropertyName(Material material)
         {
             // Common color property names in order of preference
             string[] colorPropertyNames = new string[]
@@ -420,8 +604,7 @@ namespace McpUnity.Tools
             {
                 if (material.HasProperty(propName))
                 {
-                    material.SetColor(propName, color);
-                    return;
+                    return propName;
                 }
             }
 
@@ -433,10 +616,11 @@ namespace McpUnity.Tools
                 if (ShaderUtil.GetPropertyType(shader, i) == ShaderUtil.ShaderPropertyType.Color)
                 {
                     string propName = ShaderUtil.GetPropertyName(shader, i);
-                    material.SetColor(propName, color);
-                    return;
+                    return propName;
                 }
             }
+
+            return null;
         }
     }
 
@@ -597,6 +781,7 @@ namespace McpUnity.Tools
             int propertyCount = ShaderUtil.GetPropertyCount(shader);
             List<string> modifiedProperties = new List<string>();
             List<string> unknownProperties = new List<string>();
+            List<JObject> failedProperties = new List<JObject>();
 
             foreach (var prop in properties.Properties())
             {
@@ -612,12 +797,29 @@ namespace McpUnity.Tools
                     {
                         found = true;
                         ShaderUtil.ShaderPropertyType propType = ShaderUtil.GetPropertyType(shader, i);
-                        object value = MaterialToolUtils.ConvertPropertyValue(propValue, propType);
+                        var conversionFailures = new List<string>();
+                        object seed = MaterialToolUtils.GetPropertySeed(
+                            material, propName, propType, conversionFailures);
+                        object value = MaterialToolUtils.ConvertPropertyValue(
+                            propValue, propType, seed, conversionFailures);
 
-                        if (value != null)
+                        if (conversionFailures.Count > 0)
                         {
-                            SetMaterialProperty(material, propName, propType, value);
-                            modifiedProperties.Add(propName);
+                            failedProperties.Add(MaterialToolUtils.CreatePropertyFailure(
+                                propName, string.Join("; ", conversionFailures.ToArray())));
+                        }
+                        else
+                        {
+                            try
+                            {
+                                SetMaterialProperty(material, propName, propType, value);
+                                modifiedProperties.Add(propName);
+                            }
+                            catch (Exception ex)
+                            {
+                                failedProperties.Add(MaterialToolUtils.CreatePropertyFailure(
+                                    propName, $"Failed to set material property: {ex.Message}"));
+                            }
                         }
                         break;
                     }
@@ -626,29 +828,44 @@ namespace McpUnity.Tools
                 if (!found)
                 {
                     unknownProperties.Add(propName);
+                    failedProperties.Add(MaterialToolUtils.CreatePropertyFailure(
+                        propName,
+                        $"'{propName}' is not a property of shader {shader.name}"));
                 }
             }
 
-            // Mark as dirty and save
-            EditorUtility.SetDirty(material);
-            AssetDatabase.SaveAssets();
-            AssetDatabase.Refresh();
-
-            McpLogger.LogInfo($"[MCP Unity] Modified material '{material.name}': {string.Join(", ", modifiedProperties)}");
+            if (modifiedProperties.Count > 0)
+            {
+                EditorUtility.SetDirty(material);
+                AssetDatabase.SaveAssets();
+                AssetDatabase.Refresh();
+                McpLogger.LogInfo(
+                    $"[MCP Unity] Modified material '{material.name}': " +
+                    string.Join(", ", modifiedProperties));
+            }
 
             JObject result = new JObject
             {
-                ["success"] = true,
+                ["success"] = failedProperties.Count == 0,
                 ["type"] = "text",
-                ["message"] = $"Successfully modified material '{material.name}'",
+                ["message"] = failedProperties.Count == 0
+                    ? $"Successfully modified material '{material.name}'"
+                    : modifiedProperties.Count == 0
+                        ? $"No properties were modified on material '{material.name}'; " +
+                            $"{failedProperties.Count} property value(s) failed"
+                    : $"Modified material '{material.name}' with " +
+                        $"{modifiedProperties.Count} property value(s) applied and " +
+                        $"{failedProperties.Count} failure(s)",
                 ["materialName"] = material.name,
-                ["modifiedProperties"] = new JArray(modifiedProperties)
+                ["modifiedProperties"] = new JArray(modifiedProperties),
+                ["failedProperties"] = new JArray(failedProperties),
+                ["unknownProperties"] = new JArray(unknownProperties)
             };
 
             if (unknownProperties.Count > 0)
             {
-                result["unknownProperties"] = new JArray(unknownProperties);
-                result["message"] = $"Modified material '{material.name}'. Some properties were not found: {string.Join(", ", unknownProperties)}";
+                result["message"] = result["message"].ToString() +
+                    $". Properties not found: {string.Join(", ", unknownProperties)}";
             }
 
             return result;

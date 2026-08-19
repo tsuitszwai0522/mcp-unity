@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
+using System.Reflection;
 using UnityEngine;
 using UnityEditor;
 using Newtonsoft.Json.Linq;
@@ -98,67 +100,35 @@ namespace McpUnity.Utils
                         prop.stringValue = value.ToObject<string>();
                         return true;
                     case SerializedPropertyType.Color:
-                        if (value.Type == JTokenType.Object)
-                        {
-                            JObject c = (JObject)value;
-                            prop.colorValue = new Color(
-                                c["r"]?.ToObject<float>() ?? 0f,
-                                c["g"]?.ToObject<float>() ?? 0f,
-                                c["b"]?.ToObject<float>() ?? 0f,
-                                c["a"]?.ToObject<float>() ?? 1f
-                            );
-                            return true;
-                        }
-                        break;
+                        if (!TryConvertUnityStructValue(
+                            value, typeof(Color), prop.colorValue, warnings, out object colorValue))
+                            return false;
+                        prop.colorValue = (Color)colorValue;
+                        return true;
                     case SerializedPropertyType.Vector2:
-                        if (value.Type == JTokenType.Object)
-                        {
-                            JObject v = (JObject)value;
-                            prop.vector2Value = new Vector2(
-                                v["x"]?.ToObject<float>() ?? 0f,
-                                v["y"]?.ToObject<float>() ?? 0f
-                            );
-                            return true;
-                        }
-                        break;
+                        if (!TryConvertUnityStructValue(
+                            value, typeof(Vector2), prop.vector2Value, warnings, out object vector2Value))
+                            return false;
+                        prop.vector2Value = (Vector2)vector2Value;
+                        return true;
                     case SerializedPropertyType.Vector3:
-                        if (value.Type == JTokenType.Object)
-                        {
-                            JObject v = (JObject)value;
-                            prop.vector3Value = new Vector3(
-                                v["x"]?.ToObject<float>() ?? 0f,
-                                v["y"]?.ToObject<float>() ?? 0f,
-                                v["z"]?.ToObject<float>() ?? 0f
-                            );
-                            return true;
-                        }
-                        break;
+                        if (!TryConvertUnityStructValue(
+                            value, typeof(Vector3), prop.vector3Value, warnings, out object vector3Value))
+                            return false;
+                        prop.vector3Value = (Vector3)vector3Value;
+                        return true;
                     case SerializedPropertyType.Vector4:
-                        if (value.Type == JTokenType.Object)
-                        {
-                            JObject v = (JObject)value;
-                            prop.vector4Value = new Vector4(
-                                v["x"]?.ToObject<float>() ?? 0f,
-                                v["y"]?.ToObject<float>() ?? 0f,
-                                v["z"]?.ToObject<float>() ?? 0f,
-                                v["w"]?.ToObject<float>() ?? 0f
-                            );
-                            return true;
-                        }
-                        break;
+                        if (!TryConvertUnityStructValue(
+                            value, typeof(Vector4), prop.vector4Value, warnings, out object vector4Value))
+                            return false;
+                        prop.vector4Value = (Vector4)vector4Value;
+                        return true;
                     case SerializedPropertyType.Rect:
-                        if (value.Type == JTokenType.Object)
-                        {
-                            JObject r = (JObject)value;
-                            prop.rectValue = new Rect(
-                                r["x"]?.ToObject<float>() ?? 0f,
-                                r["y"]?.ToObject<float>() ?? 0f,
-                                r["width"]?.ToObject<float>() ?? 0f,
-                                r["height"]?.ToObject<float>() ?? 0f
-                            );
-                            return true;
-                        }
-                        break;
+                        if (!TryConvertUnityStructValue(
+                            value, typeof(Rect), prop.rectValue, warnings, out object rectValue))
+                            return false;
+                        prop.rectValue = (Rect)rectValue;
+                        return true;
                     case SerializedPropertyType.Enum:
                         if (value.Type == JTokenType.String)
                         {
@@ -189,12 +159,28 @@ namespace McpUnity.Utils
                                 }
                             }
 
-                            warnings?.Add($"Enum value '{strValue}' not found for '{fieldName}'. Valid: {string.Join(", ", internalNames)}");
+                            if (int.TryParse(
+                                strValue,
+                                NumberStyles.Integer,
+                                CultureInfo.InvariantCulture,
+                                out int numericValue))
+                            {
+                                return TrySetEnumInteger(
+                                    prop, numericValue, warnings, fieldName, internalNames);
+                            }
+
+                            warnings?.Add(
+                                $"Enum value '{strValue}' not found for '{fieldName}'. " +
+                                $"Valid names: {string.Join(", ", internalNames)}");
                         }
                         else if (value.Type == JTokenType.Integer)
                         {
-                            prop.enumValueIndex = value.ToObject<int>();
-                            return true;
+                            int requestedValue = value.ToObject<int>();
+#pragma warning disable CS0618 // enumNames is obsolete but no non-obsolete API returns internal C# enum names
+                            string[] validNames = prop.enumNames;
+#pragma warning restore CS0618
+                            return TrySetEnumInteger(
+                                prop, requestedValue, warnings, fieldName, validNames);
                         }
                         break;
                     case SerializedPropertyType.ObjectReference:
@@ -232,47 +218,86 @@ namespace McpUnity.Utils
                             }
                             warnings?.Add($"Object not found with instance ID {id} for '{fieldName}'");
                         }
-                        // Structured reference: { instanceId, assetPath, objectPath }
+                        // Structured reference: locator keys plus reader-emitted descriptive keys.
                         else if (value.Type == JTokenType.Object)
                         {
                             JObject refObj = (JObject)value;
-                            if (refObj.ContainsKey("instanceId"))
+                            string[] locatorKeys = { "assetPath", "instanceId", "objectPath" };
+                            string[] validKeys = { "instanceId", "assetPath", "objectPath", "name", "type" };
+                            var descriptiveKeys = new List<string>();
+                            foreach (JProperty suppliedProperty in refObj.Properties())
                             {
-                                int id = refObj["instanceId"].ToObject<int>();
-                                var obj = EditorUtility.InstanceIDToObject(id);
-                                if (obj != null)
+                                bool knownKey = false;
+                                foreach (string validKey in validKeys)
                                 {
-                                    objectReferenceWrite = new ObjectReferenceWrite(
-                                        prop.objectReferenceValue, obj, false);
-                                    prop.objectReferenceValue = obj;
-                                    return true;
+                                    if (suppliedProperty.Name == validKey)
+                                    {
+                                        knownKey = true;
+                                        break;
+                                    }
+                                }
+                                if (!knownKey)
+                                {
+                                    warnings?.Add(
+                                        $"Unknown object reference key '{suppliedProperty.Name}' for '{fieldName}'. " +
+                                        $"Valid keys: {string.Join(", ", validKeys)}");
+                                    return false;
+                                }
+                                if (suppliedProperty.Name == "name" || suppliedProperty.Name == "type")
+                                {
+                                    descriptiveKeys.Add(suppliedProperty.Name);
                                 }
                             }
-                            if (refObj.ContainsKey("assetPath"))
+
+                            if (descriptiveKeys.Count > 0)
                             {
-                                string path = refObj["assetPath"].ToObject<string>();
-                                var asset = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(path);
-                                if (asset != null)
+                                warnings?.Add(
+                                    $"Ignored descriptive keys: {string.Join(", ", descriptiveKeys)} " +
+                                    $"for object reference '{fieldName}'");
+                            }
+
+                            var locatorFailures = new List<string>();
+                            foreach (string locatorKey in locatorKeys)
+                            {
+                                if (!refObj.TryGetValue(locatorKey, out JToken locatorToken))
                                 {
+                                    continue;
+                                }
+
+                                if (TryResolveObjectLocator(
+                                    locatorKey,
+                                    locatorToken,
+                                    out UnityEngine.Object resolved,
+                                    out string locatorFailure))
+                                {
+                                    foreach (string priorFailure in locatorFailures)
+                                    {
+                                        warnings?.Add(
+                                            $"{priorFailure}; resolved successfully via locator " +
+                                            $"'{locatorKey}' (value {FormatLocatorValue(locatorToken)}) " +
+                                            $"for '{fieldName}'");
+                                    }
+
                                     objectReferenceWrite = new ObjectReferenceWrite(
-                                        prop.objectReferenceValue, asset, false);
-                                    prop.objectReferenceValue = asset;
+                                        prop.objectReferenceValue, resolved, false);
+                                    prop.objectReferenceValue = resolved;
                                     return true;
                                 }
+
+                                locatorFailures.Add(locatorFailure);
                             }
-                            if (refObj.ContainsKey("objectPath"))
+
+                            if (locatorFailures.Count > 0)
                             {
-                                string path = refObj["objectPath"].ToObject<string>();
-                                var go = GameObject.Find(path);
-                                if (go != null)
-                                {
-                                    objectReferenceWrite = new ObjectReferenceWrite(
-                                        prop.objectReferenceValue, go, false);
-                                    prop.objectReferenceValue = go;
-                                    return true;
-                                }
+                                warnings?.AddRange(locatorFailures);
                             }
-                            warnings?.Add($"Object reference could not be resolved for '{fieldName}'");
+                            else
+                            {
+                                warnings?.Add(
+                                    $"Object reference for '{fieldName}' must provide one of: " +
+                                    string.Join(", ", locatorKeys));
+                            }
+                            return false;
                         }
                         // Null: clear the reference
                         else if (value.Type == JTokenType.Null)
@@ -284,39 +309,17 @@ namespace McpUnity.Utils
                         }
                         break;
                     case SerializedPropertyType.Bounds:
-                        if (value.Type == JTokenType.Object)
-                        {
-                            JObject bObj = (JObject)value;
-                            JObject center = bObj["center"] as JObject;
-                            JObject size = bObj["size"] as JObject;
-                            prop.boundsValue = new Bounds(
-                                center != null ? new Vector3(
-                                    center["x"]?.ToObject<float>() ?? 0f,
-                                    center["y"]?.ToObject<float>() ?? 0f,
-                                    center["z"]?.ToObject<float>() ?? 0f
-                                ) : Vector3.zero,
-                                size != null ? new Vector3(
-                                    size["x"]?.ToObject<float>() ?? 0f,
-                                    size["y"]?.ToObject<float>() ?? 0f,
-                                    size["z"]?.ToObject<float>() ?? 0f
-                                ) : Vector3.zero
-                            );
-                            return true;
-                        }
-                        break;
+                        if (!TryConvertUnityStructValue(
+                            value, typeof(Bounds), prop.boundsValue, warnings, out object boundsValue))
+                            return false;
+                        prop.boundsValue = (Bounds)boundsValue;
+                        return true;
                     case SerializedPropertyType.Quaternion:
-                        if (value.Type == JTokenType.Object)
-                        {
-                            JObject q = (JObject)value;
-                            prop.quaternionValue = new Quaternion(
-                                q["x"]?.ToObject<float>() ?? 0f,
-                                q["y"]?.ToObject<float>() ?? 0f,
-                                q["z"]?.ToObject<float>() ?? 0f,
-                                q["w"]?.ToObject<float>() ?? 1f
-                            );
-                            return true;
-                        }
-                        break;
+                        if (!TryConvertUnityStructValue(
+                            value, typeof(Quaternion), prop.quaternionValue, warnings, out object quaternionValue))
+                            return false;
+                        prop.quaternionValue = (Quaternion)quaternionValue;
+                        return true;
                     default:
                         warnings?.Add($"Property type '{prop.propertyType}' not supported for '{fieldName}'");
                         break;
@@ -359,12 +362,13 @@ namespace McpUnity.Utils
                 return true;
             }
 
-            if (readBackProperty != null)
+            bool originalValueWasPreserved = readBackValue == objectReferenceWrite.PreviousValue;
+            if (!originalValueWasPreserved && readBackProperty != null)
             {
                 readBackProperty.objectReferenceValue = objectReferenceWrite.PreviousValue;
                 readBackObject.ApplyModifiedProperties();
             }
-            else
+            else if (!originalValueWasPreserved)
             {
                 originalProperty.objectReferenceValue = objectReferenceWrite.PreviousValue;
                 originalSerializedObject.ApplyModifiedProperties();
@@ -384,6 +388,331 @@ namespace McpUnity.Utils
             }
 
             return false;
+        }
+
+        private static bool TryConvertUnityStructValue(
+            JToken token,
+            Type targetType,
+            object currentValue,
+            List<string> warnings,
+            out object convertedValue)
+        {
+            var failures = new List<string>();
+            bool converted = SerializedFieldConverter.TryConvertUnityStruct(
+                token, targetType, currentValue, failures, out convertedValue);
+            if (!converted)
+            {
+                warnings?.AddRange(failures);
+            }
+            return converted;
+        }
+
+        /// <summary>
+        /// Validates integer writes for managed enum properties. Native bitfields such as
+        /// Rigidbody.m_Constraints serialize as Integer and do not enter this enum path.
+        /// </summary>
+        private static bool TrySetEnumInteger(
+            SerializedProperty prop,
+            int requestedValue,
+            List<string> warnings,
+            string fieldName,
+            string[] validNames)
+        {
+            int previousValue = prop.intValue;
+            prop.intValue = requestedValue;
+            if (prop.enumValueIndex != -1)
+            {
+                return true;
+            }
+
+            if (TryGetSerializedEnumType(prop, out Type enumType)
+                && enumType.GetCustomAttributes(typeof(FlagsAttribute), false).Length > 0
+                && IsValidFlagsCombination(enumType, requestedValue))
+            {
+                return true;
+            }
+
+            prop.intValue = previousValue;
+            warnings?.Add(
+                $"Enum value '{requestedValue}' is not defined for '{fieldName}'. " +
+                $"Valid names: {string.Join(", ", validNames)}. " +
+                "Combined numeric values are accepted only for [Flags] enums when every bit is defined.");
+            return false;
+        }
+
+        private static bool TryGetSerializedEnumType(SerializedProperty prop, out Type enumType)
+        {
+            enumType = null;
+            UnityEngine.Object target = prop.serializedObject?.targetObject;
+            if (target == null)
+            {
+                return false;
+            }
+
+            Type currentType = target.GetType();
+            string normalizedPath = prop.propertyPath.Replace(".Array.data[", "[");
+            string[] pathSegments = normalizedPath.Split('.');
+            foreach (string pathSegment in pathSegments)
+            {
+                int bracketIndex = pathSegment.IndexOf('[', StringComparison.Ordinal);
+                string fieldName = bracketIndex >= 0
+                    ? pathSegment.Substring(0, bracketIndex)
+                    : pathSegment;
+                if (!TryGetSerializedMemberType(currentType, fieldName, out Type memberType))
+                {
+                    return false;
+                }
+
+                currentType = memberType;
+                if (bracketIndex >= 0)
+                {
+                    currentType = GetCollectionElementType(currentType);
+                    if (currentType == null)
+                    {
+                        return false;
+                    }
+                }
+            }
+
+            currentType = Nullable.GetUnderlyingType(currentType) ?? currentType;
+            if (!currentType.IsEnum)
+            {
+                return false;
+            }
+
+            enumType = currentType;
+            return true;
+        }
+
+        private static bool TryGetSerializedMemberType(
+            Type declaringType,
+            string serializedName,
+            out Type memberType)
+        {
+            memberType = null;
+            FieldInfo field = GetFieldInHierarchy(declaringType, serializedName);
+            if (field == null)
+            {
+                string mappedFieldName = GetBidirectionalSerializedName(serializedName);
+                if (!string.IsNullOrEmpty(mappedFieldName))
+                {
+                    field = GetFieldInHierarchy(declaringType, mappedFieldName);
+                }
+            }
+            if (field != null)
+            {
+                memberType = field.FieldType;
+                return true;
+            }
+
+            PropertyInfo property = GetPublicPropertyInHierarchy(declaringType, serializedName);
+            if (property == null)
+            {
+                string mappedPropertyName = GetPublicPropertyName(serializedName);
+                if (!string.IsNullOrEmpty(mappedPropertyName))
+                {
+                    property = GetPublicPropertyInHierarchy(declaringType, mappedPropertyName);
+                }
+            }
+            if (property == null)
+            {
+                return false;
+            }
+
+            memberType = property.PropertyType;
+            return true;
+        }
+
+        private static FieldInfo GetFieldInHierarchy(Type type, string fieldName)
+        {
+            for (Type currentType = type;
+                 currentType != null && currentType != typeof(object);
+                 currentType = currentType.BaseType)
+            {
+                FieldInfo field = currentType.GetField(
+                    fieldName,
+                    BindingFlags.Public
+                    | BindingFlags.NonPublic
+                    | BindingFlags.Instance
+                    | BindingFlags.DeclaredOnly);
+                if (field != null)
+                {
+                    return field;
+                }
+            }
+            return null;
+        }
+
+        private static PropertyInfo GetPublicPropertyInHierarchy(Type type, string propertyName)
+        {
+            for (Type currentType = type;
+                 currentType != null && currentType != typeof(object);
+                 currentType = currentType.BaseType)
+            {
+                PropertyInfo property = currentType.GetProperty(
+                    propertyName,
+                    BindingFlags.Public
+                    | BindingFlags.Instance
+                    | BindingFlags.DeclaredOnly);
+                if (property != null)
+                {
+                    return property;
+                }
+            }
+            return null;
+        }
+
+        private static string GetBidirectionalSerializedName(string memberName)
+        {
+            if (string.IsNullOrEmpty(memberName))
+            {
+                return null;
+            }
+            if (memberName.StartsWith("m_", StringComparison.Ordinal) && memberName.Length > 2)
+            {
+                return char.ToLowerInvariant(memberName[2]) + memberName.Substring(3);
+            }
+            return "m_" + char.ToUpperInvariant(memberName[0]) + memberName.Substring(1);
+        }
+
+        private static string GetPublicPropertyName(string serializedName)
+        {
+            if (serializedName == "m_ObjectHideFlags")
+            {
+                return "hideFlags";
+            }
+            return serializedName.StartsWith("m_", StringComparison.Ordinal)
+                && serializedName.Length > 2
+                ? char.ToLowerInvariant(serializedName[2]) + serializedName.Substring(3)
+                : null;
+        }
+
+        private static Type GetCollectionElementType(Type collectionType)
+        {
+            Type elementType = collectionType.GetElementType();
+            if (elementType != null)
+            {
+                return elementType;
+            }
+
+            if (collectionType.IsGenericType)
+            {
+                Type genericDefinition = collectionType.GetGenericTypeDefinition();
+                if (genericDefinition == typeof(List<>)
+                    || genericDefinition == typeof(IList<>))
+                {
+                    return collectionType.GetGenericArguments()[0];
+                }
+            }
+
+            foreach (Type interfaceType in collectionType.GetInterfaces())
+            {
+                if (interfaceType.IsGenericType
+                    && interfaceType.GetGenericTypeDefinition() == typeof(IList<>))
+                {
+                    return interfaceType.GetGenericArguments()[0];
+                }
+            }
+            return null;
+        }
+
+        private static bool IsValidFlagsCombination(Type enumType, int requestedValue)
+        {
+            object candidate = Enum.ToObject(enumType, requestedValue);
+            Type underlyingType = Enum.GetUnderlyingType(enumType);
+            bool roundTrips;
+            if (underlyingType == typeof(byte) || underlyingType == typeof(ushort))
+            {
+                roundTrips = requestedValue >= 0
+                    && Convert.ToUInt64(candidate) == (ulong)requestedValue;
+            }
+            else if (underlyingType == typeof(uint) || underlyingType == typeof(ulong))
+            {
+                roundTrips = Convert.ToUInt64(candidate) == unchecked((uint)requestedValue);
+            }
+            else
+            {
+                roundTrips = Convert.ToInt64(candidate) == requestedValue;
+            }
+            if (!roundTrips)
+            {
+                return false;
+            }
+
+            ulong candidateBits = EnumValueToUInt64(candidate, enumType);
+            ulong allDefinedBits = 0;
+            foreach (object definedValue in Enum.GetValues(enumType))
+            {
+                allDefinedBits |= EnumValueToUInt64(definedValue, enumType);
+            }
+            return (candidateBits & ~allDefinedBits) == 0;
+        }
+
+        private static ulong EnumValueToUInt64(object value, Type enumType)
+        {
+            Type underlyingType = Enum.GetUnderlyingType(enumType);
+            if (underlyingType == typeof(sbyte)) return unchecked((ulong)Convert.ToSByte(value));
+            if (underlyingType == typeof(short)) return unchecked((ulong)Convert.ToInt16(value));
+            if (underlyingType == typeof(int)) return unchecked((ulong)Convert.ToInt32(value));
+            if (underlyingType == typeof(long)) return unchecked((ulong)Convert.ToInt64(value));
+            return Convert.ToUInt64(value);
+        }
+
+        private static bool TryResolveObjectLocator(
+            string locatorKey,
+            JToken locatorToken,
+            out UnityEngine.Object resolved,
+            out string failure)
+        {
+            resolved = null;
+            failure = null;
+            try
+            {
+                switch (locatorKey)
+                {
+                    case "assetPath":
+                        string assetPath = locatorToken?.ToObject<string>();
+                        resolved = string.IsNullOrEmpty(assetPath)
+                            ? null
+                            : AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(assetPath);
+                        break;
+                    case "instanceId":
+                        resolved = EditorUtility.InstanceIDToObject(locatorToken.ToObject<int>());
+                        break;
+                    case "objectPath":
+                        string objectPath = locatorToken?.ToObject<string>();
+                        resolved = string.IsNullOrEmpty(objectPath)
+                            ? null
+                            : GameObject.Find(objectPath);
+                        break;
+                    default:
+                        failure = $"Unsupported locator '{locatorKey}'";
+                        return false;
+                }
+            }
+            catch (Exception ex)
+            {
+                failure =
+                    $"Locator '{locatorKey}' (value {FormatLocatorValue(locatorToken)}) " +
+                    $"failed to resolve: {ex.Message}";
+                return false;
+            }
+
+            if (resolved != null)
+            {
+                return true;
+            }
+
+            failure =
+                $"Locator '{locatorKey}' (value {FormatLocatorValue(locatorToken)}) failed to resolve";
+            return false;
+        }
+
+        private static string FormatLocatorValue(JToken token)
+        {
+            return token == null || token.Type == JTokenType.Null
+                ? "null"
+                : $"'{token}'";
         }
     }
 }

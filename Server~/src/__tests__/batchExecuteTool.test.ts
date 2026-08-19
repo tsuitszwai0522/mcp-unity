@@ -102,6 +102,10 @@ describe('Batch Execute Tool', () => {
         })
       });
       expect(result.content[0].text).toContain('Successfully');
+      expect(JSON.parse(result.content[1].text).message).toBe(
+        'Successfully executed 2/2 operations.'
+      );
+      expect(result.isError).toBeUndefined();
     });
 
     it('should throw error when operations array is empty', async () => {
@@ -147,9 +151,10 @@ describe('Batch Execute Tool', () => {
       const result = await toolHandler(params);
       expect(result.content[0].text).toContain('1/2');
       expect(result.content[0].text).toContain('failed');
+      expect(result.isError).toBe(true);
     });
 
-    it('should throw error on failure when stopOnError=true', async () => {
+    it('should return isError with payload on failure when stopOnError=true', async () => {
       mockSendRequest.mockResolvedValue({
         success: false,
         type: 'text',
@@ -168,7 +173,51 @@ describe('Batch Execute Tool', () => {
         stopOnError: true
       };
 
-      await expect(toolHandler(params)).rejects.toThrow(McpUnityError);
+      const result = await toolHandler(params);
+      expect(result.isError).toBe(true);
+      expect(JSON.parse(result.content[1].text).results[0]).toMatchObject({
+        status: 'Error',
+        error: 'First tool failed'
+      });
+    });
+
+    it('should preserve failed operation result data', async () => {
+      mockSendRequest.mockResolvedValue({
+        success: false,
+        type: 'text',
+        message: 'Batch execution stopped on error.',
+        results: [
+          {
+            index: 0,
+            id: 'field-write',
+            success: false,
+            error: '1 field failed',
+            result: {
+              success: false,
+              failedFields: [{ field: 'tpyo', reason: 'not found' }]
+            }
+          }
+        ],
+        summary: { total: 1, succeeded: 0, failed: 1, executed: 1 }
+      });
+
+      const result = await toolHandler({
+        operations: [{ tool: 'update_component', params: {}, id: 'field-write' }],
+        stopOnError: true,
+        atomic: false
+      });
+
+      const payload = JSON.parse(result.content[1].text);
+      expect(result.isError).toBe(true);
+      expect(payload.results[0]).toMatchObject({
+        id: 'field-write',
+        status: 'Error',
+        error: '1 field failed',
+        data: {
+          success: false,
+          failedFields: [{ field: 'tpyo', reason: 'not found' }]
+        }
+      });
     });
 
     it('should preserve operation ids in request', async () => {

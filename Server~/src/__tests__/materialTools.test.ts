@@ -53,6 +53,15 @@ describe('Material Tools', () => {
       expect(description).toContain('material');
       expect(description).toContain('shader');
     });
+
+    it('should reject unknown color keys instead of stripping them', () => {
+      registerCreateMaterialTool(mockServer as any, mockMcpUnity as any, mockLogger as any);
+
+      const [, , schema] = mockServerTool.mock.calls[0];
+      const parsed = schema.color.safeParse({ r: 1, g: 0, b: 0, alpha: 0.5 });
+
+      expect(parsed.success).toBe(false);
+    });
   });
 
   describe('registerAssignMaterialTool', () => {
@@ -176,6 +185,59 @@ describe('Material Tools', () => {
           shader: undefined
         })
       });
+    });
+
+    it('should preserve the structured payload for successful creation', async () => {
+      mockSendRequest.mockResolvedValue({
+        success: true,
+        type: 'text',
+        message: 'Material created',
+        materialPath: 'Assets/Materials/Test.mat',
+        materialName: 'TestMaterial',
+        shaderName: 'Standard',
+        modifiedProperties: ['_Color'],
+        failedProperties: [],
+        unknownProperties: []
+      });
+
+      const result = await handler({
+        name: 'TestMaterial',
+        shader: 'Standard',
+        savePath: 'Assets/Materials/Test.mat'
+      });
+
+      expect(result.content).toHaveLength(2);
+      expect(JSON.parse(result.content[1].text)).toMatchObject({
+        materialPath: 'Assets/Materials/Test.mat',
+        modifiedProperties: ['_Color'],
+        failedProperties: []
+      });
+      expect(result.isError).toBeUndefined();
+    });
+
+    it('should return property failures as isError without throwing', async () => {
+      mockSendRequest.mockResolvedValue({
+        success: false,
+        type: 'text',
+        message: 'Material was not created; no asset was created.',
+        materialPath: 'Assets/Materials/Test.mat',
+        materialName: 'TestMaterial',
+        shaderName: 'Standard',
+        modifiedProperties: [],
+        failedProperties: [{ property: '_Color', reason: 'Unknown key typo' }],
+        unknownProperties: []
+      });
+
+      const result = await handler({
+        name: 'TestMaterial',
+        shader: 'Standard',
+        savePath: 'Assets/Materials/Test.mat'
+      });
+
+      expect(result.isError).toBe(true);
+      expect(JSON.parse(result.content[1].text).failedProperties).toEqual([
+        { property: '_Color', reason: 'Unknown key typo' }
+      ]);
     });
 
     it('should throw tool execution error on Unity failure', async () => {
@@ -359,6 +421,41 @@ describe('Material Tools', () => {
             _MainTex: 'Assets/Textures/Wood.png'
           }
         }
+      });
+    });
+
+    it('should return property-level failures as isError with the full payload', async () => {
+      mockSendRequest.mockResolvedValue({
+        success: false,
+        type: 'text',
+        message: 'Modified with failures',
+        materialName: 'TestMaterial',
+        modifiedProperties: ['_Color'],
+        failedProperties: [
+          { property: '_Metallic', reason: 'Expected a number' },
+          { property: '_Unknown', reason: 'not a property of shader Standard' }
+        ],
+        unknownProperties: ['_Unknown']
+      });
+
+      const result = await handler({
+        materialPath: 'Assets/Materials/Test.mat',
+        properties: {
+          _Color: { r: 1 },
+          _Metallic: 'bad',
+          _Unknown: 1
+        }
+      });
+
+      expect(result.isError).toBe(true);
+      expect(result.content).toHaveLength(2);
+      expect(JSON.parse(result.content[1].text)).toMatchObject({
+        modifiedProperties: ['_Color'],
+        unknownProperties: ['_Unknown'],
+        failedProperties: expect.arrayContaining([
+          expect.objectContaining({ property: '_Metallic' }),
+          expect.objectContaining({ property: '_Unknown' })
+        ])
       });
     });
   });

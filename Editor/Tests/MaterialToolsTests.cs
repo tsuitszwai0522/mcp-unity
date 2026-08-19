@@ -1,4 +1,5 @@
 using System.IO;
+using System.Collections.Generic;
 using System.Text.RegularExpressions;
 using NUnit.Framework;
 using McpUnity.Tools;
@@ -455,10 +456,18 @@ namespace McpUnity.Tests
             JObject result = tool.Execute(parameters);
 
             // Assert
-            Assert.IsTrue(result["success"].ToObject<bool>(), "Tool should still succeed");
+            Assert.IsFalse(result["success"].ToObject<bool>(), "Unknown properties are write failures");
             Assert.IsNotNull(result["unknownProperties"], "Should report unknown properties");
             JArray unknownProps = (JArray)result["unknownProperties"];
             Assert.IsTrue(unknownProps.Count > 0, "Should have at least one unknown property");
+            JArray failedProperties = (JArray)result["failedProperties"];
+            Assert.AreEqual(1, failedProperties.Count, "Unknown property must also be a failed property");
+            Assert.AreEqual(
+                "_NonExistentProperty",
+                failedProperties[0]["property"].ToString());
+            Assert.That(
+                failedProperties[0]["reason"].ToString(),
+                Does.Contain("not a property of shader"));
         }
 
         #endregion
@@ -665,5 +674,28 @@ namespace McpUnity.Tests
         }
 
         #endregion
+
+        [Test]
+        public void ConvertPropertyValue_IntAcceptsWholeFloatAndRejectsFractionalFloat()
+        {
+            var wholeFailures = new List<string>();
+            var fractionalFailures = new List<string>();
+
+            object whole = MaterialToolUtils.ConvertPropertyValue(
+                new JValue(1.0),
+                ShaderUtil.ShaderPropertyType.Int,
+                null,
+                wholeFailures);
+            object fractional = MaterialToolUtils.ConvertPropertyValue(
+                new JValue(1.5),
+                ShaderUtil.ShaderPropertyType.Int,
+                null,
+                fractionalFailures);
+
+            Assert.AreEqual(1, whole);
+            Assert.That(wholeFailures, Is.Empty);
+            Assert.IsNull(fractional);
+            Assert.That(fractionalFailures, Has.Some.Contains("whole-number"));
+        }
     }
 }

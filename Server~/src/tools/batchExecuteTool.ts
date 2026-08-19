@@ -4,6 +4,7 @@ import { Logger } from '../utils/logger.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { McpUnityError, ErrorType } from '../utils/errors.js';
 import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+import { payloadContent } from '../utils/toolPayload.js';
 
 const toolName = 'batch_execute';
 const toolDescription = `Executes multiple tool operations in a single batch request.
@@ -152,7 +153,7 @@ async function batchExecuteHandler(
       id: res.id,
       status: res.success ? 'OK' : 'Error'
     };
-    if (res.success && res.result) {
+    if (res.result !== undefined) {
       entry.data = res.result;
     }
     if (!res.success && res.error) {
@@ -161,31 +162,30 @@ async function batchExecuteHandler(
     return entry;
   }) ?? [];
 
-  // Determine if we should throw an error or return success
-  if (!response.success && params.stopOnError) {
-    // When stopOnError is true and we failed, throw to signal the error clearly
-    throw new McpUnityError(
-      ErrorType.TOOL_EXECUTION,
-      resultText + '\n\n' + JSON.stringify({ results: structuredResults }, null, 2)
-    );
-  }
-
   // Include full results JSON so AI clients can access each tool's return data
-  const fullResultsJson = JSON.stringify({
+  const structuredPayload = {
+    message: response.message
+      || `${response.summary?.succeeded ?? 0}/${response.summary?.total ?? structuredResults.length} operations succeeded`,
     results: structuredResults,
     summary: response.summary
-  }, null, 2);
+  };
 
-  return {
+  const hasOperationFailures = !response.success
+    || structuredResults.some((result) => result.status === 'Error');
+
+  const result: CallToolResult = {
     content: [
       {
         type: 'text',
         text: resultText
       },
-      {
-        type: 'text',
-        text: fullResultsJson
-      }
+      payloadContent(structuredPayload)
     ]
   };
+
+  if (hasOperationFailures) {
+    result.isError = true;
+  }
+
+  return result;
 }

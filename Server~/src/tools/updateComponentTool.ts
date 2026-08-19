@@ -10,6 +10,8 @@ import { payloadContent } from '../utils/toolPayload.js';
 const toolName = 'update_component';
 const toolDescription = `Updates component fields on a GameObject, or adds the component if missing.
 Best for: adding new components, setting fields by C# property/field name.
+Integer enum input is treated as the underlying enum value (not an index); invalid values are rejected with the valid names listed.
+Partial struct writes (for example, {"r":1}) preserve unmentioned components of the current value; on freshly-created objects, unmentioned components are the type's default.
 For Unity built-in serialized fields (m_Color, m_Sprite, m_FontSize), prefer write_serialized_fields.`;
 const paramsSchema = z.object({
   instanceId: z.number().optional().describe('The instance ID of the GameObject to update'),

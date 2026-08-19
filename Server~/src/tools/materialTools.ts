@@ -11,16 +11,8 @@ const colorSchema = z.object({
   r: z.number().min(0).max(1).describe('Red component (0-1)'),
   g: z.number().min(0).max(1).describe('Green component (0-1)'),
   b: z.number().min(0).max(1).describe('Blue component (0-1)'),
-  a: z.number().min(0).max(1).optional().default(1).describe('Alpha component (0-1)')
-});
-
-// Vector4 schema for material properties
-const vector4Schema = z.object({
-  x: z.number().describe('X component'),
-  y: z.number().describe('Y component'),
-  z: z.number().describe('Z component'),
-  w: z.number().optional().default(0).describe('W component')
-});
+  a: z.number().min(0).max(1).optional().describe('Alpha component (0-1)')
+}).strict();
 
 // ============================================================================
 // CREATE MATERIAL TOOL
@@ -86,19 +78,38 @@ async function createMaterialHandler(mcpUnity: McpUnity, params: any): Promise<C
     }
   });
 
-  if (!response.success) {
+  const hasPropertyFailures = Array.isArray(response.failedProperties) && response.failedProperties.length > 0;
+
+  if (!response.success && !hasPropertyFailures) {
     throw new McpUnityError(
       ErrorType.TOOL_EXECUTION,
       response.message || 'Failed to create material'
     );
   }
 
-  return {
-    content: [{
-      type: response.type || 'text',
-      text: response.message || `Successfully created material '${params.name}'`
-    }]
+  const result: CallToolResult = {
+    content: [
+      {
+        type: response.type || 'text',
+        text: response.message || `Successfully created material '${params.name}'`
+      },
+      payloadContent({
+        message: response.message,
+        materialPath: response.materialPath,
+        materialName: response.materialName,
+        shaderName: response.shaderName,
+        modifiedProperties: response.modifiedProperties,
+        failedProperties: response.failedProperties,
+        unknownProperties: response.unknownProperties
+      })
+    ]
   };
+
+  if (hasPropertyFailures) {
+    result.isError = true;
+  }
+
+  return result;
 }
 
 // ============================================================================
@@ -237,19 +248,36 @@ async function modifyMaterialHandler(mcpUnity: McpUnity, params: any): Promise<C
     }
   });
 
-  if (!response.success) {
+  const hasPropertyFailures = Array.isArray(response.failedProperties) && response.failedProperties.length > 0;
+
+  if (!response.success && !hasPropertyFailures) {
     throw new McpUnityError(
       ErrorType.TOOL_EXECUTION,
       response.message || 'Failed to modify material'
     );
   }
 
-  return {
-    content: [{
-      type: response.type || 'text',
-      text: response.message || `Successfully modified material`
-    }]
+  const result: CallToolResult = {
+    content: [
+      {
+        type: response.type || 'text',
+        text: response.message || `Successfully modified material`
+      },
+      payloadContent({
+        message: response.message,
+        materialName: response.materialName,
+        modifiedProperties: response.modifiedProperties,
+        failedProperties: response.failedProperties,
+        unknownProperties: response.unknownProperties
+      })
+    ]
   };
+
+  if (hasPropertyFailures) {
+    result.isError = true;
+  }
+
+  return result;
 }
 
 // ============================================================================

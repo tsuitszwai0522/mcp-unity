@@ -32,6 +32,16 @@ describe('update_component field write results', () => {
     jest.clearAllMocks();
   });
 
+  it('discloses enum underlying-value and partial-struct semantics', () => {
+    registerUpdateComponentTool(mockServer, mockMcpUnity, mockLogger);
+
+    const description = (mockServerTool.mock.calls[0] as any)[1] as string;
+    expect(description).toContain('underlying enum value (not an index)');
+    expect(description).toContain('invalid values are rejected with the valid names listed');
+    expect(description).toContain('Partial struct writes');
+    expect(description).toContain("unmentioned components are the type's default");
+  });
+
   it('returns isError with failedFields preserved in payload for field-level failure', async () => {
     const failedFields = [{
       field: 'enabled',

@@ -20,7 +20,12 @@ namespace McpUnity.Tools
         public UpdateComponentTool()
         {
             Name = "update_component";
-            Description = "Updates component fields on a GameObject or adds it to the GameObject if it does not contain the component. Prefer passing componentData in the same call to avoid duplicate additions.";
+            Description = "Updates component fields on a GameObject or adds it if missing. Integer enum input " +
+                "is treated as the underlying enum value (not an index); invalid values are rejected with " +
+                "the valid names listed. Partial struct writes (for example, {\"r\":1}) preserve " +
+                "unmentioned components of the current value; on freshly-created objects, unmentioned " +
+                "components are the type's default. Prefer passing componentData in the same call to avoid " +
+                "duplicate additions.";
         }
         
         /// <summary>
@@ -150,11 +155,14 @@ namespace McpUnity.Tools
                     return McpUnitySocketHandler.CreateErrorResponse(errorMessage, "update_error");
                 }
 
-                // Ensure field changes are saved
-                EditorUtility.SetDirty(gameObject);
-                if (PrefabUtility.IsPartOfAnyPrefab(gameObject))
+                // Persist only when at least one requested field was actually written.
+                if (updatedFields.Count > 0)
                 {
-                    PrefabUtility.RecordPrefabInstancePropertyModifications(component);
+                    EditorUtility.SetDirty(gameObject);
+                    if (PrefabUtility.IsPartOfAnyPrefab(gameObject))
+                    {
+                        PrefabUtility.RecordPrefabInstancePropertyModifications(component);
+                    }
                 }
             }
 
@@ -272,7 +280,9 @@ namespace McpUnity.Tools
 
                 if (string.IsNullOrEmpty(fieldName))
                 {
-                    warnings.Add("Ignored a component field with an empty name");
+                    failedFields.Add(CreateFieldFailure(
+                        fieldName,
+                        "Component field name cannot be empty"));
                     continue;
                 }
 
@@ -286,8 +296,12 @@ namespace McpUnity.Tools
                     {
                         var conversionFailures = new List<string>();
                         object value = SerializedFieldConverter.ConvertJTokenToValue(
-                            fieldValue, fieldInfo.FieldType, conversionFailures);
-                        if (CannotAssignConvertedValue(value, fieldValue, fieldInfo.FieldType))
+                            fieldValue,
+                            fieldInfo.FieldType,
+                            SerializedFieldConverter.CloneClassSeed(fieldInfo.GetValue(component)),
+                            conversionFailures,
+                            warnings);
+                        if (SerializedFieldConverter.CannotAssignConvertedValue(conversionFailures))
                         {
                             failedFields.Add(CreateFieldFailure(
                                 fieldName,
@@ -307,8 +321,13 @@ namespace McpUnity.Tools
                     {
                         var conversionFailures = new List<string>();
                         object value = SerializedFieldConverter.ConvertJTokenToValue(
-                            fieldValue, propertyInfo.PropertyType, conversionFailures);
-                        if (CannotAssignConvertedValue(value, fieldValue, propertyInfo.PropertyType))
+                            fieldValue,
+                            propertyInfo.PropertyType,
+                            SerializedFieldConverter.CloneClassSeed(
+                                SerializedFieldConverter.GetSafePropertySeed(propertyInfo, component)),
+                            conversionFailures,
+                            warnings);
+                        if (SerializedFieldConverter.CannotAssignConvertedValue(conversionFailures))
                         {
                             failedFields.Add(CreateFieldFailure(
                                 fieldName,
@@ -323,8 +342,14 @@ namespace McpUnity.Tools
                     // Fallback: try SerializedProperty which handles both serialized names (m_Color)
                     // and property names (color) through Unity's serialization system
                     if (TrySetViaSerializedProperty(
-                        component, fieldName, fieldValue, out bool propertyFound, out string failureReason))
+                        component,
+                        fieldName,
+                        fieldValue,
+                        out bool propertyFound,
+                        out string failureReason,
+                        out List<string> propertyWarnings))
                     {
+                        warnings.AddRange(propertyWarnings);
                         updatedFields.Add(fieldName);
                         continue;
                     }
@@ -360,10 +385,12 @@ namespace McpUnity.Tools
             string fieldName,
             JToken fieldValue,
             out bool propertyFound,
-            out string failureReason)
+            out string failureReason,
+            out List<string> propertyWarnings)
         {
             propertyFound = false;
             failureReason = null;
+            propertyWarnings = new List<string>();
             var serializedObject = new SerializedObject(component);
 
             SerializedProperty prop = SerializedPropertyHelper.FindProperty(serializedObject, fieldName);
@@ -374,16 +401,15 @@ namespace McpUnity.Tools
             propertyFound = true;
             string serializedFieldName = prop.propertyPath;
 
-            var fieldWarnings = new List<string>();
             if (!SerializedPropertyHelper.SetValue(
                 prop,
                 fieldValue,
-                fieldWarnings,
+                propertyWarnings,
                 fieldName,
                 out SerializedPropertyHelper.ObjectReferenceWrite objectReferenceWrite))
             {
-                failureReason = fieldWarnings.Count > 0
-                    ? string.Join("; ", fieldWarnings.ToArray())
+                failureReason = propertyWarnings.Count > 0
+                    ? string.Join("; ", propertyWarnings.ToArray())
                     : $"Value could not be assigned to serialized field '{serializedFieldName}'";
                 return false;
             }
@@ -396,17 +422,6 @@ namespace McpUnity.Tools
                 serializedFieldName,
                 objectReferenceWrite,
                 out failureReason);
-        }
-
-        private static bool CannotAssignConvertedValue(object value, JToken token, Type targetType)
-        {
-            if (value != null)
-            {
-                return false;
-            }
-
-            return token.Type != JTokenType.Null
-                || (targetType.IsValueType && Nullable.GetUnderlyingType(targetType) == null);
         }
 
         private static string GetConversionFailureReason(Type targetType, List<string> conversionFailures)

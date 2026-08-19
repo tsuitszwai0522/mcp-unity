@@ -14,7 +14,8 @@ const readToolName = 'read_serialized_fields';
 const readToolDescription = `Reads serialized fields from a component using Unity's SerializedProperty API.
 More reliable than get_gameobject for reading specific component fields.
 Accepts both serialized names (m_Color, m_Sprite) and property names (color, sprite).
-If fieldNames is omitted, returns all visible serialized fields.`;
+If fieldNames is omitted, returns all visible serialized fields.
+For enums, value is the underlying enum value and index is the enumValueIndex.`;
 
 const readParamsSchema = z.object({
   instanceId: z.number().optional().describe('The instance ID of the GameObject'),
@@ -108,6 +109,8 @@ const writeToolDescription = `Writes serialized fields on a component using Unit
 Best for: Unity built-in component fields (m_Color, m_Sprite, etc.) and when exact serialized field control is needed.
 Does NOT add missing components — use update_component for that.
 Accepts both serialized names (m_Color) and property names (color).
+Integer enum input is treated as the underlying enum value (not an index); invalid values are rejected with the valid names listed.
+Partial struct writes (for example, {"r":1}) preserve unmentioned components of the current value; on freshly-created objects, unmentioned components are the type's default.
 For object references, use asset path string, instance ID number, or structured {instanceId: N} / {assetPath: "..."} / {objectPath: "Path/To/Object"}.`;
 
 const writeParamsSchema = z.object({

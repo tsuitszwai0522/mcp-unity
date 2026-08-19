@@ -98,6 +98,28 @@ namespace McpUnity.Tools
                     ApplyFieldValues(scriptableObject, fieldValues, updatedFields, failedFields, warnings);
                 }
 
+                if (failedFields.Count > 0)
+                {
+                    Undo.DestroyObjectImmediate(scriptableObject);
+                    var failedResponse = new JObject
+                    {
+                        ["success"] = false,
+                        ["type"] = "text",
+                        ["message"] =
+                            $"ScriptableObject '{typeName}' was not created because " +
+                            $"{failedFields.Count} field(s) failed; no asset was created.",
+                        ["assetPath"] = savePath,
+                        ["typeName"] = scriptableObjectType.FullName,
+                        ["updatedFields"] = new JArray(updatedFields.ToArray()),
+                        ["failedFields"] = new JArray(failedFields.ToArray())
+                    };
+                    if (warnings.Count > 0)
+                    {
+                        failedResponse["warnings"] = new JArray(warnings.ToArray());
+                    }
+                    return failedResponse;
+                }
+
                 // Ensure the directory exists
                 string directory = System.IO.Path.GetDirectoryName(savePath);
                 if (!string.IsNullOrEmpty(directory) && !AssetDatabase.IsValidFolder(directory))
@@ -234,8 +256,12 @@ namespace McpUnity.Tools
 
                     var conversionFailures = new List<string>();
                     object convertedValue = SerializedFieldConverter.ConvertJTokenToValue(
-                        value, field.FieldType, conversionFailures);
-                    if (CannotAssignConvertedValue(convertedValue, value, field.FieldType))
+                        value,
+                        field.FieldType,
+                        SerializedFieldConverter.CloneClassSeed(field.GetValue(scriptableObject)),
+                        conversionFailures,
+                        warnings);
+                    if (SerializedFieldConverter.CannotAssignConvertedValue(conversionFailures))
                     {
                         string reason = conversionFailures.Count > 0
                             ? string.Join("; ", conversionFailures.ToArray())
@@ -256,17 +282,6 @@ namespace McpUnity.Tools
             }
 
             EditorUtility.SetDirty(scriptableObject);
-        }
-
-        private static bool CannotAssignConvertedValue(object value, JToken token, Type targetType)
-        {
-            if (value != null)
-            {
-                return false;
-            }
-
-            return token.Type != JTokenType.Null
-                || (targetType.IsValueType && Nullable.GetUnderlyingType(targetType) == null);
         }
 
         private static JObject CreateFieldFailure(string fieldName, string reason)

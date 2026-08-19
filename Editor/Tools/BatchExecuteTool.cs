@@ -37,6 +37,15 @@ namespace McpUnity.Tools
             bool stopOnError = parameters["stopOnError"]?.ToObject<bool?>() ?? true;
             bool atomic = parameters["atomic"]?.ToObject<bool?>() ?? false;
 
+            if (atomic && !stopOnError)
+            {
+                tcs.SetResult(McpUnitySocketHandler.CreateErrorResponse(
+                    "atomic requires stopOnError to be true.",
+                    "validation_error"
+                ));
+                yield break;
+            }
+
             // Validate operations array
             if (operations == null || operations.Count == 0)
             {
@@ -291,11 +300,12 @@ namespace McpUnity.Tools
                 ["success"] = success
             };
 
-            if (success && result != null)
+            if (result != null)
             {
                 operationResult["result"] = result;
             }
-            else if (!success)
+
+            if (!success)
             {
                 operationResult["error"] = error ?? "Unknown error";
             }
