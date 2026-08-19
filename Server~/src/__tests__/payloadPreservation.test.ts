@@ -120,7 +120,7 @@ describe('payload preservation in MCP content', () => {
     expect(summary._preview).toContain('InventorySlot_0');
   });
 
-  it('keeps a useful preview for oversized get_ui_element_state payloads', async () => {
+  it('keeps usable component data for oversized get_ui_element_state payloads', async () => {
     const response = {
       success: true,
       message: 'UI element state for Canvas/InventoryPanel',
@@ -146,8 +146,13 @@ describe('payload preservation in MCP content', () => {
     expect(result.content[0].text).toBe(response.message);
     expect(result.content[1].text.length).toBeLessThanOrEqual(PAYLOAD_MAX_CHARS);
     expect(summary._truncated).toBe(true);
-    expect(summary._preview).toContain('Canvas/InventoryPanel');
-    expect(summary._preview).toContain('InventorySlot_0');
+    // 頂層陣列超限時直接驗證保留嘅真實結構，唔再依賴 preview 字串。
+    expect(summary.path).toBe('Canvas/InventoryPanel');
+    expect(summary.components[0].type).toBe('InventorySlot_0');
+    expect(summary.components).toHaveLength(summary._arraysTruncated.components.kept);
+    expect(summary._arraysTruncated.components.kept).toBeLessThan(2500);
+    expect(summary._arraysTruncated.components.total).toBe(2500);
+    expect(summary).not.toHaveProperty('_preview');
   });
 
   it('returns reparent_gameobject payload in content', async () => {

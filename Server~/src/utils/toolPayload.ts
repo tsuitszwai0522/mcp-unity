@@ -72,6 +72,7 @@ const truncationMetadataKeys = new Set([
   '_keyCount',
   '_droppedKeys',
   '_droppedKeysTruncated',
+  '_arraysTruncated',
   '_preview',
   '_hint',
 ]);
@@ -101,6 +102,84 @@ export function payloadContent(payload: unknown, limits?: PayloadLimits): Payloa
   const compact = JSON.stringify(payload) ?? 'null';
   if (compact.length <= maxChars) {
     return withStructured(compact);
+  }
+
+  if (payload !== null && typeof payload === 'object' && !Array.isArray(payload)) {
+    const payloadRecord = payload as Record<string, unknown>;
+    const arrayEntries = Object.entries(payloadRecord).filter(
+      (entry): entry is [string, unknown[]] => Array.isArray(entry[1]),
+    );
+    const hasTruncationMetadata = ['_truncated', '_arraysTruncated']
+      .some((key) => Object.prototype.hasOwnProperty.call(payloadRecord, key));
+
+    // 已帶裁剪 metadata 的 payload 保持走既有路徑，避免重新解讀保留欄位。
+    if (arrayEntries.length > 0 && !hasTruncationMetadata) {
+      const uniformArrayLimits = (maxItems: number) => new Map(
+        arrayEntries.map(([key, value]) => [key, Math.min(maxItems, value.length)]),
+      );
+      const serializeArrayPrefix = (
+        arrayLimits: ReadonlyMap<string, number>,
+        includeCompleteArrays: boolean,
+      ) => {
+        const prefixPayload: Record<string, unknown> = { ...payloadRecord };
+        const arraysTruncated = Object.create(null) as Record<string, { kept: number; total: number }>;
+
+        for (const [key, value] of arrayEntries) {
+          const kept = Math.min(arrayLimits.get(key) ?? 0, value.length);
+          prefixPayload[key] = value.slice(0, kept);
+          if (includeCompleteArrays || kept < value.length) {
+            arraysTruncated[key] = { kept, total: value.length };
+          }
+        }
+
+        return JSON.stringify({
+          ...prefixPayload,
+          _truncated: true,
+          _totalChars: compact.length,
+          _arraysTruncated: arraysTruncated,
+          _hint: `Payload exceeds the ${maxChars}-character content limit; narrow the request with a limit or filter.`,
+        });
+      };
+      const emptyProbe = serializeArrayPrefix(uniformArrayLimits(0), true);
+
+      if (emptyProbe.length <= maxChars) {
+        let low = 1;
+        let high = Math.max(...arrayEntries.map(([, value]) => value.length));
+        let fittedMaxItems = 0;
+
+        // 搜尋固定列齊所有陣列 metadata 的單調形態，輸出時才移除完整陣列條目。
+        while (low <= high) {
+          const middle = Math.floor((low + high) / 2);
+          const probe = serializeArrayPrefix(uniformArrayLimits(middle), true);
+          if (probe.length <= maxChars) {
+            fittedMaxItems = middle;
+            low = middle + 1;
+          } else {
+            high = middle - 1;
+          }
+        }
+
+        const fittedArrayLimits = uniformArrayLimits(fittedMaxItems);
+        const shortestArraysFirst = [...arrayEntries]
+          .sort((left, right) => left[1].length - right[1].length);
+
+        // 每個提升都實際序列化 probe 驗證，失敗只還原該陣列嘅上限。
+        for (const [key, value] of shortestArraysFirst) {
+          const previousLimit = fittedArrayLimits.get(key) ?? 0;
+          if (previousLimit >= value.length) {
+            continue;
+          }
+
+          fittedArrayLimits.set(key, value.length);
+          const topUpProbe = serializeArrayPrefix(fittedArrayLimits, true);
+          if (topUpProbe.length > maxChars) {
+            fittedArrayLimits.set(key, previousLimit);
+          }
+        }
+
+        return withStructured(serializeArrayPrefix(fittedArrayLimits, false));
+      }
+    }
   }
 
   const allKeys = payloadKeys(payload);

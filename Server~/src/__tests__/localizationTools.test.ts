@@ -241,9 +241,12 @@ describe('loc_get_entries', () => {
     expect(result.content[0].text).toBe(expectedText);
     expect(payloadText.length).toBeLessThanOrEqual(PAYLOAD_MAX_CHARS);
     expect(payload._truncated).toBe(true);
-    expect(payload).not.toHaveProperty('entries');
-    expect(payload._droppedKeys).toEqual(['entries']);
-    expect(payload._droppedKeysTruncated).toBe(false);
+    expect(payload).toHaveProperty('entries');
+    expect(payload.entries).toHaveLength(payload._arraysTruncated.entries.kept);
+    expect(payload.entries).toEqual(entries.slice(0, payload._arraysTruncated.entries.kept));
+    expect(payload._arraysTruncated.entries.total).toBe(entryCount);
+    expect(payload._arraysTruncated.entries.kept).toBeLessThan(entryCount);
+    expect(payload._arraysTruncated.entries.kept).toBeGreaterThan(0);
     expect(payload.table).toBe('CB_Tooltip');
     expect(payload.locale).toBe('zh-TW');
     expect(payload.totalEntries).toBe(entryCount);
