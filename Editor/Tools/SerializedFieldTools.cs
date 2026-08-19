@@ -229,8 +229,8 @@ namespace McpUnity.Tools
                 );
             }
 
-            var serializedObject = new SerializedObject(component);
             var updatedFields = new List<string>();
+            var failedFields = new List<JObject>();
             var warnings = new List<string>();
 
             foreach (var property in fieldData.Properties())
@@ -238,23 +238,61 @@ namespace McpUnity.Tools
                 string fieldName = property.Name;
                 JToken fieldValue = property.Value;
 
-                SerializedProperty prop = SerializedPropertyHelper.FindProperty(serializedObject, fieldName);
-                if (prop == null)
+                try
                 {
-                    warnings.Add($"Field '{fieldName}' not found on '{componentName}'");
-                    continue;
-                }
+                    var serializedObject = new SerializedObject(component);
+                    SerializedProperty prop = SerializedPropertyHelper.FindProperty(serializedObject, fieldName);
+                    if (prop == null)
+                    {
+                        failedFields.Add(CreateFieldFailure(
+                            fieldName,
+                            $"Field '{fieldName}' was not found after checking SerializedProperty " +
+                            $"on component '{component.GetType().Name}'"));
+                        continue;
+                    }
 
-                if (SerializedPropertyHelper.SetValue(prop, fieldValue, warnings, fieldName))
+                    string serializedFieldName = prop.propertyPath;
+                    var fieldWarnings = new List<string>();
+                    if (!SerializedPropertyHelper.SetValue(
+                        prop,
+                        fieldValue,
+                        fieldWarnings,
+                        fieldName,
+                        out SerializedPropertyHelper.ObjectReferenceWrite objectReferenceWrite))
+                    {
+                        string reason = fieldWarnings.Count > 0
+                            ? string.Join("; ", fieldWarnings.ToArray())
+                            : $"Value could not be assigned to serialized field '{serializedFieldName}'";
+                        failedFields.Add(CreateFieldFailure(fieldName, reason));
+                        continue;
+                    }
+
+                    serializedObject.ApplyModifiedProperties();
+                    if (!SerializedPropertyHelper.VerifyObjectReferenceWrite(
+                        component,
+                        serializedObject,
+                        prop,
+                        serializedFieldName,
+                        objectReferenceWrite,
+                        out string verificationFailure))
+                    {
+                        failedFields.Add(CreateFieldFailure(fieldName, verificationFailure));
+                        continue;
+                    }
+
+                    updatedFields.Add(serializedFieldName);
+                }
+                catch (Exception ex)
                 {
-                    updatedFields.Add(prop.name);
+                    failedFields.Add(CreateFieldFailure(
+                        fieldName, $"Exception while setting field: {ex.Message}"));
                 }
             }
 
-            serializedObject.ApplyModifiedProperties();
             EditorUtility.SetDirty(gameObject);
 
-            string message = $"Updated {updatedFields.Count} field(s) on '{componentName}' on '{gameObject.name}'";
+            string message = $"Updated fields on '{componentName}' on '{gameObject.name}': " +
+                $"{updatedFields.Count} field(s) succeeded, {failedFields.Count} field(s) failed";
             if (warnings.Count > 0)
             {
                 message += $" (with {warnings.Count} warning(s))";
@@ -262,11 +300,12 @@ namespace McpUnity.Tools
 
             var response = new JObject
             {
-                ["success"] = true,
+                ["success"] = failedFields.Count == 0,
                 ["type"] = "text",
                 ["message"] = message,
                 ["instanceId"] = gameObject.GetInstanceID(),
-                ["updatedFields"] = new JArray(updatedFields.ToArray())
+                ["updatedFields"] = new JArray(updatedFields.ToArray()),
+                ["failedFields"] = new JArray(failedFields.ToArray())
             };
 
             if (warnings.Count > 0)
@@ -275,6 +314,15 @@ namespace McpUnity.Tools
             }
 
             return response;
+        }
+
+        private static JObject CreateFieldFailure(string fieldName, string reason)
+        {
+            return new JObject
+            {
+                ["field"] = fieldName,
+                ["reason"] = reason
+            };
         }
 
     }

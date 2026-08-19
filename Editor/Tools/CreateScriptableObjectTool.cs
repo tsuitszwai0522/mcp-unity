@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using McpUnity.Utils;
@@ -88,10 +89,13 @@ namespace McpUnity.Tools
                 }
 
                 // Apply field values if provided
+                var updatedFields = new List<string>();
+                var failedFields = new List<JObject>();
+                var warnings = new List<string>();
                 if (fieldValues != null && fieldValues.Count > 0)
                 {
                     Undo.RecordObject(scriptableObject, "Set ScriptableObject field values");
-                    ApplyFieldValues(scriptableObject, fieldValues);
+                    ApplyFieldValues(scriptableObject, fieldValues, updatedFields, failedFields, warnings);
                 }
 
                 // Ensure the directory exists
@@ -116,14 +120,30 @@ namespace McpUnity.Tools
                     );
                 }
 
-                return new JObject
+                string message = $"Created ScriptableObject '{typeName}' at '{savePath}': " +
+                    $"{updatedFields.Count} field(s) succeeded, {failedFields.Count} field(s) failed";
+                if (warnings.Count > 0)
                 {
-                    ["success"] = true,
+                    message += $" (with {warnings.Count} warning(s))";
+                }
+
+                var response = new JObject
+                {
+                    ["success"] = failedFields.Count == 0,
                     ["type"] = "text",
-                    ["message"] = $"Successfully created ScriptableObject '{typeName}' at '{savePath}'",
+                    ["message"] = message,
                     ["assetPath"] = savePath,
-                    ["typeName"] = scriptableObjectType.FullName
+                    ["typeName"] = scriptableObjectType.FullName,
+                    ["updatedFields"] = new JArray(updatedFields.ToArray()),
+                    ["failedFields"] = new JArray(failedFields.ToArray())
                 };
+
+                if (warnings.Count > 0)
+                {
+                    response["warnings"] = new JArray(warnings.ToArray());
+                }
+
+                return response;
             }
             catch (Exception ex)
             {
@@ -183,7 +203,12 @@ namespace McpUnity.Tools
         /// <summary>
         /// Applies field values from a JObject to a ScriptableObject using reflection
         /// </summary>
-        private void ApplyFieldValues(ScriptableObject scriptableObject, JObject fieldValues)
+        private void ApplyFieldValues(
+            ScriptableObject scriptableObject,
+            JObject fieldValues,
+            List<string> updatedFields,
+            List<JObject> failedFields,
+            List<string> warnings)
         {
             Type type = scriptableObject.GetType();
 
@@ -192,32 +217,65 @@ namespace McpUnity.Tools
                 string fieldName = property.Name;
                 JToken value = property.Value;
 
-                // Try to find a field (including private fields with [SerializeField])
-                FieldInfo field = type.GetField(fieldName,
-                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                try
+                {
+                    // Try to find a field (including private fields with [SerializeField])
+                    FieldInfo field = type.GetField(fieldName,
+                        BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
 
-                if (field != null)
-                {
-                    try
+                    if (field == null)
                     {
-                        object convertedValue = SerializedFieldConverter.ConvertJTokenToValue(value, field.FieldType);
-                        if (convertedValue != null || !field.FieldType.IsValueType)
-                        {
-                            field.SetValue(scriptableObject, convertedValue);
-                        }
+                        failedFields.Add(CreateFieldFailure(
+                            fieldName,
+                            $"Field '{fieldName}' was not found after checking reflection field " +
+                            $"on type '{type.Name}'"));
+                        continue;
                     }
-                    catch (Exception ex)
+
+                    var conversionFailures = new List<string>();
+                    object convertedValue = SerializedFieldConverter.ConvertJTokenToValue(
+                        value, field.FieldType, conversionFailures);
+                    if (CannotAssignConvertedValue(convertedValue, value, field.FieldType))
                     {
-                        Debug.LogWarning($"[MCP] Failed to set field '{fieldName}': {ex.Message}");
+                        string reason = conversionFailures.Count > 0
+                            ? string.Join("; ", conversionFailures.ToArray())
+                            : $"Input value could not be converted to {field.FieldType.Name}";
+                        failedFields.Add(CreateFieldFailure(fieldName, reason));
+                        continue;
                     }
+
+                    field.SetValue(scriptableObject, convertedValue);
+                    updatedFields.Add(fieldName);
                 }
-                else
+                catch (Exception ex)
                 {
-                    Debug.LogWarning($"[MCP] Field '{fieldName}' not found on type '{type.Name}'");
+                    string reason = $"Exception while setting field: {ex.Message}";
+                    failedFields.Add(CreateFieldFailure(fieldName, reason));
+                    Debug.LogWarning($"[MCP] Failed to set field '{fieldName}': {ex.Message}");
                 }
             }
 
             EditorUtility.SetDirty(scriptableObject);
+        }
+
+        private static bool CannotAssignConvertedValue(object value, JToken token, Type targetType)
+        {
+            if (value != null)
+            {
+                return false;
+            }
+
+            return token.Type != JTokenType.Null
+                || (targetType.IsValueType && Nullable.GetUnderlyingType(targetType) == null);
+        }
+
+        private static JObject CreateFieldFailure(string fieldName, string reason)
+        {
+            return new JObject
+            {
+                ["field"] = fieldName,
+                ["reason"] = reason
+            };
         }
 
         /// <summary>

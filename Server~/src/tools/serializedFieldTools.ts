@@ -171,7 +171,9 @@ async function writeHandler(mcpUnity: McpUnity, params: any): Promise<CallToolRe
     }
   });
 
-  if (!response.success) {
+  const hasFieldFailures = Array.isArray(response.failedFields) && response.failedFields.length > 0;
+
+  if (!response.success && !hasFieldFailures) {
     throw new McpUnityError(
       ErrorType.TOOL_EXECUTION,
       response.message || 'Failed to write serialized fields'
@@ -183,7 +185,7 @@ async function writeHandler(mcpUnity: McpUnity, params: any): Promise<CallToolRe
     text += '\n\nWarnings:\n' + response.warnings.map((w: string) => `  - ${w}`).join('\n');
   }
 
-  return {
+  const result: CallToolResult = {
     content: [
       {
         type: 'text',
@@ -192,9 +194,16 @@ async function writeHandler(mcpUnity: McpUnity, params: any): Promise<CallToolRe
       payloadContent({
           instanceId: response.instanceId,
           updatedFields: response.updatedFields,
+          failedFields: response.failedFields,
           warnings: response.warnings,
           message: response.message
         })
     ]
   };
+
+  if (hasFieldFailures) {
+    result.isError = true;
+  }
+
+  return result;
 }

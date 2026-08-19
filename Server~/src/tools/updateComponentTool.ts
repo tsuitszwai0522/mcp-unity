@@ -4,6 +4,7 @@ import { McpUnity } from '../unity/mcpUnity.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { McpUnityError, ErrorType } from '../utils/errors.js';
 import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+import { payloadContent } from '../utils/toolPayload.js';
 
 // Constants for the tool
 const toolName = 'update_component';
@@ -83,7 +84,9 @@ async function toolHandler(mcpUnity: McpUnity, params: any): Promise<CallToolRes
     }
   });
   
-  if (!response.success) {
+  const hasFieldFailures = Array.isArray(response.failedFields) && response.failedFields.length > 0;
+
+  if (!response.success && !hasFieldFailures) {
     throw new McpUnityError(
       ErrorType.TOOL_EXECUTION,
       response.message || `Failed to update component on GameObject`
@@ -95,10 +98,24 @@ async function toolHandler(mcpUnity: McpUnity, params: any): Promise<CallToolRes
     ? `path '${params.objectPath}'` 
     : `ID ${params.instanceId}`;
   
-  return {
-    content: [{
-      type: response.type || 'text',
-      text: response.message || `Successfully updated component on GameObject with ${targetDescription}`
-    }]
+  const result: CallToolResult = {
+    content: [
+      {
+        type: response.type || 'text',
+        text: response.message || `Successfully updated component on GameObject with ${targetDescription}`
+      },
+      payloadContent({
+        message: response.message,
+        updatedFields: response.updatedFields,
+        failedFields: response.failedFields,
+        warnings: response.warnings
+      })
+    ]
   };
+
+  if (hasFieldFailures) {
+    result.isError = true;
+  }
+
+  return result;
 }

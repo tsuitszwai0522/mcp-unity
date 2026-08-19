@@ -132,10 +132,18 @@ namespace McpUnity.Tools
                 }
             }
             // Update component fields
-            List<string> updateWarnings = null;
+            var updateWarnings = new List<string>();
+            var updatedFields = new List<string>();
+            var failedFields = new List<JObject>();
             if (componentData != null && componentData.Count > 0)
             {
-                bool success = UpdateComponentData(component, componentData, out string errorMessage, out updateWarnings);
+                bool success = UpdateComponentData(
+                    component,
+                    componentData,
+                    out string errorMessage,
+                    out updateWarnings,
+                    out updatedFields,
+                    out failedFields);
                 // If update failed, return error
                 if (!success)
                 {
@@ -151,20 +159,23 @@ namespace McpUnity.Tools
             }
 
             // Create the response
-            string message = $"Successfully updated component '{componentName}' on GameObject '{gameObject.name}'";
-            if (updateWarnings != null && updateWarnings.Count > 0)
+            string message = $"Updated component '{componentName}' on GameObject '{gameObject.name}': " +
+                $"{updatedFields.Count} field(s) succeeded, {failedFields.Count} field(s) failed";
+            if (updateWarnings.Count > 0)
             {
                 message += $" (with {updateWarnings.Count} warning(s))";
             }
 
             var response = new JObject
             {
-                ["success"] = true,
+                ["success"] = failedFields.Count == 0,
                 ["type"] = "text",
-                ["message"] = message
+                ["message"] = message,
+                ["updatedFields"] = new JArray(updatedFields.ToArray()),
+                ["failedFields"] = new JArray(failedFields.ToArray())
             };
 
-            if (updateWarnings != null && updateWarnings.Count > 0)
+            if (updateWarnings.Count > 0)
             {
                 response["warnings"] = new JArray(updateWarnings.ToArray());
             }
@@ -226,12 +237,22 @@ namespace McpUnity.Tools
         /// <param name="component">The component to update</param>
         /// <param name="componentData">The data to apply to the component</param>
         /// <param name="errorMessage">Error message if update fails</param>
-        /// <param name="warnings">List of non-fatal warnings (e.g. null-resolved Object references)</param>
+        /// <param name="warnings">List of non-fatal warnings</param>
+        /// <param name="updatedFields">Fields that were written successfully</param>
+        /// <param name="failedFields">Fields that could not be written</param>
         /// <returns>True if the component was updated successfully</returns>
-        private bool UpdateComponentData(Component component, JObject componentData, out string errorMessage, out List<string> warnings)
+        private bool UpdateComponentData(
+            Component component,
+            JObject componentData,
+            out string errorMessage,
+            out List<string> warnings,
+            out List<string> updatedFields,
+            out List<JObject> failedFields)
         {
             errorMessage = "";
             warnings = new List<string>();
+            updatedFields = new List<string>();
+            failedFields = new List<JObject>();
 
             if (component == null || componentData == null)
             {
@@ -240,13 +261,8 @@ namespace McpUnity.Tools
             }
 
             Type componentType = component.GetType();
-            bool fullSuccess = true;
-
             // Record object for undo
             Undo.RecordObject(component, $"Update {componentType.Name} fields");
-
-            // Cache SerializedObjects to avoid re-creating per field in TrySetViaSerializedProperty
-            var serializedObjects = new Dictionary<Component, SerializedObject>();
 
             // Process each field or property in the component data
             foreach (var property in componentData.Properties())
@@ -254,84 +270,159 @@ namespace McpUnity.Tools
                 string fieldName = property.Name;
                 JToken fieldValue = property.Value;
 
-                // Skip null values
-                if (string.IsNullOrEmpty(fieldName) || fieldValue.Type == JTokenType.Null)
+                if (string.IsNullOrEmpty(fieldName))
                 {
+                    warnings.Add("Ignored a component field with an empty name");
                     continue;
                 }
 
-                // Try to update field
-                FieldInfo fieldInfo = componentType.GetField(fieldName,
-                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-
-                if (fieldInfo != null)
+                try
                 {
-                    object value = SerializedFieldConverter.ConvertJTokenToValue(fieldValue, fieldInfo.FieldType);
-                    if (value == null && fieldValue.Type != JTokenType.Null)
+                    // Try to update field
+                    FieldInfo fieldInfo = componentType.GetField(fieldName,
+                        BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+
+                    if (fieldInfo != null)
                     {
-                        bool isObjectRef = typeof(UnityEngine.Object).IsAssignableFrom(fieldInfo.FieldType);
-                        warnings.Add($"Field '{fieldName}' ({fieldInfo.FieldType.Name}): input value could not be resolved{(isObjectRef ? " — ensure the instance ID, asset path, or object path is valid" : "")}");
+                        var conversionFailures = new List<string>();
+                        object value = SerializedFieldConverter.ConvertJTokenToValue(
+                            fieldValue, fieldInfo.FieldType, conversionFailures);
+                        if (CannotAssignConvertedValue(value, fieldValue, fieldInfo.FieldType))
+                        {
+                            failedFields.Add(CreateFieldFailure(
+                                fieldName,
+                                GetConversionFailureReason(fieldInfo.FieldType, conversionFailures)));
+                            continue;
+                        }
+                        fieldInfo.SetValue(component, value);
+                        updatedFields.Add(fieldName);
+                        continue;
                     }
-                    fieldInfo.SetValue(component, value);
-                    continue;
-                }
 
-                // Try to update property if not found as a field
-                PropertyInfo propertyInfo = componentType.GetProperty(fieldName,
-                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    // Try to update property if not found as a field
+                    PropertyInfo propertyInfo = componentType.GetProperty(fieldName,
+                        BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
 
-                if (propertyInfo != null)
-                {
-                    object value = SerializedFieldConverter.ConvertJTokenToValue(fieldValue, propertyInfo.PropertyType);
-                    if (value == null && fieldValue.Type != JTokenType.Null)
+                    if (propertyInfo != null)
                     {
-                        bool isObjectRef = typeof(UnityEngine.Object).IsAssignableFrom(propertyInfo.PropertyType);
-                        warnings.Add($"Property '{fieldName}' ({propertyInfo.PropertyType.Name}): input value could not be resolved{(isObjectRef ? " — ensure the instance ID, asset path, or object path is valid" : "")}");
+                        var conversionFailures = new List<string>();
+                        object value = SerializedFieldConverter.ConvertJTokenToValue(
+                            fieldValue, propertyInfo.PropertyType, conversionFailures);
+                        if (CannotAssignConvertedValue(value, fieldValue, propertyInfo.PropertyType))
+                        {
+                            failedFields.Add(CreateFieldFailure(
+                                fieldName,
+                                GetConversionFailureReason(propertyInfo.PropertyType, conversionFailures)));
+                            continue;
+                        }
+                        propertyInfo.SetValue(component, value);
+                        updatedFields.Add(fieldName);
+                        continue;
                     }
-                    propertyInfo.SetValue(component, value);
-                    continue;
-                }
 
-                // Fallback: try SerializedProperty which handles both serialized names (m_Color)
-                // and property names (color) through Unity's serialization system
-                if (TrySetViaSerializedProperty(component, fieldName, fieldValue, warnings, serializedObjects))
+                    // Fallback: try SerializedProperty which handles both serialized names (m_Color)
+                    // and property names (color) through Unity's serialization system
+                    if (TrySetViaSerializedProperty(
+                        component, fieldName, fieldValue, out bool propertyFound, out string failureReason))
+                    {
+                        updatedFields.Add(fieldName);
+                        continue;
+                    }
+
+                    if (propertyFound)
+                    {
+                        failedFields.Add(CreateFieldFailure(fieldName, failureReason));
+                    }
+                    else
+                    {
+                        failedFields.Add(CreateFieldFailure(
+                            fieldName,
+                            $"Field '{fieldName}' was not found after checking reflection field, " +
+                            $"reflection property, and SerializedProperty on component '{componentType.Name}'"));
+                    }
+                }
+                catch (Exception ex)
                 {
-                    continue;
+                    failedFields.Add(CreateFieldFailure(
+                        fieldName, $"Exception while setting field '{fieldName}': {ex.Message}"));
                 }
-
-                fullSuccess = false;
-                errorMessage = $"Field or Property with name '{fieldName}' not found on component '{componentType.Name}'";
             }
 
-            // Apply any cached SerializedObjects
-            foreach (var kvp in serializedObjects)
-            {
-                kvp.Value.ApplyModifiedProperties();
-            }
-
-            return fullSuccess;
+            return true;
         }
 
         /// <summary>
         /// Try to set a field via Unity's SerializedProperty system.
         /// This handles both serialized names (m_Color, m_Sprite) and their property equivalents.
-        /// Uses a cache to avoid re-creating SerializedObject per field.
         /// </summary>
-        private bool TrySetViaSerializedProperty(Component component, string fieldName, JToken fieldValue, List<string> warnings, Dictionary<Component, SerializedObject> cache)
+        private bool TrySetViaSerializedProperty(
+            Component component,
+            string fieldName,
+            JToken fieldValue,
+            out bool propertyFound,
+            out string failureReason)
         {
-            if (!cache.TryGetValue(component, out var serializedObject))
-            {
-                serializedObject = new SerializedObject(component);
-                cache[component] = serializedObject;
-            }
+            propertyFound = false;
+            failureReason = null;
+            var serializedObject = new SerializedObject(component);
 
             SerializedProperty prop = SerializedPropertyHelper.FindProperty(serializedObject, fieldName);
             if (prop == null)
             {
                 return false;
             }
+            propertyFound = true;
+            string serializedFieldName = prop.propertyPath;
 
-            return SerializedPropertyHelper.SetValue(prop, fieldValue, warnings, fieldName);
+            var fieldWarnings = new List<string>();
+            if (!SerializedPropertyHelper.SetValue(
+                prop,
+                fieldValue,
+                fieldWarnings,
+                fieldName,
+                out SerializedPropertyHelper.ObjectReferenceWrite objectReferenceWrite))
+            {
+                failureReason = fieldWarnings.Count > 0
+                    ? string.Join("; ", fieldWarnings.ToArray())
+                    : $"Value could not be assigned to serialized field '{serializedFieldName}'";
+                return false;
+            }
+
+            serializedObject.ApplyModifiedProperties();
+            return SerializedPropertyHelper.VerifyObjectReferenceWrite(
+                component,
+                serializedObject,
+                prop,
+                serializedFieldName,
+                objectReferenceWrite,
+                out failureReason);
+        }
+
+        private static bool CannotAssignConvertedValue(object value, JToken token, Type targetType)
+        {
+            if (value != null)
+            {
+                return false;
+            }
+
+            return token.Type != JTokenType.Null
+                || (targetType.IsValueType && Nullable.GetUnderlyingType(targetType) == null);
+        }
+
+        private static string GetConversionFailureReason(Type targetType, List<string> conversionFailures)
+        {
+            return conversionFailures.Count > 0
+                ? string.Join("; ", conversionFailures.ToArray())
+                : $"Input value could not be converted to {targetType.Name}";
+        }
+
+        private static JObject CreateFieldFailure(string fieldName, string reason)
+        {
+            return new JObject
+            {
+                ["field"] = fieldName,
+                ["reason"] = reason
+            };
         }
 
     }

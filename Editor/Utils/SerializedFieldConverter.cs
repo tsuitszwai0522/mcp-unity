@@ -22,8 +22,9 @@ namespace McpUnity.Utils
         /// </summary>
         /// <param name="token">The JToken to convert</param>
         /// <param name="targetType">The target type to convert to</param>
+        /// <param name="failures">Optional collection that receives conversion failure reasons</param>
         /// <returns>The converted value, or null if conversion fails</returns>
-        public static object ConvertJTokenToValue(JToken token, Type targetType)
+        public static object ConvertJTokenToValue(JToken token, Type targetType, List<string> failures = null)
         {
             if (token == null || token.Type == JTokenType.Null)
             {
@@ -109,7 +110,7 @@ namespace McpUnity.Utils
             if (typeof(UnityEngine.Object).IsAssignableFrom(targetType) && token.Type == JTokenType.Integer)
             {
                 int id = token.ToObject<int>();
-                return ResolveUnityObjectByInstanceId(id, targetType);
+                return ResolveUnityObjectByInstanceId(id, targetType, failures);
             }
 
             // Scene object reference via structured reference ({"instanceId": 123} or {"objectPath": "Path/To/Object"})
@@ -119,7 +120,7 @@ namespace McpUnity.Utils
                 // Skip if this looks like a Vector/Color/etc. (has x/y/z/r/g/b keys) — those are handled above
                 if (refObj.ContainsKey("instanceId") || refObj.ContainsKey("objectPath"))
                 {
-                    return ResolveUnityObjectByStructuredRef(refObj, targetType);
+                    return ResolveUnityObjectByStructuredRef(refObj, targetType, failures);
                 }
             }
 
@@ -127,7 +128,7 @@ namespace McpUnity.Utils
             if (typeof(UnityEngine.Object).IsAssignableFrom(targetType) && token.Type == JTokenType.String)
             {
                 string assetRef = token.ToObject<string>();
-                return ResolveUnityObjectByAssetRef(assetRef, targetType);
+                return ResolveUnityObjectByAssetRef(assetRef, targetType, failures);
             }
 
             // --- Enum ---
@@ -162,7 +163,17 @@ namespace McpUnity.Utils
                 Array arr = Array.CreateInstance(elementType, jArray.Count);
                 for (int i = 0; i < jArray.Count; i++)
                 {
-                    arr.SetValue(ConvertJTokenToValue(jArray[i], elementType), i);
+                    int failureCount = failures?.Count ?? 0;
+                    object elementValue = ConvertJTokenToValue(jArray[i], elementType, failures);
+                    if (failures != null && elementValue == null && jArray[i].Type != JTokenType.Null)
+                    {
+                        if (failures != null && failures.Count == failureCount)
+                        {
+                            failures.Add($"Failed to convert array element {i} to {elementType.Name}");
+                        }
+                        return null;
+                    }
+                    arr.SetValue(elementValue, i);
                 }
                 return arr;
             }
@@ -178,7 +189,17 @@ namespace McpUnity.Utils
                 IList list = (IList)Activator.CreateInstance(targetType);
                 for (int i = 0; i < jArray.Count; i++)
                 {
-                    list.Add(ConvertJTokenToValue(jArray[i], elementType));
+                    int failureCount = failures?.Count ?? 0;
+                    object elementValue = ConvertJTokenToValue(jArray[i], elementType, failures);
+                    if (failures != null && elementValue == null && jArray[i].Type != JTokenType.Null)
+                    {
+                        if (failures != null && failures.Count == failureCount)
+                        {
+                            failures.Add($"Failed to convert list element {i} to {elementType.Name}");
+                        }
+                        return null;
+                    }
+                    list.Add(elementValue);
                 }
                 return list;
             }
@@ -201,6 +222,7 @@ namespace McpUnity.Utils
                     JObject obj = (JObject)token;
                     FieldInfo[] fields = targetType.GetFields(
                         BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    int matchedCount = 0;
 
                     foreach (FieldInfo field in fields)
                     {
@@ -211,11 +233,31 @@ namespace McpUnity.Utils
                         JToken fieldToken = obj[field.Name];
                         if (fieldToken == null || fieldToken.Type == JTokenType.Null) continue;
 
-                        object fieldValue = ConvertJTokenToValue(fieldToken, field.FieldType);
+                        int failureCount = failures?.Count ?? 0;
+                        object fieldValue = ConvertJTokenToValue(fieldToken, field.FieldType, failures);
+                        if (failures != null && fieldValue == null && fieldToken.Type != JTokenType.Null)
+                        {
+                            if (failures.Count == failureCount)
+                            {
+                                failures.Add($"Failed to convert nested field '{field.Name}' to {field.FieldType.Name}");
+                            }
+                            else
+                            {
+                                for (int i = failureCount; i < failures.Count; i++)
+                                {
+                                    failures[i] = $"Nested field '{field.Name}': {failures[i]}";
+                                }
+                            }
+                            return null;
+                        }
                         field.SetValue(instance, fieldValue);
+                        matchedCount++;
                     }
 
-                    return instance;
+                    if (matchedCount > 0)
+                    {
+                        return instance;
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -227,11 +269,18 @@ namespace McpUnity.Utils
 
             try
             {
-                return token.ToObject(targetType);
+                object converted = token.ToObject(targetType);
+                if (converted == null && failures != null)
+                {
+                    failures.Add($"Failed to convert value to {targetType.Name}: conversion returned null");
+                }
+                return converted;
             }
             catch (Exception ex)
             {
+                string reason = $"Failed to convert value to {targetType.Name}: {ex.Message}";
                 McpLogger.LogError($"[MCP Unity] Error converting value to type {targetType.Name}: {ex.Message}");
+                failures?.Add(reason);
                 return null;
             }
         }
@@ -239,7 +288,7 @@ namespace McpUnity.Utils
         /// <summary>
         /// Resolve a UnityEngine.Object by instance ID
         /// </summary>
-        private static object ResolveUnityObjectByInstanceId(int id, Type targetType)
+        private static object ResolveUnityObjectByInstanceId(int id, Type targetType, List<string> failures)
         {
             UnityEngine.Object obj = EditorUtility.InstanceIDToObject(id);
             if (obj != null)
@@ -247,15 +296,25 @@ namespace McpUnity.Utils
                 object resolved = CastUnityObject(obj, targetType);
                 if (resolved != null)
                     return resolved;
+
+                string mismatchReason = $"Resolved object type {obj.GetType().Name} is not assignable to {targetType.Name}";
+                if (failures != null)
+                {
+                    McpLogger.LogWarning($"[MCP Unity] {mismatchReason}");
+                    failures.Add(mismatchReason);
+                    return null;
+                }
             }
-            McpLogger.LogWarning($"[MCP Unity] Could not resolve instance ID {id} to type {targetType.Name}");
+            string reason = $"Could not resolve instance ID {id} to type {targetType.Name}";
+            McpLogger.LogWarning($"[MCP Unity] {reason}");
+            failures?.Add(reason);
             return null;
         }
 
         /// <summary>
         /// Resolve a UnityEngine.Object by structured reference ({"instanceId": N} or {"objectPath": "..."})
         /// </summary>
-        private static object ResolveUnityObjectByStructuredRef(JObject refObj, Type targetType)
+        private static object ResolveUnityObjectByStructuredRef(JObject refObj, Type targetType, List<string> failures)
         {
             UnityEngine.Object resolvedObj = null;
 
@@ -275,7 +334,9 @@ namespace McpUnity.Utils
 
             if (resolvedObj == null)
             {
-                McpLogger.LogWarning($"[MCP Unity] Could not resolve scene object reference to type {targetType.Name}");
+                string reason = $"Could not resolve scene object reference to type {targetType.Name}";
+                McpLogger.LogWarning($"[MCP Unity] {reason}");
+                failures?.Add(reason);
                 return null;
             }
 
@@ -283,17 +344,20 @@ namespace McpUnity.Utils
             if (casted != null)
                 return casted;
 
-            McpLogger.LogWarning($"[MCP Unity] Resolved object type {resolvedObj.GetType().Name} is not assignable to {targetType.Name}");
+            string mismatchReason = $"Resolved object type {resolvedObj.GetType().Name} is not assignable to {targetType.Name}";
+            McpLogger.LogWarning($"[MCP Unity] {mismatchReason}");
+            failures?.Add(mismatchReason);
             return null;
         }
 
         /// <summary>
         /// Resolve a UnityEngine.Object by asset path or GUID string
         /// </summary>
-        private static object ResolveUnityObjectByAssetRef(string assetRef, Type targetType)
+        private static object ResolveUnityObjectByAssetRef(string assetRef, Type targetType, List<string> failures)
         {
             if (string.IsNullOrEmpty(assetRef))
             {
+                failures?.Add($"Asset reference is empty for type {targetType.Name}");
                 return null;
             }
 
@@ -315,7 +379,9 @@ namespace McpUnity.Utils
                 }
             }
 
-            McpLogger.LogWarning($"[MCP Unity] Could not load asset of type {targetType.Name} from '{assetRef}'");
+            string reason = $"Could not load asset of type {targetType.Name} from '{assetRef}'";
+            McpLogger.LogWarning($"[MCP Unity] {reason}");
+            failures?.Add(reason);
             return null;
         }
 

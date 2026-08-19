@@ -4,6 +4,7 @@ import { McpUnityError, ErrorType } from '../utils/errors.js';
 import * as z from 'zod';
 import { Logger } from '../utils/logger.js';
 import { payloadContent } from '../utils/toolPayload.js';
+import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 
 // Constants for the tool
 const toolName = 'update_scriptable_object';
@@ -71,14 +72,16 @@ async function toolHandler(mcpUnity: McpUnity, params: any) {
     params
   });
 
-  if (!response.success) {
+  const hasFieldFailures = Array.isArray(response.failedFields) && response.failedFields.length > 0;
+
+  if (!response.success && !hasFieldFailures) {
     throw new McpUnityError(
       ErrorType.TOOL_EXECUTION,
       response.message || `Failed to update ScriptableObject`
     );
   }
 
-  return {
+  const result: CallToolResult = {
     content: [
       {
         type: response.type || 'text',
@@ -87,8 +90,17 @@ async function toolHandler(mcpUnity: McpUnity, params: any) {
       payloadContent({
           assetPath: response.assetPath,
           typeName: response.typeName,
+          updatedFields: response.updatedFields,
+          failedFields: response.failedFields,
+          warnings: response.warnings,
           message: response.message
         })
     ]
   };
+
+  if (hasFieldFailures) {
+    result.isError = true;
+  }
+
+  return result;
 }

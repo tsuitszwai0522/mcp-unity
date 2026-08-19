@@ -12,6 +12,23 @@ namespace McpUnity.Utils
     /// </summary>
     public static class SerializedPropertyHelper
     {
+        public sealed class ObjectReferenceWrite
+        {
+            public UnityEngine.Object PreviousValue { get; }
+            public UnityEngine.Object AttemptedValue { get; }
+            public bool IsIntentionalClear { get; }
+
+            public ObjectReferenceWrite(
+                UnityEngine.Object previousValue,
+                UnityEngine.Object attemptedValue,
+                bool isIntentionalClear)
+            {
+                PreviousValue = previousValue;
+                AttemptedValue = attemptedValue;
+                IsIntentionalClear = isIntentionalClear;
+            }
+        }
+
         /// <summary>
         /// Find a SerializedProperty by name, with bidirectional m_ prefix mapping.
         /// Tries: exact name → m_Name → name without m_ prefix.
@@ -49,6 +66,21 @@ namespace McpUnity.Utils
         /// </summary>
         public static bool SetValue(SerializedProperty prop, JToken value, List<string> warnings, string fieldName)
         {
+            ObjectReferenceWrite ignoredWrite;
+            return SetValue(prop, value, warnings, fieldName, out ignoredWrite);
+        }
+
+        /// <summary>
+        /// Set a SerializedProperty value and report object-reference assignment metadata for read-back verification.
+        /// </summary>
+        public static bool SetValue(
+            SerializedProperty prop,
+            JToken value,
+            List<string> warnings,
+            string fieldName,
+            out ObjectReferenceWrite objectReferenceWrite)
+        {
+            objectReferenceWrite = null;
             try
             {
                 switch (prop.propertyType)
@@ -179,6 +211,8 @@ namespace McpUnity.Utils
                             }
                             if (asset != null)
                             {
+                                objectReferenceWrite = new ObjectReferenceWrite(
+                                    prop.objectReferenceValue, asset, false);
                                 prop.objectReferenceValue = asset;
                                 return true;
                             }
@@ -191,6 +225,8 @@ namespace McpUnity.Utils
                             var obj = EditorUtility.InstanceIDToObject(id);
                             if (obj != null)
                             {
+                                objectReferenceWrite = new ObjectReferenceWrite(
+                                    prop.objectReferenceValue, obj, false);
                                 prop.objectReferenceValue = obj;
                                 return true;
                             }
@@ -206,6 +242,8 @@ namespace McpUnity.Utils
                                 var obj = EditorUtility.InstanceIDToObject(id);
                                 if (obj != null)
                                 {
+                                    objectReferenceWrite = new ObjectReferenceWrite(
+                                        prop.objectReferenceValue, obj, false);
                                     prop.objectReferenceValue = obj;
                                     return true;
                                 }
@@ -216,6 +254,8 @@ namespace McpUnity.Utils
                                 var asset = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(path);
                                 if (asset != null)
                                 {
+                                    objectReferenceWrite = new ObjectReferenceWrite(
+                                        prop.objectReferenceValue, asset, false);
                                     prop.objectReferenceValue = asset;
                                     return true;
                                 }
@@ -226,6 +266,8 @@ namespace McpUnity.Utils
                                 var go = GameObject.Find(path);
                                 if (go != null)
                                 {
+                                    objectReferenceWrite = new ObjectReferenceWrite(
+                                        prop.objectReferenceValue, go, false);
                                     prop.objectReferenceValue = go;
                                     return true;
                                 }
@@ -235,6 +277,8 @@ namespace McpUnity.Utils
                         // Null: clear the reference
                         else if (value.Type == JTokenType.Null)
                         {
+                            objectReferenceWrite = new ObjectReferenceWrite(
+                                prop.objectReferenceValue, null, true);
                             prop.objectReferenceValue = null;
                             return true;
                         }
@@ -282,6 +326,63 @@ namespace McpUnity.Utils
             {
                 warnings?.Add($"Error setting '{fieldName}': {ex.Message}");
             }
+            return false;
+        }
+
+        /// <summary>
+        /// Verify an applied object-reference write by reading the exact serialized property path
+        /// from a fresh SerializedObject. Restores the previous reference when verification fails.
+        /// </summary>
+        public static bool VerifyObjectReferenceWrite(
+            UnityEngine.Object target,
+            SerializedObject originalSerializedObject,
+            SerializedProperty originalProperty,
+            string propertyPath,
+            ObjectReferenceWrite objectReferenceWrite,
+            out string failureReason)
+        {
+            failureReason = null;
+            if (objectReferenceWrite == null)
+            {
+                return true;
+            }
+
+            var readBackObject = new SerializedObject(target);
+            SerializedProperty readBackProperty = readBackObject.FindProperty(propertyPath);
+            UnityEngine.Object readBackValue = readBackProperty?.objectReferenceValue;
+            bool matches = objectReferenceWrite.IsIntentionalClear
+                ? readBackValue == null
+                : readBackValue == objectReferenceWrite.AttemptedValue;
+
+            if (matches)
+            {
+                return true;
+            }
+
+            if (readBackProperty != null)
+            {
+                readBackProperty.objectReferenceValue = objectReferenceWrite.PreviousValue;
+                readBackObject.ApplyModifiedProperties();
+            }
+            else
+            {
+                originalProperty.objectReferenceValue = objectReferenceWrite.PreviousValue;
+                originalSerializedObject.ApplyModifiedProperties();
+            }
+
+            if (objectReferenceWrite.IsIntentionalClear)
+            {
+                failureReason = $"Object reference field '{propertyPath}' could not be cleared";
+            }
+            else
+            {
+                string resolvedType = objectReferenceWrite.AttemptedValue != null
+                    ? objectReferenceWrite.AttemptedValue.GetType().Name
+                    : "null";
+                failureReason = $"Resolved object type {resolvedType} is not assignable to field " +
+                    $"'{propertyPath}' (object-reference read-back did not retain the assigned identity)";
+            }
+
             return false;
         }
     }

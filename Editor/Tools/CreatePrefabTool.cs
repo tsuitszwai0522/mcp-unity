@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEditor;
 using Newtonsoft.Json.Linq;
@@ -74,6 +75,10 @@ namespace McpUnity.Tools
                 tempObject = new GameObject(prefabName);
             }
 
+            var updatedFields = new List<string>();
+            var failedFields = new List<JObject>();
+            var warnings = new List<string>();
+
             // Add component if provided
             if (!string.IsNullOrEmpty(componentName))
             {
@@ -83,7 +88,7 @@ namespace McpUnity.Tools
                     Component component = AddComponent(tempObject, componentName);
 
                     // Apply field values if provided and component exists
-                    ApplyFieldValues(fieldValues, component);
+                    ApplyFieldValues(fieldValues, component, updatedFields, failedFields, warnings);
                 }
                 catch (Exception)
                 {
@@ -114,6 +119,14 @@ namespace McpUnity.Tools
             // Refresh the asset database
             AssetDatabase.Refresh();
 
+            if (!success)
+            {
+                return McpUnitySocketHandler.CreateErrorResponse(
+                    $"Failed to create prefab '{prefabName}' at path '{prefabPath}'",
+                    "tool_execution_error"
+                );
+            }
+
             bool isVariant = !string.IsNullOrEmpty(basePrefabPath);
             string variantLabel = isVariant ? "Prefab Variant" : "prefab";
 
@@ -121,19 +134,32 @@ namespace McpUnity.Tools
             McpLogger.LogInfo($"Created {variantLabel} '{prefabName}' at path '{prefabPath}'" +
                 (isVariant ? $" based on '{basePrefabPath}'" : $" from script '{componentName}'"));
 
-            string message = success
-                ? $"Successfully created {variantLabel} '{prefabName}' at path '{prefabPath}'" + (isVariant ? $" based on '{basePrefabPath}'" : "")
-                : $"Failed to create {variantLabel} '{prefabName}' at path '{prefabPath}'";
+            string message = $"Created {variantLabel} '{prefabName}' at path '{prefabPath}'" +
+                (isVariant ? $" based on '{basePrefabPath}'" : "") +
+                $": {updatedFields.Count} field(s) succeeded, {failedFields.Count} field(s) failed";
+            if (warnings.Count > 0)
+            {
+                message += $" (with {warnings.Count} warning(s))";
+            }
 
             // Create the response
-            return new JObject
+            var response = new JObject
             {
-                ["success"] = success,
+                ["success"] = failedFields.Count == 0,
                 ["type"] = "text",
                 ["message"] = message,
                 ["prefabPath"] = prefabPath,
-                ["isVariant"] = isVariant
+                ["isVariant"] = isVariant,
+                ["updatedFields"] = new JArray(updatedFields.ToArray()),
+                ["failedFields"] = new JArray(failedFields.ToArray())
             };
+
+            if (warnings.Count > 0)
+            {
+                response["warnings"] = new JArray(warnings.ToArray());
+            }
+
+            return response;
         }
 
         private Component AddComponent(GameObject gameObject, string componentName)
@@ -172,7 +198,12 @@ namespace McpUnity.Tools
             return gameObject.AddComponent(scriptType);
         }
 
-        private void ApplyFieldValues(JObject fieldValues, Component component)
+        private void ApplyFieldValues(
+            JObject fieldValues,
+            Component component,
+            List<string> updatedFields,
+            List<JObject> failedFields,
+            List<string> warnings)
         {
             // Apply field values if provided and component exists
             if (fieldValues == null || fieldValues.Count == 0)
@@ -184,33 +215,96 @@ namespace McpUnity.Tools
                 
             foreach (var property in fieldValues.Properties())
             {
-                // Get the field/property info
-                var fieldInfo = component.GetType().GetField(property.Name, 
-                    System.Reflection.BindingFlags.Public | 
-                    System.Reflection.BindingFlags.NonPublic | 
-                    System.Reflection.BindingFlags.Instance);
-                            
-                if (fieldInfo != null)
+                string fieldName = property.Name;
+                JToken fieldValue = property.Value;
+
+                try
                 {
-                    // Set field value
-                    object value = property.Value.ToObject(fieldInfo.FieldType);
-                    fieldInfo.SetValue(component, value);
-                }
-                else
-                {
-                    // Try property
-                    var propInfo = component.GetType().GetProperty(property.Name, 
-                        System.Reflection.BindingFlags.Public | 
-                        System.Reflection.BindingFlags.NonPublic | 
+                    // Get the field/property info
+                    var fieldInfo = component.GetType().GetField(fieldName,
+                        System.Reflection.BindingFlags.Public |
+                        System.Reflection.BindingFlags.NonPublic |
                         System.Reflection.BindingFlags.Instance);
-                                
-                    if (propInfo != null && propInfo.CanWrite)
+
+                    if (fieldInfo != null)
                     {
-                        object value = property.Value.ToObject(propInfo.PropertyType);
-                        propInfo.SetValue(component, value);
+                        var conversionFailures = new List<string>();
+                        object value = SerializedFieldConverter.ConvertJTokenToValue(
+                            fieldValue, fieldInfo.FieldType, conversionFailures);
+                        if (CannotAssignConvertedValue(value, fieldValue, fieldInfo.FieldType))
+                        {
+                            failedFields.Add(CreateFieldFailure(
+                                fieldName,
+                                GetConversionFailureReason(fieldInfo.FieldType, conversionFailures)));
+                            continue;
+                        }
+
+                        fieldInfo.SetValue(component, value);
+                        updatedFields.Add(fieldName);
+                        continue;
                     }
+
+                    // Try property
+                    var propInfo = component.GetType().GetProperty(fieldName,
+                        System.Reflection.BindingFlags.Public |
+                        System.Reflection.BindingFlags.NonPublic |
+                        System.Reflection.BindingFlags.Instance);
+
+                    if (propInfo == null || !propInfo.CanWrite)
+                    {
+                        failedFields.Add(CreateFieldFailure(
+                            fieldName,
+                            $"Field '{fieldName}' was not found after checking reflection field and " +
+                            $"writable reflection property on component '{component.GetType().Name}'"));
+                        continue;
+                    }
+
+                    var propertyConversionFailures = new List<string>();
+                    object propertyValue = SerializedFieldConverter.ConvertJTokenToValue(
+                        fieldValue, propInfo.PropertyType, propertyConversionFailures);
+                    if (CannotAssignConvertedValue(propertyValue, fieldValue, propInfo.PropertyType))
+                    {
+                        failedFields.Add(CreateFieldFailure(
+                            fieldName,
+                            GetConversionFailureReason(propInfo.PropertyType, propertyConversionFailures)));
+                        continue;
+                    }
+
+                    propInfo.SetValue(component, propertyValue);
+                    updatedFields.Add(fieldName);
+                }
+                catch (Exception ex)
+                {
+                    failedFields.Add(CreateFieldFailure(fieldName, $"Exception while setting field: {ex.Message}"));
                 }
             }
+        }
+
+        private static bool CannotAssignConvertedValue(object value, JToken token, Type targetType)
+        {
+            if (value != null)
+            {
+                return false;
+            }
+
+            return token.Type != JTokenType.Null
+                || (targetType.IsValueType && Nullable.GetUnderlyingType(targetType) == null);
+        }
+
+        private static string GetConversionFailureReason(Type targetType, List<string> conversionFailures)
+        {
+            return conversionFailures.Count > 0
+                ? string.Join("; ", conversionFailures.ToArray())
+                : $"Input value could not be converted to {targetType.Name}";
+        }
+
+        private static JObject CreateFieldFailure(string fieldName, string reason)
+        {
+            return new JObject
+            {
+                ["field"] = fieldName,
+                ["reason"] = reason
+            };
         }
     }
 }
