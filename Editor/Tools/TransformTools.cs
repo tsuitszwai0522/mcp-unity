@@ -428,26 +428,14 @@ namespace McpUnity.Tools
             int? instanceId = parameters["instanceId"]?.ToObject<int?>();
             string objectPath = parameters["objectPath"]?.ToObject<string>();
 
-            GameObject gameObject = null;
             string identifierInfo = "";
 
             if (instanceId.HasValue)
             {
-                gameObject = EditorUtility.InstanceIDToObject(instanceId.Value) as GameObject;
                 identifierInfo = $"instance ID {instanceId.Value}";
             }
             else if (!string.IsNullOrEmpty(objectPath))
             {
-                // Prefer prefab contents when editing a prefab
-                if (PrefabEditingService.IsEditing)
-                {
-                    gameObject = PrefabEditingService.FindByPath(objectPath);
-                }
-                // Fall back to scene hierarchy
-                if (gameObject == null)
-                {
-                    gameObject = GameObject.Find(objectPath);
-                }
                 identifierInfo = $"path '{objectPath}'";
             }
             else
@@ -460,6 +448,11 @@ namespace McpUnity.Tools
                     )
                 };
             }
+
+            JObject scopeError = PrefabSessionScope.TryResolveGameObject(
+                instanceId, objectPath, out GameObject gameObject);
+            if (scopeError != null)
+                return new FindResult { Error = scopeError };
 
             if (gameObject == null)
             {

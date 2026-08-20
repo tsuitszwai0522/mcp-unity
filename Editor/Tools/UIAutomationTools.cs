@@ -9,6 +9,7 @@ using UnityEngine.EventSystems;
 using UnityEditor;
 using Newtonsoft.Json.Linq;
 using McpUnity.Unity;
+using McpUnity.Services;
 using Unity.EditorCoroutines.Editor;
 
 namespace McpUnity.Tools
@@ -60,12 +61,10 @@ namespace McpUnity.Tools
 
             if (instanceId.HasValue)
             {
-                gameObject = EditorUtility.InstanceIDToObject(instanceId.Value) as GameObject;
                 identifierInfo = $"instance ID {instanceId.Value}";
             }
             else if (!string.IsNullOrEmpty(objectPath))
             {
-                gameObject = GameObject.Find(objectPath);
                 identifierInfo = $"path '{objectPath}'";
             }
             else
@@ -75,6 +74,11 @@ namespace McpUnity.Tools
                     "validation_error"
                 );
             }
+
+            JObject scopeError = PrefabSessionScope.TryResolveGameObject(
+                instanceId, objectPath, out gameObject);
+            if (scopeError != null)
+                return scopeError;
 
             if (gameObject == null)
             {

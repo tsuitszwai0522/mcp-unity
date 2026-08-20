@@ -6,19 +6,19 @@ import { Logger } from '../utils/logger.js';
 
 // Constants for the tool
 const toolName = 'add_asset_to_scene';
-const toolDescription = 'Adds an asset from the AssetDatabase to the Unity scene';
+const toolDescription = 'Instantiates an AssetDatabase prefab in the active context: a loaded scene normally, or the open Prefab contents when a Prefab editing session is active';
 
 // Parameter schema for the tool
 const paramsSchema = z.object({
   assetPath: z.string().optional().describe('The path of the asset in the AssetDatabase'),
   guid: z.string().optional().describe('The GUID of the asset'),
   position: z.object({
-    x: z.number().default(0).describe('X position in the scene'),
-    y: z.number().default(0).describe('Y position in the scene'),
-    z: z.number().default(0).describe('Z position in the scene')
-  }).optional().describe('Position in the scene (defaults to Vector3.zero)'),
-  parentPath: z.string().optional().describe('The path of the parent GameObject in the hierarchy'),
-  parentId: z.number().optional().describe('The instance ID of the parent GameObject')
+    x: z.number().default(0).describe('X position in the active context'),
+    y: z.number().default(0).describe('Y position in the active context'),
+    z: z.number().default(0).describe('Z position in the active context')
+  }).optional().describe('Position in the active context (defaults to Vector3.zero)'),
+  parentPath: z.string().optional().describe('Parent path in the active scene or Prefab contents; an unresolved parent fails without instantiating'),
+  parentId: z.number().optional().describe('Parent instance ID in the active context; an unresolved parent fails without instantiating')
 });
 
 /**
@@ -74,14 +74,14 @@ async function toolHandler(mcpUnity: McpUnity, params: any) {
   if (!response.success) {
     throw new McpUnityError(
       ErrorType.TOOL_EXECUTION,
-      response.message || `Failed to add asset to scene`
+      response.message || `Failed to add asset to the active context`
     );
   }
   
   return {
     content: [{
       type: response.type || 'text',
-      text: response.message || `Successfully added asset to scene`
+      text: response.message || `Successfully added asset to the active context`
     }]
   };
 }

@@ -5,6 +5,7 @@ using System.Reflection;
 using UnityEngine;
 using UnityEditor;
 using Newtonsoft.Json.Linq;
+using McpUnity.Services;
 
 namespace McpUnity.Utils
 {
@@ -208,9 +209,23 @@ namespace McpUnity.Utils
                         else if (value.Type == JTokenType.Integer)
                         {
                             int id = value.ToObject<int>();
-                            var obj = EditorUtility.InstanceIDToObject(id);
+                            JObject scopeError = PrefabSessionScope.TryResolveObjectByInstanceId(
+                                id, out UnityEngine.Object obj);
+                            if (scopeError != null)
+                            {
+                                warnings?.Add(FormatScopeError(scopeError));
+                                return false;
+                            }
                             if (obj != null)
                             {
+                                JObject assignmentError = PrefabSessionScope.ValidateReferenceAssignment(
+                                    prop.serializedObject?.targetObject, obj);
+                                if (assignmentError != null)
+                                {
+                                    warnings?.Add(FormatScopeError(assignmentError));
+                                    return false;
+                                }
+
                                 objectReferenceWrite = new ObjectReferenceWrite(
                                     prop.objectReferenceValue, obj, false);
                                 prop.objectReferenceValue = obj;
@@ -267,8 +282,10 @@ namespace McpUnity.Utils
                                 if (TryResolveObjectLocator(
                                     locatorKey,
                                     locatorToken,
+                                    prop.serializedObject?.targetObject,
                                     out UnityEngine.Object resolved,
-                                    out string locatorFailure))
+                                    out string locatorFailure,
+                                    out JObject scopeError))
                                 {
                                     foreach (string priorFailure in locatorFailures)
                                     {
@@ -282,6 +299,14 @@ namespace McpUnity.Utils
                                         prop.objectReferenceValue, resolved, false);
                                     prop.objectReferenceValue = resolved;
                                     return true;
+                                }
+
+                                if (scopeError != null)
+                                {
+                                    locatorFailures.Add(
+                                        $"Locator '{locatorKey}' (value {FormatLocatorValue(locatorToken)}) " +
+                                        $"was rejected: {FormatScopeError(scopeError)}");
+                                    continue;
                                 }
 
                                 locatorFailures.Add(locatorFailure);
@@ -661,11 +686,14 @@ namespace McpUnity.Utils
         private static bool TryResolveObjectLocator(
             string locatorKey,
             JToken locatorToken,
+            UnityEngine.Object referenceOwner,
             out UnityEngine.Object resolved,
-            out string failure)
+            out string failure,
+            out JObject scopeError)
         {
             resolved = null;
             failure = null;
+            scopeError = null;
             try
             {
                 switch (locatorKey)
@@ -677,13 +705,25 @@ namespace McpUnity.Utils
                             : AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(assetPath);
                         break;
                     case "instanceId":
-                        resolved = EditorUtility.InstanceIDToObject(locatorToken.ToObject<int>());
+                        scopeError = PrefabSessionScope.TryResolveObjectByInstanceId(
+                            locatorToken.ToObject<int>(), out resolved);
+                        if (scopeError != null)
+                            return false;
                         break;
                     case "objectPath":
                         string objectPath = locatorToken?.ToObject<string>();
-                        resolved = string.IsNullOrEmpty(objectPath)
-                            ? null
-                            : GameObject.Find(objectPath);
+                        if (string.IsNullOrEmpty(objectPath))
+                        {
+                            resolved = null;
+                        }
+                        else
+                        {
+                            scopeError = PrefabSessionScope.TryResolveGameObject(
+                                null, objectPath, out GameObject gameObject);
+                            if (scopeError != null)
+                                return false;
+                            resolved = gameObject;
+                        }
                         break;
                     default:
                         failure = $"Unsupported locator '{locatorKey}'";
@@ -700,6 +740,14 @@ namespace McpUnity.Utils
 
             if (resolved != null)
             {
+                JObject assignmentError = PrefabSessionScope.ValidateReferenceAssignment(
+                    referenceOwner, resolved);
+                if (assignmentError != null)
+                {
+                    scopeError = assignmentError;
+                    resolved = null;
+                    return false;
+                }
                 return true;
             }
 
@@ -713,6 +761,13 @@ namespace McpUnity.Utils
             return token == null || token.Type == JTokenType.Null
                 ? "null"
                 : $"'{token}'";
+        }
+
+        private static string FormatScopeError(JObject scopeError)
+        {
+            string errorType = scopeError?["error"]?["type"]?.ToString();
+            string message = scopeError?["error"]?["message"]?.ToString();
+            return $"{errorType}: {message}";
         }
     }
 }

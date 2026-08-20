@@ -17,7 +17,10 @@ namespace McpUnity.Tools
         public ScreenshotGameViewTool()
         {
             Name = "screenshot_game_view";
-            Description = "Captures a screenshot from the Game View, reflecting what the player sees. Set force_focus=true to force-focus the Game View tab before capturing (prevents accidentally capturing the Scene View when it's the active tab).";
+            Description = "Captures a screenshot from the Game View, reflecting what the player sees. " +
+                          "Set force_focus=true to force-focus the Game View tab before capturing. " +
+                          "While Prefab contents are open, failed Game View capture never falls " +
+                          "back to a loaded scene Main Camera.";
             IsAsync = true;
         }
 
@@ -121,6 +124,19 @@ namespace McpUnity.Tools
                 {
                     UnityEngine.Object.DestroyImmediate(screenshot);
                 }
+            }
+
+            JObject scopeError = PrefabSessionScope.TryGetPrefabRoot(out GameObject prefabRoot);
+            if (scopeError != null)
+                return scopeError;
+            if (prefabRoot != null)
+            {
+                return McpUnitySocketHandler.CreateErrorResponse(
+                    $"Failed to capture the Game View while Prefab contents " +
+                    $"'{PrefabEditingService.AssetPath}' (root '{prefabRoot.name}') are open. " +
+                    "screenshot_game_view does not fall back to a loaded scene Main Camera " +
+                    "during a Prefab editing session.",
+                    "tool_execution_error");
             }
 
             // Fallback: render from Main Camera (Edit Mode when Game View isn't actively rendering)
@@ -243,7 +259,8 @@ namespace McpUnity.Tools
                 bool needsDelayedCapture = false;
 
                 // When in prefab editing mode, auto-focus the scene view on the prefab root
-                if (PrefabEditingService.IsEditing && PrefabEditingService.PrefabRoot != null)
+                if (PrefabEditingService.Status == PrefabEditingSessionStatus.Active
+                    && PrefabEditingService.PrefabRoot != null)
                 {
                     Selection.activeGameObject = PrefabEditingService.PrefabRoot;
                     sceneView.FrameSelected();
@@ -310,7 +327,9 @@ namespace McpUnity.Tools
         public ScreenshotCameraTool()
         {
             Name = "screenshot_camera";
-            Description = "Captures a screenshot from a specific Camera in the scene";
+            Description = "Captures a specific Camera in the active context. Without a locator, " +
+                          "uses Camera.main when no Prefab session is active, or an enabled " +
+                          "MainCamera-tagged Camera inside the active Prefab contents.";
         }
 
         public override JObject Execute(JObject parameters)
@@ -323,22 +342,48 @@ namespace McpUnity.Tools
                 int? cameraInstanceId = parameters?["cameraInstanceId"]?.ToObject<int?>();
 
                 Camera cam = null;
+                JObject scopeError;
 
                 if (cameraInstanceId.HasValue)
                 {
-                    var obj = EditorUtility.InstanceIDToObject(cameraInstanceId.Value) as GameObject;
+                    scopeError = PrefabSessionScope.TryResolveGameObject(
+                        cameraInstanceId, null, out GameObject obj);
+                    if (scopeError != null) return scopeError;
                     if (obj != null)
                         cam = obj.GetComponent<Camera>();
                 }
                 else if (!string.IsNullOrEmpty(cameraPath))
                 {
-                    var obj = GameObject.Find(cameraPath);
+                    scopeError = PrefabSessionScope.TryResolveGameObject(
+                        null, cameraPath, out GameObject obj);
+                    if (scopeError != null) return scopeError;
                     if (obj != null)
                         cam = obj.GetComponent<Camera>();
                 }
                 else
                 {
-                    cam = Camera.main;
+                    scopeError = PrefabSessionScope.TryGetPrefabRoot(out GameObject prefabRoot);
+                    if (scopeError != null) return scopeError;
+
+                    if (prefabRoot == null)
+                    {
+                        cam = Camera.main;
+                    }
+                    else
+                    {
+                        cam = FindMainCameraInPrefab(prefabRoot);
+                        if (cam == null)
+                        {
+                            return McpUnitySocketHandler.CreateErrorResponse(
+                                $"No enabled Camera tagged 'MainCamera' exists inside the active " +
+                                $"Prefab contents '{PrefabEditingService.AssetPath}' (root " +
+                                $"'{prefabRoot.name}'). screenshot_camera without a locator does " +
+                                "not fall back to loaded scene cameras while a Prefab editing " +
+                                "session is active. Specify cameraPath or cameraInstanceId inside " +
+                                "the Prefab contents, or add an enabled MainCamera-tagged Camera.",
+                                "tool_execution_error");
+                        }
+                    }
                 }
 
                 if (cam == null)
@@ -358,6 +403,31 @@ namespace McpUnity.Tools
                     "tool_execution_error"
                 );
             }
+        }
+
+        private static Camera FindMainCameraInPrefab(GameObject prefabRoot)
+        {
+            foreach (Camera candidate in prefabRoot.GetComponentsInChildren<Camera>(true))
+            {
+                if (!candidate.isActiveAndEnabled)
+                    continue;
+
+                try
+                {
+                    if (candidate.CompareTag("MainCamera"))
+                        return candidate;
+                }
+                catch (UnityException ex)
+                {
+                    // A deleted custom tag can leave a loaded Prefab Camera with an invalid
+                    // serialized tag. Skip that candidate so a later valid MainCamera remains
+                    // discoverable instead of failing the entire scan.
+                    McpLogger.LogWarning(
+                        $"Skipping Camera '{candidate.gameObject.name}' with an invalid tag: {ex.Message}");
+                }
+            }
+
+            return null;
         }
     }
 

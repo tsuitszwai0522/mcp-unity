@@ -15,7 +15,8 @@ namespace McpUnity.Tools
         {
             Name = "save_prefab_contents";
             Description = "Saves or discards changes to a Prefab that was opened with open_prefab_contents. " +
-                          "By default saves changes back to the .prefab asset. Set discard=true to abandon changes.";
+                          "By default saves changes back to the .prefab asset. Set discard=true to abandon " +
+                          "an active session or acknowledge and clear a lost session.";
             IsAsync = false;
         }
 
@@ -23,15 +24,44 @@ namespace McpUnity.Tools
         {
             bool discard = parameters["discard"]?.ToObject<bool>() ?? false;
 
-            if (!PrefabEditingService.IsEditing)
+            if (PrefabEditingService.Status == PrefabEditingSessionStatus.Lost)
             {
-                return McpUnitySocketHandler.CreateErrorResponse(
-                    "No Prefab is currently being edited. Call open_prefab_contents first.",
-                    "validation_error"
-                );
+                if (!discard)
+                    return PrefabSessionScope.CreateSessionLostError();
+
+                string lostPrefabPath = PrefabEditingService.LostAssetPath;
+                bool previewWasUnloaded;
+                try
+                {
+                    previewWasUnloaded = PrefabEditingService.DiscardWithCleanupResult();
+                }
+                catch (Exception ex)
+                {
+                    return McpUnitySocketHandler.CreateErrorResponse(
+                        $"Failed to acknowledge the lost Prefab editing session for " +
+                        $"'{lostPrefabPath}': {ex.Message}",
+                        "prefab_cleanup_error");
+                }
+
+                string cleanupMessage = previewWasUnloaded
+                    ? "A live preview root was unloaded before the recovery record was cleared; " +
+                      "any unsaved preview edits were discarded."
+                    : "No live preview root remained to unload; only the recovery record was cleared.";
+                return new JObject
+                {
+                    ["success"] = true,
+                    ["type"] = "text",
+                    ["message"] = $"Acknowledged and cleared the lost Prefab editing session for '{lostPrefabPath}'. " +
+                                  cleanupMessage,
+                    ["prefabPath"] = lostPrefabPath,
+                    ["discarded"] = true,
+                    ["lostSessionAcknowledged"] = true
+                };
             }
 
-            string prefabPath = PrefabEditingService.AssetPath;
+            JObject sessionError = PrefabSessionScope.RequireActiveSession(
+                out _, out string prefabPath);
+            if (sessionError != null) return sessionError;
 
             try
             {
@@ -59,6 +89,23 @@ namespace McpUnity.Tools
                         ["discarded"] = false
                     };
                 }
+            }
+            catch (PrefabEditingCleanupException ex)
+            {
+                return new JObject
+                {
+                    ["error"] = new JObject
+                    {
+                        ["type"] = "prefab_cleanup_error",
+                        ["message"] = ex.Message,
+                        ["details"] = new JObject
+                        {
+                            ["saveCompleted"] = true,
+                            ["sessionRecordPreserved"] = true,
+                            ["sessionStatus"] = ex.SessionStatus.ToString()
+                        }
+                    }
+                };
             }
             catch (Exception ex)
             {

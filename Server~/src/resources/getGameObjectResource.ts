@@ -64,12 +64,32 @@ async function resourceHandler(mcpUnity: McpUnity, uri: URL, variables: Variable
   const idOrName = decodeURIComponent(variables["idOrName"] as string);
       
   // Send request to Unity
-  const response = await mcpUnity.sendRequest({
-    method: resourceName,
-    params: {
-      idOrName: idOrName
+  let response;
+  try {
+    response = await mcpUnity.sendRequest({
+      method: resourceName,
+      params: {
+        idOrName: idOrName
+      }
+    });
+  } catch (error) {
+    if (error instanceof McpUnityError) {
+      const upstreamDetails = error.details !== null
+        && typeof error.details === 'object'
+        && !Array.isArray(error.details)
+        ? error.details as Record<string, unknown>
+        : {};
+      throw new McpUnityError(
+        ErrorType.RESOURCE_FETCH,
+        error.message,
+        {
+          ...upstreamDetails,
+          upstreamErrorType: error.type
+        }
+      );
     }
-  });
+    throw error;
+  }
   
   if (!response.success) {
     throw new McpUnityError(

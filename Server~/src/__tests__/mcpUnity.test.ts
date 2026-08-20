@@ -21,6 +21,40 @@ describe('McpUnityError integration', () => {
 
     expect(error.type).toBe('timeout_error');
   });
+
+  it.each([
+    'prefab_session_lost_error',
+    'prefab_context_miss_error',
+    'validation_error'
+  ])('maps Unity error type %s into McpUnityError details', async (unityErrorType) => {
+    const logger = new Logger('Test', LogLevel.ERROR);
+    const unity = new McpUnity(logger, { queueingEnabled: false });
+    const requestId = `typed-${unityErrorType}`;
+    const responsePromise = new Promise((resolve, reject) => {
+      (unity as any).pendingRequests.set(requestId, {
+        resolve,
+        reject,
+        timeout: setTimeout(() => reject(new Error('unexpected timeout')), 1000)
+      });
+    });
+    const rejection = expect(responsePromise).rejects.toMatchObject({
+      type: ErrorType.TOOL_EXECUTION,
+      message: `Unity reported ${unityErrorType}`,
+      details: { unityErrorType }
+    });
+
+    (unity as any).handleMessage(JSON.stringify({
+      jsonrpc: '2.0',
+      id: requestId,
+      error: {
+        type: unityErrorType,
+        message: `Unity reported ${unityErrorType}`
+      }
+    }));
+
+    await rejection;
+    await unity.stop();
+  });
 });
 
 describe('Path handling in configuration', () => {

@@ -2,13 +2,17 @@ using System;
 using UnityEngine;
 using UnityEditor; // Required for Undo operations
 using McpUnity.Services;
+using Newtonsoft.Json.Linq;
 
 namespace McpUnity.Utils
 {
     public static class GameObjectHierarchyCreator
     {
-        public static GameObject FindOrCreateHierarchicalGameObject(string path)
+        public static JObject TryFindOrCreateHierarchicalGameObject(
+            string path,
+            out GameObject foundOrCreatedObject)
         {
+            foundOrCreatedObject = null;
             if (string.IsNullOrEmpty(path))
             {
                 throw new ArgumentException("GameObject path cannot be null or empty.", nameof(path));
@@ -21,10 +25,22 @@ namespace McpUnity.Utils
             }
 
             string[] parts = path.Split('/');
-            GameObject currentParent = null;
-            GameObject foundOrCreatedObject = null;
+            JObject scopeError = PrefabSessionScope.TryGetPrefabRoot(out GameObject prefabRoot);
+            if (scopeError != null)
+                return scopeError;
 
-            for (int i = 0; i < parts.Length; i++)
+            GameObject currentParent = prefabRoot;
+            int startIndex = 0;
+            if (prefabRoot != null)
+            {
+                if (parts[0] != prefabRoot.name)
+                    return PrefabSessionScope.CreatePathContextMissError(path, prefabRoot);
+
+                foundOrCreatedObject = prefabRoot;
+                startIndex = 1;
+            }
+
+            for (int i = startIndex; i < parts.Length; i++)
             {
                 string name = parts[i];
                 if (string.IsNullOrEmpty(name))
@@ -35,28 +51,10 @@ namespace McpUnity.Utils
                 Transform childTransform;
                 if (currentParent == null)
                 {
-                    GameObject rootObj = null;
-
-                    // When editing a prefab, prioritize the prefab editing context
-                    if (PrefabEditingService.IsEditing)
-                    {
-                        if (PrefabEditingService.PrefabRoot.name == name)
-                        {
-                            rootObj = PrefabEditingService.PrefabRoot;
-                        }
-                        else
-                        {
-                            // Check direct children of prefab root
-                            Transform childOfRoot = PrefabEditingService.PrefabRoot.transform.Find(name);
-                            if (childOfRoot != null)
-                                rootObj = childOfRoot.gameObject;
-                        }
-                    }
-
-                    // Fallback to scene search only if not found in prefab editing context
-                    if (rootObj == null)
-                        rootObj = GameObject.Find(name);
-
+                    JObject rootError = PrefabSessionScope.TryResolveGameObject(
+                        null, name, out GameObject rootObj);
+                    if (rootError != null)
+                        return rootError;
                     childTransform = rootObj?.transform;
                 }
                 else
@@ -67,7 +65,8 @@ namespace McpUnity.Utils
                 if (childTransform == null)
                 {
                     GameObject newObj = new GameObject(name);
-                    Undo.RegisterCreatedObjectUndo(newObj, $"Create {name}");
+                    if (!PrefabSessionScope.HasActiveSession)
+                        Undo.RegisterCreatedObjectUndo(newObj, $"Create {name}");
                     if (currentParent != null)
                     {
                         newObj.transform.SetParent(currentParent.transform, false);
@@ -76,7 +75,10 @@ namespace McpUnity.Utils
                         if (currentParent.GetComponentInParent<Canvas>() != null
                             && newObj.GetComponent<RectTransform>() == null)
                         {
-                            Undo.AddComponent<RectTransform>(newObj);
+                            if (PrefabSessionScope.HasActiveSession)
+                                newObj.AddComponent<RectTransform>();
+                            else
+                                Undo.AddComponent<RectTransform>(newObj);
                         }
                     }
                     foundOrCreatedObject = newObj;
@@ -94,7 +96,7 @@ namespace McpUnity.Utils
                 throw new InvalidOperationException($"Failed to find or create GameObject for path '{path}'. This indicates an unexpected state.");
             }
 
-            return foundOrCreatedObject;
+            return null;
         }
     }
 }

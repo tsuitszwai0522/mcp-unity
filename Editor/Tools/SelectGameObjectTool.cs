@@ -2,6 +2,7 @@ using System;
 using System.Threading.Tasks;
 using McpUnity.Unity;
 using McpUnity.Utils;
+using McpUnity.Services;
 using UnityEngine;
 using UnityEditor;
 using Newtonsoft.Json.Linq;
@@ -40,20 +41,28 @@ namespace McpUnity.Tools
                 );
             }
             
-            // First try to find by instance ID if provided
-            if (instanceId.HasValue)
+            string requestedPath = !string.IsNullOrEmpty(objectPath) ? objectPath : objectName;
+            JObject scopeError;
+            if (instanceId.HasValue || !string.IsNullOrEmpty(objectPath))
             {
-                selectedGameObject = EditorUtility.InstanceIDToObject(instanceId.Value) as GameObject;
-            }
-            else if (!string.IsNullOrEmpty(objectPath))
-            {
-                // Try to find the object by path in the hierarchy
-                selectedGameObject = GameObject.Find(objectPath);
+                scopeError = PrefabSessionScope.TryResolveGameObject(
+                    instanceId, objectPath, out selectedGameObject);
             }
             else
             {
-                // Try to find the object by name in the hierarchy
-                selectedGameObject = GameObject.Find(objectName);
+                scopeError = PrefabSessionScope.TryResolveGameObjectByName(
+                    objectName, out selectedGameObject);
+            }
+            if (scopeError != null) return scopeError;
+
+            if (selectedGameObject == null)
+            {
+                string identifier = instanceId.HasValue
+                    ? $"instance ID {instanceId.Value}"
+                    : $"path or name '{requestedPath}'";
+                return McpUnitySocketHandler.CreateErrorResponse(
+                    $"GameObject not found using {identifier}.",
+                    "not_found_error");
             }
             
             Selection.activeGameObject = selectedGameObject;

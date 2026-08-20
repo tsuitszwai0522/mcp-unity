@@ -52,14 +52,8 @@ namespace McpUnity.Tools
                 );
             }
 
-            if (PrefabEditingService.IsEditing)
-            {
-                return McpUnitySocketHandler.CreateErrorResponse(
-                    $"A Prefab is already being edited: '{PrefabEditingService.AssetPath}'. " +
-                    "Call save_prefab_contents first.",
-                    "validation_error"
-                );
-            }
+            JObject sessionError = PrefabSessionScope.ValidateCanOpenPrefab();
+            if (sessionError != null) return sessionError;
 
             try
             {
@@ -74,7 +68,8 @@ namespace McpUnity.Tools
                     ["type"] = "text",
                     ["message"] = $"Opened Prefab contents for editing: '{prefabPath}'. " +
                                   "Use other tools to modify the Prefab structure, then call save_prefab_contents to save. " +
-                                  "Note: instanceIds are session-scoped and will change between sessions — prefer using objectPath for stability.",
+                                  "Object paths can address both operation targets and serialized reference values inside this Prefab. " +
+                                  "Instance IDs are scoped to this editing session.",
                     ["prefabPath"] = prefabPath,
                     ["rootInstanceId"] = root.GetInstanceID(),
                     ["rootName"] = root.name,

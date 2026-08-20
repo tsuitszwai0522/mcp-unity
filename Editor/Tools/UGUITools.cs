@@ -5,6 +5,7 @@ using System.Reflection;
 using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.EventSystems;
+using UnityEngine.SceneManagement;
 using UnityEditor;
 using Newtonsoft.Json.Linq;
 using McpUnity.Unity;
@@ -73,10 +74,25 @@ namespace McpUnity.Tools
         /// </summary>
         public static EventSystem EnsureEventSystem()
         {
-            EventSystem eventSystem = UnityEngine.Object.FindObjectOfType<EventSystem>();
+            JObject scopeError = PrefabSessionScope.TryGetPrefabRoot(out GameObject prefabRoot);
+            if (scopeError != null)
+                throw new InvalidOperationException(scopeError["error"]?["message"]?.ToString());
+
+            EventSystem eventSystem = prefabRoot != null
+                ? prefabRoot.GetComponentInChildren<EventSystem>(true)
+                : FindInLoadedNonPreviewScenes<EventSystem>();
             if (eventSystem == null)
             {
+                if (prefabRoot != null)
+                {
+                    throw new InvalidOperationException(
+                        "No EventSystem exists inside the active Prefab contents. MCP Unity will " +
+                        "not auto-create an EventSystem in a Prefab asset; create it explicitly " +
+                        "outside the Prefab session if the asset design requires one.");
+                }
+
                 GameObject eventSystemGO = new GameObject("EventSystem");
+                MoveToLoadedNonPreviewSceneOrDestroy(eventSystemGO);
                 Undo.RegisterCreatedObjectUndo(eventSystemGO, "Create EventSystem");
                 eventSystem = eventSystemGO.AddComponent<EventSystem>();
 
@@ -101,7 +117,10 @@ namespace McpUnity.Tools
         public static Canvas FindOrCreateCanvas(string path = "Canvas")
         {
             // First try to find an existing canvas at the path
-            GameObject existingObj = GameObject.Find(path);
+            JObject scopeError = PrefabSessionScope.TryResolveGameObject(
+                null, path, out GameObject existingObj);
+            if (scopeError != null)
+                throw new InvalidOperationException(scopeError["error"]?["message"]?.ToString());
             if (existingObj != null)
             {
                 Canvas existingCanvas = existingObj.GetComponent<Canvas>();
@@ -110,12 +129,24 @@ namespace McpUnity.Tools
             }
 
             // If not found, try to find any canvas
-            Canvas anyCanvas = UnityEngine.Object.FindObjectOfType<Canvas>();
+            PrefabSessionScope.TryGetPrefabRoot(out GameObject prefabRoot);
+            Canvas anyCanvas = prefabRoot != null
+                ? prefabRoot.GetComponentInChildren<Canvas>(true)
+                : FindInLoadedNonPreviewScenes<Canvas>();
             if (anyCanvas != null)
                 return anyCanvas;
 
+            if (prefabRoot != null)
+            {
+                throw new InvalidOperationException(
+                    "No Canvas exists inside the active Prefab contents. MCP Unity will not " +
+                    "auto-create a Canvas or EventSystem in a Prefab asset. Set requireCanvas=false " +
+                    "when intentionally creating a Canvas-free UI Prefab.");
+            }
+
             // Create a new canvas
             GameObject canvasGO = new GameObject(path);
+            MoveToLoadedNonPreviewSceneOrDestroy(canvasGO);
             Undo.RegisterCreatedObjectUndo(canvasGO, "Create Canvas");
             Canvas canvas = canvasGO.AddComponent<Canvas>();
             canvas.renderMode = RenderMode.ScreenSpaceOverlay;
@@ -124,6 +155,71 @@ namespace McpUnity.Tools
 
             // Ensure EventSystem exists
             EnsureEventSystem();
+
+            return canvas;
+        }
+
+        private static T FindInLoadedNonPreviewScenes<T>() where T : Component
+        {
+            T[] candidates = UnityEngine.Object.FindObjectsByType<T>(
+                FindObjectsInactive.Exclude,
+                FindObjectsSortMode.None);
+            foreach (T candidate in candidates)
+            {
+                if (PrefabSessionScope.IsLoadedNonPreviewSceneObject(candidate.gameObject))
+                    return candidate;
+            }
+
+            return null;
+        }
+
+        private static void MoveToLoadedNonPreviewSceneOrDestroy(GameObject gameObject)
+        {
+            if (!PrefabSessionScope.TryGetLoadedNonPreviewScene(out Scene targetScene))
+            {
+                UnityEngine.Object.DestroyImmediate(gameObject);
+                throw new InvalidOperationException(
+                    "No loaded non-preview scene is available for creating UI scene objects.");
+            }
+
+            if (gameObject.scene == targetScene)
+                return;
+
+            try
+            {
+                SceneManager.MoveGameObjectToScene(gameObject, targetScene);
+            }
+            catch (Exception ex)
+            {
+                UnityEngine.Object.DestroyImmediate(gameObject);
+                throw new InvalidOperationException(
+                    $"Could not move the new UI scene object into loaded scene " +
+                    $"'{targetScene.path}'; no object was kept. {ex.Message}",
+                    ex);
+            }
+        }
+
+        internal static Canvas FindExistingCanvasInPrefabPath(GameObject prefabRoot, string objectPath)
+        {
+            if (prefabRoot == null || string.IsNullOrEmpty(objectPath))
+                return null;
+
+            string[] parts = objectPath.Trim('/').Split('/');
+            if (parts.Length == 0 || parts[0] != prefabRoot.name)
+                return null;
+
+            GameObject current = prefabRoot;
+            Canvas canvas = current.GetComponent<Canvas>();
+            for (int i = 1; i < parts.Length; i++)
+            {
+                Transform child = current.transform.Find(parts[i]);
+                if (child == null)
+                    break;
+                current = child.gameObject;
+                Canvas currentCanvas = current.GetComponent<Canvas>();
+                if (currentCanvas != null)
+                    canvas = currentCanvas;
+            }
 
             return canvas;
         }
@@ -154,82 +250,25 @@ namespace McpUnity.Tools
         /// <summary>
         /// Find a GameObject by instance ID or path
         /// </summary>
-        public static GameObject FindGameObject(int? instanceId, string objectPath, out string identifier)
+        public static JObject FindGameObject(
+            int? instanceId,
+            string objectPath,
+            out GameObject gameObject,
+            out string identifier)
         {
             identifier = "unknown";
-            GameObject gameObject = null;
 
             if (instanceId.HasValue)
             {
-                gameObject = EditorUtility.InstanceIDToObject(instanceId.Value) as GameObject;
                 identifier = $"instance ID {instanceId.Value}";
             }
             else if (!string.IsNullOrEmpty(objectPath))
             {
                 identifier = $"path '{objectPath}'";
-
-                // Prefer prefab contents when editing a prefab
-                if (PrefabEditingService.IsEditing)
-                {
-                    gameObject = PrefabEditingService.FindByPath(objectPath);
-                }
-                // Fall back to scene hierarchy
-                if (gameObject == null)
-                {
-                    gameObject = GameObject.Find(objectPath);
-                }
-                if (gameObject == null)
-                {
-                    gameObject = FindGameObjectByPath(objectPath);
-                }
             }
 
-            return gameObject;
-        }
-
-        /// <summary>
-        /// Find a GameObject by its hierarchy path
-        /// </summary>
-        private static GameObject FindGameObjectByPath(string path)
-        {
-            string[] pathParts = path.Split('/');
-            GameObject[] rootGameObjects = UnityEngine.SceneManagement.SceneManager.GetActiveScene().GetRootGameObjects();
-
-            if (pathParts.Length == 0)
-                return null;
-
-            foreach (GameObject rootObj in rootGameObjects)
-            {
-                if (rootObj.name == pathParts[0])
-                {
-                    GameObject current = rootObj;
-                    for (int i = 1; i < pathParts.Length; i++)
-                    {
-                        Transform child = current.transform.Find(pathParts[i]);
-                        if (child == null)
-                            return null;
-                        current = child.gameObject;
-                    }
-                    return current;
-                }
-            }
-
-            // Fallback: check Prefab edit mode root
-            if (PrefabEditingService.IsEditing
-                && PrefabEditingService.PrefabRoot.name == pathParts[0])
-            {
-                GameObject current = PrefabEditingService.PrefabRoot;
-                for (int i = 1; i < pathParts.Length; i++)
-                {
-                    Transform child = current.transform.Find(pathParts[i]);
-                    if (child == null)
-                        return null;
-                    current = child.gameObject;
-                }
-                return current;
-            }
-
-            return null;
+            return PrefabSessionScope.TryResolveGameObject(
+                instanceId, objectPath, out gameObject);
         }
 
         /// <summary>
@@ -326,7 +365,7 @@ namespace McpUnity.Tools
         public CreateCanvasTool()
         {
             Name = "create_canvas";
-            Description = "Creates a Canvas with CanvasScaler and GraphicRaycaster components, and optionally an EventSystem";
+            Description = "Creates a Canvas with CanvasScaler and GraphicRaycaster components, and optionally an EventSystem. Disabled while Prefab contents are open";
         }
 
         public override JObject Execute(JObject parameters)
@@ -349,6 +388,18 @@ namespace McpUnity.Tools
                         "Required parameter 'objectPath' not provided",
                         "validation_error"
                     );
+                }
+
+                JObject prefabScopeError = PrefabSessionScope.TryGetPrefabRoot(
+                    out GameObject activePrefabRoot);
+                if (prefabScopeError != null) return prefabScopeError;
+                if (activePrefabRoot != null)
+                {
+                    return McpUnitySocketHandler.CreateErrorResponse(
+                        "create_canvas is disabled while Prefab contents are open because it would " +
+                        "write a Canvas and optional EventSystem into the Prefab asset. Close the " +
+                        "session first, or author an existing Canvas explicitly before opening it.",
+                        "validation_error");
                 }
 
                 // Parse render mode
@@ -377,14 +428,32 @@ namespace McpUnity.Tools
                 {
                     if (!string.IsNullOrEmpty(cameraPath))
                     {
-                        GameObject cameraObj = GameObject.Find(cameraPath);
+                        JObject cameraScopeError = PrefabSessionScope.TryResolveGameObject(
+                            null, cameraPath, out GameObject cameraObj);
+                        if (cameraScopeError != null) return cameraScopeError;
                         if (cameraObj != null)
                             targetCamera = cameraObj.GetComponent<Camera>();
                     }
 
                     if (targetCamera == null)
                     {
-                        targetCamera = Camera.main;
+                        JObject rootScopeError = PrefabSessionScope.TryGetPrefabRoot(out GameObject prefabRoot);
+                        if (rootScopeError != null) return rootScopeError;
+                        if (prefabRoot != null)
+                        {
+                            foreach (Camera candidate in prefabRoot.GetComponentsInChildren<Camera>(true))
+                            {
+                                if (candidate.gameObject.tag == "MainCamera")
+                                {
+                                    targetCamera = candidate;
+                                    break;
+                                }
+                            }
+                        }
+                        else
+                        {
+                            targetCamera = Camera.main;
+                        }
                     }
 
                     if (targetCamera == null && renderMode == RenderMode.ScreenSpaceCamera)
@@ -397,7 +466,9 @@ namespace McpUnity.Tools
                 }
 
                 // Create the Canvas GameObject
-                GameObject canvasGO = GameObjectHierarchyCreator.FindOrCreateHierarchicalGameObject(objectPath);
+                JObject createError = GameObjectHierarchyCreator.TryFindOrCreateHierarchicalGameObject(
+                    objectPath, out GameObject canvasGO);
+                if (createError != null) return createError;
 
                 // Check if Canvas already exists
                 Canvas existingCanvas = canvasGO.GetComponent<Canvas>();
@@ -549,8 +620,24 @@ namespace McpUnity.Tools
                     );
                 }
 
+                JObject prefabScopeError = PrefabSessionScope.TryGetPrefabRoot(
+                    out GameObject activePrefabRoot);
+                if (prefabScopeError != null) return prefabScopeError;
+                if (activePrefabRoot != null && requireCanvas
+                    && UGUIToolUtils.FindExistingCanvasInPrefabPath(
+                        activePrefabRoot, objectPath) == null)
+                {
+                    return McpUnitySocketHandler.CreateErrorResponse(
+                        "No Canvas exists in the requested Prefab parent hierarchy. MCP Unity will " +
+                        "not auto-create a Canvas or EventSystem in Prefab contents. Use " +
+                        "requireCanvas=false for an intentional Canvas-free UI Prefab.",
+                        "canvas_error");
+                }
+
                 // Create or find the GameObject
-                GameObject elementGO = GameObjectHierarchyCreator.FindOrCreateHierarchicalGameObject(objectPath);
+                JObject createError = GameObjectHierarchyCreator.TryFindOrCreateHierarchicalGameObject(
+                    objectPath, out GameObject elementGO);
+                if (createError != null) return createError;
 
                 if (requireCanvas)
                 {
@@ -563,9 +650,19 @@ namespace McpUnity.Tools
                         if (pathParts.Length > 1)
                         {
                             // Check if first part is a canvas
-                            GameObject rootObj = GameObject.Find(pathParts[0]);
+                            JObject rootScopeError = PrefabSessionScope.TryResolveGameObject(
+                                null, pathParts[0], out GameObject rootObj);
+                            if (rootScopeError != null) return rootScopeError;
                             if (rootObj != null && rootObj.GetComponent<Canvas>() == null)
                             {
+                                if (PrefabSessionScope.HasActiveSession)
+                                {
+                                    return McpUnitySocketHandler.CreateErrorResponse(
+                                        "MCP Unity will not auto-add a Canvas or EventSystem to " +
+                                        "Prefab contents.",
+                                        "canvas_error");
+                                }
+
                                 // Add Canvas to root
                                 Undo.RecordObject(rootObj, "Add Canvas");
                                 Canvas newCanvas = Undo.AddComponent<Canvas>(rootObj);
@@ -805,7 +902,7 @@ namespace McpUnity.Tools
             {
                 // In prefab editing mode, Undo.AddComponent may not work reliably
                 // in the isolated LoadPrefabContents environment (same issue as reparent)
-                if (PrefabEditingService.IsEditing)
+                if (PrefabSessionScope.HasActiveSession)
                     obj.AddComponent<RectTransform>();
                 else
                     Undo.AddComponent<RectTransform>(obj);
@@ -1926,7 +2023,9 @@ namespace McpUnity.Tools
                 }
 
                 // Find the GameObject
-                GameObject gameObject = UGUIToolUtils.FindGameObject(instanceId, objectPath, out string identifier);
+                JObject scopeError = UGUIToolUtils.FindGameObject(
+                    instanceId, objectPath, out GameObject gameObject, out string identifier);
+                if (scopeError != null) return scopeError;
 
                 if (gameObject == null)
                 {
@@ -2082,7 +2181,9 @@ namespace McpUnity.Tools
                 }
 
                 // Find the GameObject
-                GameObject gameObject = UGUIToolUtils.FindGameObject(instanceId, objectPath, out string identifier);
+                JObject scopeError = UGUIToolUtils.FindGameObject(
+                    instanceId, objectPath, out GameObject gameObject, out string identifier);
+                if (scopeError != null) return scopeError;
 
                 if (gameObject == null)
                 {
@@ -2433,7 +2534,9 @@ namespace McpUnity.Tools
                 }
 
                 // Find the GameObject
-                GameObject gameObject = UGUIToolUtils.FindGameObject(instanceId, objectPath, out string identifier);
+                JObject scopeError = UGUIToolUtils.FindGameObject(
+                    instanceId, objectPath, out GameObject gameObject, out string identifier);
+                if (scopeError != null) return scopeError;
 
                 if (gameObject == null)
                 {

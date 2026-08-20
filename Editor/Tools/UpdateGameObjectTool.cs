@@ -47,21 +47,16 @@ namespace McpUnity.Tools
             // Identify or create the GameObject by instanceId or objectPath
             if (instanceId.HasValue)
             {
-                targetGameObject = EditorUtility.InstanceIDToObject(instanceId.Value) as GameObject;
+                JObject scopeError = PrefabSessionScope.TryResolveGameObject(
+                    instanceId, null, out targetGameObject);
+                if (scopeError != null) return scopeError;
                 identifierInfo = $"instance ID {instanceId.Value}";
             }
             else if (!string.IsNullOrEmpty(objectPath))
             {
-                // Prefer prefab contents when editing a prefab
-                if (PrefabEditingService.IsEditing)
-                {
-                    targetGameObject = PrefabEditingService.FindByPath(objectPath);
-                }
-                // Fall back to scene hierarchy (find or create)
-                if (targetGameObject == null)
-                {
-                    targetGameObject = GameObjectHierarchyCreator.FindOrCreateHierarchicalGameObject(objectPath);
-                }
+                JObject createError = GameObjectHierarchyCreator.TryFindOrCreateHierarchicalGameObject(
+                    objectPath, out targetGameObject);
+                if (createError != null) return createError;
                 identifierInfo = $"path '{objectPath}'";
             }
             else

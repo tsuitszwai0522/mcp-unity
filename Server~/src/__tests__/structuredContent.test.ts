@@ -3,7 +3,13 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { McpServer as RuntimeMcpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import ts from 'typescript';
+import { McpUnity, ConnectionState } from '../unity/mcpUnity.js';
+import { ErrorType } from '../utils/errors.js';
+import { Logger, LogLevel } from '../utils/logger.js';
 import {
   attachStructuredContent,
   PAYLOAD_MAX_CHARS,
@@ -270,6 +276,92 @@ describe('installStructuredContentSeam', () => {
     const plainResult = callbacks.tool({}) as Record<string, unknown>;
 
     expect(plainResult).not.toHaveProperty('structuredContent');
+  });
+
+  it('delivers Unity error type through the SDK protocol to an MCP client', async () => {
+    const unityErrorType = 'prefab_session_lost_error';
+    const unityErrorMessage = 'The Prefab editing session was lost';
+    const unity = new McpUnity(new Logger('ProtocolTest', LogLevel.ERROR), {
+      queueingEnabled: false,
+    });
+    const connection = {
+      isConnected: true,
+      isConnecting: false,
+      connectionState: ConnectionState.Connected,
+      send: jest.fn((message: string) => {
+        const request = JSON.parse(message) as { id: string };
+        queueMicrotask(() => {
+          (unity as any).handleMessage(JSON.stringify({
+            jsonrpc: '2.0',
+            id: request.id,
+            error: {
+              type: unityErrorType,
+              message: unityErrorMessage,
+              details: { prefabPath: 'Assets/Prefabs/Card.prefab' },
+            },
+          }));
+        });
+      }),
+      connect: jest.fn(),
+      disconnect: jest.fn(),
+      removeAllListeners: jest.fn(),
+      forceReconnect: jest.fn(),
+      getStats: jest.fn(() => ({
+        state: ConnectionState.Connected,
+        reconnectAttempt: 0,
+        timeSinceLastPong: 0,
+      })),
+    };
+    (unity as any).connection = connection;
+
+    const server = new RuntimeMcpServer(
+      { name: 'structured-error-test-server', version: '1.0.0' },
+      { capabilities: { tools: {} } }
+    );
+    installStructuredContentSeam(server);
+    server.registerTool(
+      'unity_typed_error',
+      { description: 'Returns a typed Unity failure' },
+      async () => {
+        await unity.sendRequest({ method: 'typed_failure', params: {} });
+        return { content: [{ type: 'text' as const, text: 'unreachable' }] };
+      }
+    );
+
+    const client = new Client(
+      { name: 'structured-error-test-client', version: '1.0.0' },
+      { capabilities: {} }
+    );
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+
+    try {
+      const result = await client.callTool({
+        name: 'unity_typed_error',
+        arguments: {},
+      });
+
+      expect(result).toMatchObject({
+        isError: true,
+        content: [{ type: 'text', text: unityErrorMessage }],
+        structuredContent: {
+          error: {
+            type: ErrorType.TOOL_EXECUTION,
+            message: unityErrorMessage,
+            details: {
+              unityErrorType,
+              unityErrorDetails: { prefabPath: 'Assets/Prefabs/Card.prefab' },
+            },
+          },
+        },
+      });
+      expect(connection.send).toHaveBeenCalledTimes(1);
+    } finally {
+      await unity.stop();
+      await client.close();
+      await server.close();
+    }
   });
 });
 

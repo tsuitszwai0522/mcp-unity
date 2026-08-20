@@ -2,7 +2,6 @@ using McpUnity.Resources;
 using McpUnity.Services;
 using McpUnity.Unity;
 using UnityEngine;
-using UnityEditor;
 using Newtonsoft.Json.Linq;
 
 namespace McpUnity.Tools
@@ -46,28 +45,28 @@ namespace McpUnity.Tools
                 );
             }
 
-            GameObject gameObject = null;
-
             // Try to parse as an instance ID first
             if (int.TryParse(idOrName, out int instanceId))
             {
-                // Unity Instance IDs are typically negative, but we'll accept any integer
-                UnityEngine.Object unityObject = EditorUtility.InstanceIDToObject(instanceId);
-                gameObject = unityObject as GameObject;
+                JObject scopeError = PrefabSessionScope.TryResolveGameObject(
+                    instanceId, null, out GameObject gameObjectById);
+                if (scopeError != null) return scopeError;
+                return BuildResponseOrNotFound(gameObjectById, idOrName, parameters);
             }
-            else
-            {
-                // Prefer prefab contents when editing a prefab
-                if (PrefabEditingService.IsEditing)
-                {
-                    gameObject = PrefabEditingService.FindByPath(idOrName);
-                }
-                // Fall back to scene hierarchy
-                if (gameObject == null)
-                {
-                    gameObject = GameObject.Find(idOrName);
-                }
-            }
+
+            GameObject gameObjectByPath;
+            JObject pathScopeError = idOrName.Contains("/")
+                ? PrefabSessionScope.TryResolveGameObject(null, idOrName, out gameObjectByPath)
+                : PrefabSessionScope.TryResolveGameObjectByName(idOrName, out gameObjectByPath);
+            if (pathScopeError != null) return pathScopeError;
+            return BuildResponseOrNotFound(gameObjectByPath, idOrName, parameters);
+        }
+
+        private static JObject BuildResponseOrNotFound(
+            GameObject gameObject,
+            string idOrName,
+            JObject parameters)
+        {
 
             // Check if the GameObject was found
             if (gameObject == null)
@@ -97,5 +96,3 @@ namespace McpUnity.Tools
         }
     }
 }
-
-

@@ -266,69 +266,13 @@ namespace McpUnity.Tools
         /// <summary>
         /// Find a GameObject by instance ID or path
         /// </summary>
-        public static GameObject FindGameObject(int? instanceId, string objectPath)
+        public static JObject FindGameObject(
+            int? instanceId,
+            string objectPath,
+            out GameObject gameObject)
         {
-            GameObject gameObject = null;
-
-            if (instanceId.HasValue)
-            {
-                gameObject = EditorUtility.InstanceIDToObject(instanceId.Value) as GameObject;
-            }
-            else if (!string.IsNullOrEmpty(objectPath))
-            {
-                // Prefer prefab contents when editing a prefab
-                if (PrefabEditingService.IsEditing)
-                {
-                    gameObject = PrefabEditingService.FindByPath(objectPath);
-                }
-                // Fall back to scene hierarchy
-                if (gameObject == null)
-                {
-                    gameObject = GameObject.Find(objectPath);
-                }
-                if (gameObject == null)
-                {
-                    gameObject = FindGameObjectByPath(objectPath);
-                }
-            }
-
-            return gameObject;
-        }
-
-        /// <summary>
-        /// Find a GameObject by its hierarchy path
-        /// </summary>
-        private static GameObject FindGameObjectByPath(string path)
-        {
-            string[] pathParts = path.Split('/');
-            GameObject[] rootGameObjects = UnityEngine.SceneManagement.SceneManager.GetActiveScene().GetRootGameObjects();
-
-            if (pathParts.Length == 0)
-            {
-                return null;
-            }
-
-            foreach (GameObject rootObj in rootGameObjects)
-            {
-                if (rootObj.name == pathParts[0])
-                {
-                    GameObject current = rootObj;
-
-                    for (int i = 1; i < pathParts.Length; i++)
-                    {
-                        Transform child = current.transform.Find(pathParts[i]);
-                        if (child == null)
-                        {
-                            return null;
-                        }
-                        current = child.gameObject;
-                    }
-
-                    return current;
-                }
-            }
-
-            return null;
+            return PrefabSessionScope.TryResolveGameObject(
+                instanceId, objectPath, out gameObject);
         }
     }
 
@@ -661,7 +605,9 @@ namespace McpUnity.Tools
             }
 
             // Find the GameObject
-            GameObject gameObject = MaterialToolUtils.FindGameObject(instanceId, objectPath);
+            JObject scopeError = MaterialToolUtils.FindGameObject(
+                instanceId, objectPath, out GameObject gameObject);
+            if (scopeError != null) return scopeError;
             if (gameObject == null)
             {
                 string identifier = instanceId.HasValue ? $"ID {instanceId.Value}" : $"path '{objectPath}'";

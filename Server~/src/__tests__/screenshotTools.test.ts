@@ -39,6 +39,18 @@ describe('screenshot_game_view', () => {
     );
   });
 
+  it('documents the context-specific camera no-fallback rules', () => {
+    registerScreenshotTools(mockServer, mockMcpUnity, mockLogger);
+
+    const cameraCall = mockServerTool.mock.calls.find((c) => c[0] === 'screenshot_camera');
+    expect(cameraCall?.[1]).toContain('Camera.main when no Prefab session is active');
+    expect(cameraCall?.[1]).toContain('never falls back to loaded scene cameras');
+
+    const gameViewCall = mockServerTool.mock.calls.find((c) => c[0] === 'screenshot_game_view');
+    expect(gameViewCall?.[1]).toContain('Prefab contents are open');
+    expect(gameViewCall?.[1]).toContain('never falls back to a loaded scene Main Camera');
+  });
+
   it('forwards force_focus to Unity for screenshot_game_view', async () => {
     (mockSendRequest as any).mockResolvedValue({
       success: true,

@@ -52,7 +52,7 @@ const rectTransformSchema = z.object({
 // ==================== create_canvas ====================
 
 const createCanvasToolName = "create_canvas";
-const createCanvasToolDescription = "Creates a Canvas with CanvasScaler and GraphicRaycaster components, and optionally an EventSystem";
+const createCanvasToolDescription = "Creates a Canvas with CanvasScaler and GraphicRaycaster components, and optionally an EventSystem. Fails while Prefab contents are open to prevent implicit writes to the Prefab asset";
 
 const createCanvasParamsSchema = z.object({
   objectPath: z.string().describe("Path for the Canvas GameObject (e.g., 'MainCanvas' or 'UI/GameCanvas')"),
@@ -72,7 +72,7 @@ const createCanvasParamsSchema = z.object({
       .describe("Screen match mode for ScaleWithScreenSize"),
     matchWidthOrHeight: z.number().min(0).max(1).optional().describe("Match width (0) or height (1) factor"),
   }).optional().describe("Canvas scaler settings"),
-  createEventSystem: z.boolean().optional().describe("Create EventSystem if none exists (default: true)"),
+  createEventSystem: z.boolean().optional().describe("Create an EventSystem if none exists (default: true); create_canvas is unavailable during Prefab contents editing"),
 });
 
 export function registerCreateCanvasTool(
@@ -152,7 +152,7 @@ const elementTypeEnum = z.enum([
 const createUIElementParamsSchema = z.object({
   objectPath: z.string().describe("Path for the UI element (e.g., 'Canvas/Panel/Button')"),
   elementType: elementTypeEnum.describe("Type of UI element to create"),
-  requireCanvas: z.boolean().default(true).describe("If true (default), requires a Canvas in the parent hierarchy. Set to false for prefab editing mode where Canvas may not exist."),
+  requireCanvas: z.boolean().default(true).describe("If true (default), requires an existing Canvas in the parent hierarchy. During Prefab contents editing MCP Unity never auto-creates a Canvas or EventSystem; set false only for an intentional Canvas-free UI Prefab."),
   rectTransform: rectTransformSchema.optional().describe("RectTransform settings"),
   elementData: z.object({
     text: z.string().optional().describe("Text content (for Text, Button, Toggle, InputField)"),

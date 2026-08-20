@@ -268,10 +268,16 @@ export class McpUnity {
         this.pendingRequests.delete(response.id);
 
         if (response.error) {
+          const unityErrorDetails = response.error.details;
           request.reject(new McpUnityError(
             ErrorType.TOOL_EXECUTION,
             response.error.message || 'Unknown error',
-            response.error.details
+            {
+              unityErrorType: response.error.type || 'unknown_error',
+              ...(unityErrorDetails === undefined
+                ? {}
+                : { unityErrorDetails })
+            }
           ));
         } else {
           request.resolve(response.result);

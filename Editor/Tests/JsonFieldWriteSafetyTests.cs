@@ -273,7 +273,7 @@ namespace McpUnity.Tests
             LogAssert.Expect(
                 LogType.Error,
                 new Regex(@"Error converting value to type Boolean:"));
-            object converted = SerializedFieldConverter.ConvertJTokenToValue(
+            object converted = SerializedFieldConverter.ConvertJTokenToValueWithoutReferenceOwner(
                 new JObject { ["enabled"] = "yes-please" },
                 typeof(JsonFieldWriteNestedValue),
                 failures);
@@ -287,7 +287,7 @@ namespace McpUnity.Tests
         public void Converter_FallsBackToNewtonsoft_WhenSerializableWalkerMatchesNoFields()
         {
             var failures = new List<string>();
-            object converted = SerializedFieldConverter.ConvertJTokenToValue(
+            object converted = SerializedFieldConverter.ConvertJTokenToValueWithoutReferenceOwner(
                 new JObject { ["value"] = 37 },
                 typeof(JsonFieldWritePropertyBackedValue),
                 failures);

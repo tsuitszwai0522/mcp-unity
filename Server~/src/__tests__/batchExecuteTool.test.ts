@@ -47,6 +47,9 @@ describe('Batch Execute Tool', () => {
       const [, description] = mockServerTool.mock.calls[0];
       expect(description).toContain('batch');
       expect(description).toContain('operations');
+      expect(description).toContain('atomic=true is rejected');
+      expect(description).toContain('active Prefab contents session');
+      expect(description).toContain('cannot include open_prefab_contents');
     });
 
     it('should have correct schema with operations array', () => {
@@ -125,6 +128,40 @@ describe('Batch Execute Tool', () => {
       };
 
       await expect(toolHandler(params)).rejects.toThrow('Cannot nest batch_execute');
+    });
+
+    it('forwards atomic prefab-opening batches and preserves Unity validation errors', async () => {
+      mockSendRequest.mockRejectedValueOnce(new McpUnityError(
+        ErrorType.TOOL_EXECUTION,
+        'atomic=true cannot include open_prefab_contents',
+        { unityErrorType: 'validation_error' }
+      ));
+      const params = {
+        operations: [{
+          tool: 'open_prefab_contents',
+          params: { prefabPath: 'Assets/Prefabs/Card.prefab' }
+        }],
+        stopOnError: true,
+        atomic: true
+      };
+
+      await expect(toolHandler(params)).rejects.toMatchObject({
+        type: ErrorType.TOOL_EXECUTION,
+        message: 'atomic=true cannot include open_prefab_contents',
+        details: { unityErrorType: 'validation_error' }
+      });
+      expect(mockSendRequest).toHaveBeenCalledWith({
+        method: 'batch_execute',
+        params: {
+          operations: [{
+            tool: 'open_prefab_contents',
+            params: { prefabPath: 'Assets/Prefabs/Card.prefab' },
+            id: '0'
+          }],
+          stopOnError: true,
+          atomic: true
+        }
+      });
     });
 
     it('should handle partial failures with stopOnError=false', async () => {

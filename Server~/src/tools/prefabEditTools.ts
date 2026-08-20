@@ -13,8 +13,10 @@ const openPrefabContentsToolName = 'open_prefab_contents';
 const openPrefabContentsToolDescription =
   'Loads a Prefab asset into an isolated editing environment using PrefabUtility.LoadPrefabContents(). ' +
   'While open, other tools (create_ui_element, reparent_gameobject, update_component, etc.) can modify the Prefab\'s internal structure. ' +
+  'All GameObject paths and scene-object instanceIds are scoped to the opened Prefab contents; scene fallback is blocked. ' +
+  'Object paths also work for serialized reference values, and interrupted sessions are restored after Unity domain reloads when possible. ' +
   'Call save_prefab_contents to save changes or discard them. ' +
-  'Note: instanceIds returned are session-scoped and may change between sessions. Prefer using objectPath for stable references.';
+  'InstanceIds returned are scoped to this editing session.';
 
 const openPrefabContentsParamsSchema = z.object({
   prefabPath: z.string().describe('The asset path to the Prefab (e.g., "Assets/Prefabs/MyPrefab.prefab")')
@@ -116,10 +118,12 @@ function formatHierarchy(children: any[], indent: string): string {
 const savePrefabContentsToolName = 'save_prefab_contents';
 const savePrefabContentsToolDescription =
   'Saves or discards changes to a Prefab that was opened with open_prefab_contents. ' +
-  'By default saves changes back to the .prefab asset. Set discard=true to abandon changes.';
+  'By default saves changes back to the .prefab asset. Set discard=true to abandon changes. ' +
+  'A failed save keeps the editing session and unsaved changes open so the operation can be retried. ' +
+  'If a session is lost, discard=true explicitly acknowledges and clears its persisted recovery record.';
 
 const savePrefabContentsParamsSchema = z.object({
-  discard: z.boolean().optional().default(false).describe('If true, discards changes instead of saving. Default: false')
+  discard: z.boolean().optional().default(false).describe('If true, discards an active session or acknowledges and clears a lost session. Default: false')
 });
 
 /**

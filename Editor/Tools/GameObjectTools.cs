@@ -27,25 +27,10 @@ namespace McpUnity.Tools
 
             if (instanceId.HasValue)
             {
-                gameObject = EditorUtility.InstanceIDToObject(instanceId.Value) as GameObject;
                 identifierInfo = $"instance ID {instanceId.Value}";
             }
             else if (!string.IsNullOrEmpty(objectPath))
             {
-                // Prefer prefab contents when editing a prefab
-                if (PrefabEditingService.IsEditing)
-                {
-                    gameObject = PrefabEditingService.FindByPath(objectPath);
-                }
-                // Fall back to scene hierarchy
-                if (gameObject == null)
-                {
-                    gameObject = GameObject.Find(objectPath);
-                }
-                if (gameObject == null)
-                {
-                    gameObject = FindGameObjectByPath(objectPath);
-                }
                 identifierInfo = $"path '{objectPath}'";
             }
             else
@@ -56,6 +41,11 @@ namespace McpUnity.Tools
                 );
             }
 
+            JObject scopeError = PrefabSessionScope.TryResolveGameObject(
+                instanceId, objectPath, out gameObject);
+            if (scopeError != null)
+                return scopeError;
+
             if (gameObject == null)
             {
                 return McpUnitySocketHandler.CreateErrorResponse(
@@ -65,51 +55,6 @@ namespace McpUnity.Tools
             }
 
             return null; // Success
-        }
-
-        /// <summary>
-        /// Find a GameObject by its hierarchy path
-        /// </summary>
-        private static GameObject FindGameObjectByPath(string path)
-        {
-            if (string.IsNullOrEmpty(path)) return null;
-
-            path = path.TrimStart('/');
-            string[] parts = path.Split('/');
-
-            if (parts.Length == 0) return null;
-
-            // Find root object
-            GameObject current = null;
-            GameObject[] rootObjects = UnityEngine.SceneManagement.SceneManager.GetActiveScene().GetRootGameObjects();
-
-            foreach (var root in rootObjects)
-            {
-                if (root.name == parts[0])
-                {
-                    current = root;
-                    break;
-                }
-            }
-
-            // Fallback: check Prefab edit mode root
-            if (current == null && PrefabEditingService.IsEditing
-                && PrefabEditingService.PrefabRoot.name == parts[0])
-            {
-                current = PrefabEditingService.PrefabRoot;
-            }
-
-            if (current == null) return null;
-
-            // Traverse children
-            for (int i = 1; i < parts.Length; i++)
-            {
-                Transform child = current.transform.Find(parts[i]);
-                if (child == null) return null;
-                current = child.gameObject;
-            }
-
-            return current;
         }
 
         /// <summary>
@@ -125,6 +70,14 @@ namespace McpUnity.Tools
                 path = "/" + obj.name + path;
             }
             return path;
+        }
+
+        internal static JObject AddResolutionRole(JObject error, string role)
+        {
+            JToken message = error?["error"]?["message"];
+            if (message != null)
+                error["error"]["message"] = $"{role} resolution failed: {message}";
+            return error;
         }
     }
 
@@ -164,27 +117,12 @@ namespace McpUnity.Tools
 
             // Find new parent if specified
             GameObject newParent = null;
-            if (newParentId.HasValue)
+            if (newParentId.HasValue || !string.IsNullOrEmpty(newParentPath))
             {
-                newParent = EditorUtility.InstanceIDToObject(newParentId.Value) as GameObject;
-                if (newParent == null)
-                {
-                    return McpUnitySocketHandler.CreateErrorResponse(
-                        $"New parent GameObject not found with instance ID {newParentId.Value}.",
-                        "not_found_error"
-                    );
-                }
-            }
-            else if (!string.IsNullOrEmpty(newParentPath))
-            {
-                newParent = GameObject.Find(newParentPath);
-                if (newParent == null)
-                {
-                    return McpUnitySocketHandler.CreateErrorResponse(
-                        $"New parent GameObject not found at path '{newParentPath}'.",
-                        "not_found_error"
-                    );
-                }
+                JObject parentError = GameObjectToolUtils.FindGameObject(
+                    newParentId, newParentPath, out newParent, out _);
+                if (parentError != null)
+                    return GameObjectToolUtils.AddResolutionRole(parentError, "New parent");
             }
 
             // Create duplicates
@@ -193,7 +131,8 @@ namespace McpUnity.Tools
             for (int i = 0; i < count; i++)
             {
                 GameObject duplicate = UnityEngine.Object.Instantiate(sourceObject);
-                Undo.RegisterCreatedObjectUndo(duplicate, $"Duplicate {sourceObject.name}");
+                if (!PrefabSessionScope.HasActiveSession)
+                    Undo.RegisterCreatedObjectUndo(duplicate, $"Duplicate {sourceObject.name}");
 
                 // Set name
                 if (!string.IsNullOrEmpty(newName))
@@ -258,6 +197,22 @@ namespace McpUnity.Tools
             JObject error = GameObjectToolUtils.FindGameObject(instanceId, objectPath, out GameObject targetObject, out string identifierInfo);
             if (error != null) return error;
 
+            if (PrefabSessionScope.HasActiveSession)
+            {
+                GameObject prefabRoot = PrefabEditingService.PrefabRoot;
+                bool destroysPrefabRoot = targetObject == prefabRoot
+                    || (includeChildren
+                        && prefabRoot.transform.IsChildOf(targetObject.transform));
+                if (destroysPrefabRoot)
+                {
+                    return McpUnitySocketHandler.CreateErrorResponse(
+                        $"Cannot delete '{targetObject.name}' because the active Prefab contents " +
+                        $"root '{prefabRoot.name}' is in the subtree that would be destroyed. " +
+                        "Save or discard the Prefab editing session instead.",
+                        "validation_error");
+                }
+            }
+
             string deletedName = targetObject.name;
             string deletedPath = GameObjectToolUtils.GetGameObjectPath(targetObject);
             int childCount = targetObject.transform.childCount;
@@ -275,12 +230,18 @@ namespace McpUnity.Tools
 
                 foreach (Transform child in children)
                 {
-                    Undo.SetTransformParent(child, parent, "Reparent before delete");
+                    if (PrefabSessionScope.HasActiveSession)
+                        child.SetParent(parent, true);
+                    else
+                        Undo.SetTransformParent(child, parent, "Reparent before delete");
                 }
             }
 
             // Delete the GameObject
-            Undo.DestroyObjectImmediate(targetObject);
+            if (PrefabSessionScope.HasActiveSession)
+                UnityEngine.Object.DestroyImmediate(targetObject);
+            else
+                Undo.DestroyObjectImmediate(targetObject);
 
             return new JObject
             {
@@ -319,6 +280,20 @@ namespace McpUnity.Tools
             JObject error = GameObjectToolUtils.FindGameObject(instanceId, objectPath, out GameObject targetObject, out string identifierInfo);
             if (error != null) return error;
 
+            if (PrefabSessionScope.HasActiveSession)
+            {
+                GameObject prefabRoot = PrefabEditingService.PrefabRoot;
+                if (targetObject == prefabRoot
+                    || prefabRoot.transform.IsChildOf(targetObject.transform))
+                {
+                    return McpUnitySocketHandler.CreateErrorResponse(
+                        $"Cannot reparent the active Prefab contents root '{prefabRoot.name}' " +
+                        "or an ancestor that contains it. Save or discard the Prefab editing " +
+                        "session instead.",
+                        "validation_error");
+                }
+            }
+
             string oldPath = GameObjectToolUtils.GetGameObjectPath(targetObject);
             Transform oldParent = targetObject.transform.parent;
 
@@ -333,37 +308,37 @@ namespace McpUnity.Tools
             }
             else if (newParentId.HasValue)
             {
-                GameObject newParent = EditorUtility.InstanceIDToObject(newParentId.Value) as GameObject;
-                if (newParent == null)
-                {
-                    return McpUnitySocketHandler.CreateErrorResponse(
-                        $"New parent GameObject not found with instance ID {newParentId.Value}.",
-                        "not_found_error"
-                    );
-                }
+                JObject parentError = GameObjectToolUtils.FindGameObject(
+                    newParentId, null, out GameObject newParent, out _);
+                if (parentError != null)
+                    return GameObjectToolUtils.AddResolutionRole(parentError, "New parent");
                 newParentTransform = newParent.transform;
             }
             else if (!string.IsNullOrEmpty(newParentPath))
             {
-                GameObject newParent = GameObject.Find(newParentPath);
-                // Fallback: search in Prefab edit mode contents
-                if (newParent == null && PrefabEditingService.IsEditing)
-                {
-                    newParent = PrefabEditingService.FindByPath(newParentPath);
-                }
-                if (newParent == null)
-                {
-                    return McpUnitySocketHandler.CreateErrorResponse(
-                        $"New parent GameObject not found at path '{newParentPath}'.",
-                        "not_found_error"
-                    );
-                }
+                JObject parentError = GameObjectToolUtils.FindGameObject(
+                    null, newParentPath, out GameObject newParent, out _);
+                if (parentError != null)
+                    return GameObjectToolUtils.AddResolutionRole(parentError, "New parent");
                 newParentTransform = newParent.transform;
             }
             else if (parameters["newParent"] == null && parameters["newParentId"] == null)
             {
                 // Neither specified - move to root
                 moveToRoot = true;
+            }
+
+            // A Prefab contents save serializes only the tree rooted at PrefabRoot. Detaching a
+            // child to the preview-scene root level would create a second root that Save() then
+            // silently discards when the preview scene unloads.
+            if (PrefabSessionScope.HasActiveSession && newParentTransform == null)
+            {
+                return McpUnitySocketHandler.CreateErrorResponse(
+                    $"Cannot move GameObject '{targetObject.name}' to the preview-scene root " +
+                    $"while Prefab contents '{PrefabEditingService.AssetPath}' are open. " +
+                    "That would create a second preview root which is not serialized by " +
+                    "SaveAsPrefabAsset. Reparent it under the active Prefab contents root instead.",
+                    "validation_error");
             }
 
             // Prevent parenting to self or descendants
@@ -418,7 +393,7 @@ namespace McpUnity.Tools
             // Perform reparenting
             // In prefab editing mode (LoadPrefabContents), use SetParent directly
             // because Undo.SetTransformParent can lose children in isolated prefab editing
-            if (PrefabEditingService.IsEditing)
+            if (PrefabSessionScope.HasActiveSession)
             {
                 targetObject.transform.SetParent(newParentTransform, worldPositionStays);
                 if (!worldPositionStays)
@@ -494,7 +469,7 @@ namespace McpUnity.Tools
             int oldIndex = targetObject.transform.GetSiblingIndex();
             int siblingCount = targetObject.transform.parent != null
                 ? targetObject.transform.parent.childCount
-                : UnityEngine.SceneManagement.SceneManager.GetActiveScene().GetRootGameObjects().Length;
+                : targetObject.scene.GetRootGameObjects().Length;
 
             Undo.RecordObject(targetObject.transform, "Set Sibling Index");
             targetObject.transform.SetSiblingIndex(siblingIndex.Value);

@@ -8,7 +8,7 @@ import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 // --- screenshot_game_view ---
 
 const gameViewToolName = 'screenshot_game_view';
-const gameViewToolDescription = 'Captures a screenshot from the Game View, reflecting what the player sees. Set force_focus=true to force-focus the Game View tab before capture (prevents capturing the Scene View when it\'s the active tab).';
+const gameViewToolDescription = 'Captures a screenshot from the Game View, reflecting what the player sees. Set force_focus=true to force-focus the Game View tab before capture. While Prefab contents are open, failed Game View capture never falls back to a loaded scene Main Camera.';
 
 const gameViewParamsSchema = z.object({
   width: z.number().int().optional().default(960).describe('Screenshot width in pixels'),
@@ -32,10 +32,10 @@ const sceneViewParamsSchema = z.object({
 // --- screenshot_camera ---
 
 const cameraToolName = 'screenshot_camera';
-const cameraToolDescription = 'Captures a screenshot from a specific Camera in the scene';
+const cameraToolDescription = 'Captures a screenshot from a specific Camera in the active GameObject context. With no locator, uses Camera.main when no Prefab session is active; during an active Prefab session, requires an enabled MainCamera-tagged Camera inside the Prefab contents and never falls back to loaded scene cameras';
 
 const cameraParamsSchema = z.object({
-  cameraPath: z.string().optional().describe('Camera GameObject path, null uses Main Camera'),
+  cameraPath: z.string().optional().describe('Camera GameObject path in the active scene or Prefab context; omitted uses the context-specific default Camera described by the tool'),
   cameraInstanceId: z.number().int().optional().describe('Camera GameObject instance ID'),
   width: z.number().int().optional().default(960).describe('Screenshot width in pixels'),
   height: z.number().int().optional().default(540).describe('Screenshot height in pixels')

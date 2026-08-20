@@ -8,7 +8,8 @@ import { payloadContent } from '../utils/toolPayload.js';
 
 const toolName = 'batch_execute';
 const toolDescription = `Executes multiple tool operations in a single batch request.
-Reduces network round-trips and enables atomic operations with rollback support.
+Reduces network round-trips and enables Undo-backed atomic operations outside active Prefab contents sessions.
+atomic=true is rejected while a Prefab contents session is active and cannot include open_prefab_contents because preview changes bypass Unity Undo.
 Performance improvement: 10-100x for repetitive operations.`;
 
 const operationSchema = z.object({
@@ -27,7 +28,7 @@ const paramsSchema = z.object({
     .describe('If true, stops execution on the first error. Default: true'),
   atomic: z.boolean()
     .default(false)
-    .describe('If true, rolls back all operations if any fails (uses Unity Undo system). Default: false')
+    .describe('If true, rolls back all operations if any fails using Unity Undo. Rejected while a Prefab contents session is active and cannot include open_prefab_contents. Default: false')
 });
 
 /**

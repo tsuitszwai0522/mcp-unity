@@ -39,9 +39,11 @@ Workflow:
 6. Confirm success and report any errors.
 
 Guidance:
-- Use "update_gameobject" for creating GameObjects in the scene or to change a GameObject's core properties.
-- Use "update_component" for adding or modifying components on an existing GameObject in the scene.
-- Use "create_prefab" for creating prefabs from GameObjects in the scene.
+- With no Prefab contents session open, GameObject paths address loaded scenes (including inactive objects).
+- While a Prefab contents session is open, GameObject operation targets are restricted to that Prefab's root-qualified hierarchy paths or session instance IDs; tools never fall back to scene objects.
+- Use "update_gameobject" for creating GameObjects in the active context or changing a GameObject's core properties.
+- Use "update_component" for adding or modifying components on an existing GameObject in the active context.
+- Use "create_prefab" for creating prefab assets; preview-scene references cannot be written into unrelated assets.
 - Component Scripts must be compiled in the Unity project before using "update_component" or "create_prefab".
 - Always validate inputs and request clarification if the identifier is ambiguous.`
           }

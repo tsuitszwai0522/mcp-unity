@@ -86,11 +86,13 @@ namespace McpUnity.Tools
 
             var matches = new List<GameObject>();
             var total = 0;
+            JObject scopeError = PrefabSessionScope.TryGetPrefabRoot(out GameObject prefabRoot);
+            if (scopeError != null) return scopeError;
 
-            if (PrefabEditingService.IsEditing && PrefabEditingService.PrefabRoot != null)
+            if (prefabRoot != null)
             {
                 total = CollectMatchesRecursive(
-                    PrefabEditingService.PrefabRoot, regex, includeInactive, limit, matches);
+                    prefabRoot, regex, includeInactive, limit, matches);
             }
             else
             {
@@ -100,7 +102,8 @@ namespace McpUnity.Tools
                 var all = Object.FindObjectsByType<GameObject>(inactiveMode, FindObjectsSortMode.None);
                 foreach (var go in all)
                 {
-                    if (!regex.IsMatch(go.name))
+                    if (!PrefabSessionScope.IsLoadedNonPreviewSceneObject(go)
+                        || !regex.IsMatch(go.name))
                         continue;
 
                     total++;

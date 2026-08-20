@@ -3,7 +3,8 @@ using System.Collections.Generic;
 using System.Reflection;
 using UnityEngine;
 using Newtonsoft.Json.Linq;
-using UnityEditor;
+using McpUnity.Services;
+using McpUnity.Unity;
 
 namespace McpUnity.Resources
 {
@@ -29,47 +30,45 @@ namespace McpUnity.Resources
             // Validate parameters
             if (parameters == null || !parameters.ContainsKey("idOrName"))
             {
-                return new JObject
-                {
-                    ["success"] = false,
-                    ["message"] = "Missing required parameter: idOrName"
-                };
+                return McpUnitySocketHandler.CreateErrorResponse(
+                    "Missing required parameter: idOrName",
+                    "validation_error");
             }
 
             string idOrName = parameters["idOrName"]?.ToObject<string>();
             
             if (string.IsNullOrEmpty(idOrName))
             {
-                return new JObject
-                {
-                    ["success"] = false,
-                    ["message"] = "Parameter 'objectPathId' cannot be null or empty"
-                };
+                return McpUnitySocketHandler.CreateErrorResponse(
+                    "Parameter 'objectPathId' cannot be null or empty",
+                    "validation_error");
             }
 
-            GameObject gameObject = null;
-            
             // Try to parse as an instance ID first
             if (int.TryParse(idOrName, out int instanceId))
             {
-                // Unity Instance IDs are typically negative, but we'll accept any integer
-                UnityEngine.Object unityObject = EditorUtility.InstanceIDToObject(instanceId);
-                gameObject = unityObject as GameObject;
+                JObject scopeError = PrefabSessionScope.TryResolveGameObject(
+                    instanceId, null, out GameObject gameObjectById);
+                if (scopeError != null) return scopeError;
+                return BuildResponseOrNotFound(gameObjectById, idOrName);
             }
-            else
-            {
-                // Otherwise, treat it as a name or hierarchical path
-                gameObject = GameObject.Find(idOrName);
-            }
-            
+
+            GameObject gameObjectByPath;
+            JObject pathScopeError = idOrName.Contains("/")
+                ? PrefabSessionScope.TryResolveGameObject(null, idOrName, out gameObjectByPath)
+                : PrefabSessionScope.TryResolveGameObjectByName(idOrName, out gameObjectByPath);
+            if (pathScopeError != null) return pathScopeError;
+            return BuildResponseOrNotFound(gameObjectByPath, idOrName);
+        }
+
+        private static JObject BuildResponseOrNotFound(GameObject gameObject, string idOrName)
+        {
             // Check if the GameObject was found
             if (gameObject == null)
             {
-                return new JObject
-                {
-                    ["success"] = false,
-                    ["message"] = $"GameObject with '{idOrName}' reference not found. Make sure the GameObject exists and is loaded in the current scene(s)."
-                };
+                return McpUnitySocketHandler.CreateErrorResponse(
+                    $"GameObject with '{idOrName}' reference not found. Make sure the GameObject exists and is loaded in the current scene(s).",
+                    "not_found_error");
             }
 
             // Convert the GameObject to a JObject

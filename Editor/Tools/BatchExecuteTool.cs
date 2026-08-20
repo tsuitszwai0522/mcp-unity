@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using UnityEngine;
 using UnityEditor;
+using McpUnity.Services;
 using McpUnity.Unity;
 using Newtonsoft.Json.Linq;
 using Unity.EditorCoroutines.Editor;
@@ -12,7 +13,7 @@ namespace McpUnity.Tools
 {
     /// <summary>
     /// Tool for executing multiple operations in a single batch request.
-    /// Supports sequential execution, stop-on-error, and atomic rollback.
+    /// Supports sequential execution, stop-on-error, and atomic rollback outside Prefab sessions.
     /// </summary>
     public class BatchExecuteTool : McpToolBase
     {
@@ -22,7 +23,9 @@ namespace McpUnity.Tools
         {
             _server = server;
             Name = "batch_execute";
-            Description = "Executes multiple tool operations in a single batch request. Reduces round-trips and enables atomic operations.";
+            Description = "Executes multiple tool operations in a single batch request. Reduces " +
+                          "round-trips and enables Undo-backed atomic operations outside active " +
+                          "Prefab contents sessions; atomic=true is rejected while a session is active.";
             IsAsync = true;
         }
 
@@ -64,6 +67,37 @@ namespace McpUnity.Tools
                     "validation_error"
                 ));
                 yield break;
+            }
+
+            if (atomic && PrefabSessionScope.HasActiveSession)
+            {
+                tcs.SetResult(McpUnitySocketHandler.CreateErrorResponse(
+                    "atomic=true is not supported while a Prefab contents session is active " +
+                    "because preview-scene create and delete operations intentionally bypass " +
+                    "Unity Undo and therefore cannot be rolled back reliably. Save or discard " +
+                    "the session, or retry with atomic=false.",
+                    "validation_error"
+                ));
+                yield break;
+            }
+
+            if (atomic)
+            {
+                foreach (JToken operationToken in operations)
+                {
+                    if (operationToken is JObject operation
+                        && operation["tool"]?.ToString() == "open_prefab_contents")
+                    {
+                        tcs.SetResult(McpUnitySocketHandler.CreateErrorResponse(
+                            "atomic=true cannot include open_prefab_contents because that operation " +
+                            "would activate a Prefab contents session whose preview-scene changes " +
+                            "intentionally bypass Unity Undo. Open the Prefab before a non-atomic " +
+                            "batch, or run the atomic batch outside Prefab editing.",
+                            "validation_error"
+                        ));
+                        yield break;
+                    }
+                }
             }
 
             JArray results = new JArray();

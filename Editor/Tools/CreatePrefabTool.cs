@@ -280,7 +280,8 @@ namespace McpUnity.Tools
                             fieldInfo.FieldType,
                             SerializedFieldConverter.CloneClassSeed(fieldInfo.GetValue(component)),
                             conversionFailures,
-                            warnings);
+                            warnings,
+                            component);
                         if (SerializedFieldConverter.CannotAssignConvertedValue(conversionFailures))
                         {
                             failedFields.Add(CreateFieldFailure(
@@ -316,7 +317,8 @@ namespace McpUnity.Tools
                         SerializedFieldConverter.CloneClassSeed(
                             SerializedFieldConverter.GetSafePropertySeed(propInfo, component)),
                         propertyConversionFailures,
-                        warnings);
+                        warnings,
+                        component);
                     if (SerializedFieldConverter.CannotAssignConvertedValue(propertyConversionFailures))
                     {
                         failedFields.Add(CreateFieldFailure(

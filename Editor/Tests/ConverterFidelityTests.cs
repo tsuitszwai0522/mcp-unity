@@ -204,7 +204,7 @@ namespace McpUnity.Tests
             };
             var failures = new List<string>();
 
-            object converted = SerializedFieldConverter.ConvertJTokenToValue(
+            object converted = SerializedFieldConverter.ConvertJTokenToValueWithoutReferenceOwner(
                 new JObject
                 {
                     ["color"] = new JObject { ["r"] = 1f }
@@ -226,7 +226,7 @@ namespace McpUnity.Tests
         {
             var failures = new List<string>();
 
-            object converted = SerializedFieldConverter.ConvertJTokenToValue(
+            object converted = SerializedFieldConverter.ConvertJTokenToValueWithoutReferenceOwner(
                 new JObject { ["x"] = 1f, ["tpyo"] = 2f },
                 typeof(Vector2),
                 new Vector2(7f, 8f),
@@ -243,7 +243,7 @@ namespace McpUnity.Tests
             var seed = new ConverterFidelityWalkerValue();
             var failures = new List<string>();
 
-            object converted = SerializedFieldConverter.ConvertJTokenToValue(
+            object converted = SerializedFieldConverter.ConvertJTokenToValueWithoutReferenceOwner(
                 new JObject
                 {
                     ["nested"] = new JObject
@@ -267,7 +267,7 @@ namespace McpUnity.Tests
             var seed = new ConverterFidelityDerivedValue { derivedValue = 91 };
             var failures = new List<string>();
 
-            object converted = SerializedFieldConverter.ConvertJTokenToValue(
+            object converted = SerializedFieldConverter.ConvertJTokenToValueWithoutReferenceOwner(
                 new JObject { ["baseValue"] = 42 },
                 typeof(ConverterFidelityDerivedValue),
                 seed,
@@ -285,7 +285,7 @@ namespace McpUnity.Tests
             var seed = new ConverterFidelityWalkerValue { reference = "keep" };
             var failures = new List<string>();
 
-            object converted = SerializedFieldConverter.ConvertJTokenToValue(
+            object converted = SerializedFieldConverter.ConvertJTokenToValueWithoutReferenceOwner(
                 new JObject { ["reference"] = JValue.CreateNull() },
                 typeof(ConverterFidelityWalkerValue),
                 seed,
@@ -302,7 +302,7 @@ namespace McpUnity.Tests
             var seed = new ConverterFidelityWalkerValue { number = 17 };
             var failures = new List<string>();
 
-            object converted = SerializedFieldConverter.ConvertJTokenToValue(
+            object converted = SerializedFieldConverter.ConvertJTokenToValueWithoutReferenceOwner(
                 new JObject { ["number"] = JValue.CreateNull() },
                 typeof(ConverterFidelityWalkerValue),
                 seed,
@@ -323,7 +323,7 @@ namespace McpUnity.Tests
             };
             var failures = new List<string>();
 
-            object converted = SerializedFieldConverter.ConvertJTokenToValue(
+            object converted = SerializedFieldConverter.ConvertJTokenToValueWithoutReferenceOwner(
                 new JObject
                 {
                     ["number"] = 99,
@@ -343,14 +343,14 @@ namespace McpUnity.Tests
         public void Converter_Vector2IntWhitelist_PreservesFullAndPartialWrites()
         {
             var fullFailures = new List<string>();
-            object full = SerializedFieldConverter.ConvertJTokenToValue(
+            object full = SerializedFieldConverter.ConvertJTokenToValueWithoutReferenceOwner(
                 new JObject { ["x"] = 1, ["y"] = 2 },
                 typeof(Vector2Int),
                 null,
                 fullFailures);
 
             var partialFailures = new List<string>();
-            object partial = SerializedFieldConverter.ConvertJTokenToValue(
+            object partial = SerializedFieldConverter.ConvertJTokenToValueWithoutReferenceOwner(
                 new JObject { ["x"] = 1 },
                 typeof(Vector2Int),
                 new Vector2Int(7, 8),
@@ -367,7 +367,7 @@ namespace McpUnity.Tests
         {
             var failures = new List<string>();
 
-            object converted = SerializedFieldConverter.ConvertJTokenToValue(
+            object converted = SerializedFieldConverter.ConvertJTokenToValueWithoutReferenceOwner(
                 new JObject { ["x"] = 1, ["typo"] = 2 },
                 typeof(Vector2Int),
                 new Vector2Int(7, 8),
@@ -387,7 +387,7 @@ namespace McpUnity.Tests
             var second = new ConverterFidelityItem { name = "shield", qty = 2 };
             var failures = new List<string>();
 
-            object converted = SerializedFieldConverter.ConvertJTokenToValue(
+            object converted = SerializedFieldConverter.ConvertJTokenToValueWithoutReferenceOwner(
                 new JArray
                 {
                     new JObject { ["name"] = "axe" },
@@ -413,7 +413,7 @@ namespace McpUnity.Tests
             var second = new ConverterFidelityItem { name = "shield", qty = 2 };
             var failures = new List<string>();
 
-            object converted = SerializedFieldConverter.ConvertJTokenToValue(
+            object converted = SerializedFieldConverter.ConvertJTokenToValueWithoutReferenceOwner(
                 new JArray
                 {
                     new JObject { ["name"] = "axe" },
@@ -439,7 +439,7 @@ namespace McpUnity.Tests
                 LogType.Error,
                 new Regex(@"Error converting value to type ConverterFidelityFallbackContainer:"));
 
-            object converted = SerializedFieldConverter.ConvertJTokenToValue(
+            object converted = SerializedFieldConverter.ConvertJTokenToValueWithoutReferenceOwner(
                 new JObject
                 {
                     ["X"] = new JObject { ["v"] = 99 },
@@ -460,7 +460,7 @@ namespace McpUnity.Tests
         {
             var failures = new List<string>();
 
-            object converted = SerializedFieldConverter.ConvertJTokenToValue(
+            object converted = SerializedFieldConverter.ConvertJTokenToValueWithoutReferenceOwner(
                 new JObject { ["r"] = 0.25f },
                 typeof(Color),
                 null,
@@ -480,17 +480,17 @@ namespace McpUnity.Tests
             var colorFailures = new List<string>();
             var fractionalFailures = new List<string>();
 
-            object vector = SerializedFieldConverter.ConvertJTokenToValue(
+            object vector = SerializedFieldConverter.ConvertJTokenToValueWithoutReferenceOwner(
                 new JObject { ["x"] = 1, ["y"] = 2, ["z"] = 3 },
                 typeof(Vector3Int),
                 null,
                 vectorFailures);
-            object rect = SerializedFieldConverter.ConvertJTokenToValue(
+            object rect = SerializedFieldConverter.ConvertJTokenToValueWithoutReferenceOwner(
                 new JObject { ["x"] = 4, ["y"] = 5, ["width"] = 6, ["height"] = 7 },
                 typeof(RectInt),
                 null,
                 rectFailures);
-            object bounds = SerializedFieldConverter.ConvertJTokenToValue(
+            object bounds = SerializedFieldConverter.ConvertJTokenToValueWithoutReferenceOwner(
                 new JObject
                 {
                     ["position"] = new JObject { ["x"] = 1, ["y"] = 2, ["z"] = 3 },
@@ -499,12 +499,12 @@ namespace McpUnity.Tests
                 typeof(BoundsInt),
                 null,
                 boundsFailures);
-            object color = SerializedFieldConverter.ConvertJTokenToValue(
+            object color = SerializedFieldConverter.ConvertJTokenToValueWithoutReferenceOwner(
                 new JObject { ["r"] = 10, ["g"] = 20, ["b"] = 30, ["a"] = 40 },
                 typeof(Color32),
                 null,
                 colorFailures);
-            object fractional = SerializedFieldConverter.ConvertJTokenToValue(
+            object fractional = SerializedFieldConverter.ConvertJTokenToValueWithoutReferenceOwner(
                 new JObject { ["x"] = 1.5, ["y"] = 2 },
                 typeof(Vector2Int),
                 null,
@@ -530,7 +530,7 @@ namespace McpUnity.Tests
             var failures = new List<string>();
             var seed = new Dictionary<string, int> { ["shield"] = 2 };
 
-            object converted = SerializedFieldConverter.ConvertJTokenToValue(
+            object converted = SerializedFieldConverter.ConvertJTokenToValueWithoutReferenceOwner(
                 new JObject { ["sword"] = 3 },
                 typeof(Dictionary<string, int>),
                 seed,
@@ -547,7 +547,7 @@ namespace McpUnity.Tests
         {
             var failures = new List<string>();
 
-            object converted = SerializedFieldConverter.ConvertJTokenToValue(
+            object converted = SerializedFieldConverter.ConvertJTokenToValueWithoutReferenceOwner(
                 new JObject { ["ReadOnly"] = 8 },
                 typeof(ConverterFidelityFallbackStruct),
                 new ConverterFidelityFallbackStruct { Writable = 4 },
@@ -564,12 +564,12 @@ namespace McpUnity.Tests
             var stringFailures = new List<string>();
             var booleanFailures = new List<string>();
 
-            object fromString = SerializedFieldConverter.ConvertJTokenToValue(
+            object fromString = SerializedFieldConverter.ConvertJTokenToValueWithoutReferenceOwner(
                 new JObject { ["x"] = "1", ["y"] = 2 },
                 typeof(Vector2),
                 null,
                 stringFailures);
-            object fromBoolean = SerializedFieldConverter.ConvertJTokenToValue(
+            object fromBoolean = SerializedFieldConverter.ConvertJTokenToValueWithoutReferenceOwner(
                 new JObject { ["x"] = true, ["y"] = 2 },
                 typeof(Vector2),
                 null,
@@ -585,15 +585,15 @@ namespace McpUnity.Tests
         public void Converter_EnumRejectsUndefinedValuesAndAcceptsDefinedValue()
         {
             var invalidFailures = new List<string>();
-            object invalid = SerializedFieldConverter.ConvertJTokenToValue(
+            object invalid = SerializedFieldConverter.ConvertJTokenToValueWithoutReferenceOwner(
                 new JValue(999), typeof(CameraClearFlags), null, invalidFailures);
 
             var zeroFailures = new List<string>();
-            object zero = SerializedFieldConverter.ConvertJTokenToValue(
+            object zero = SerializedFieldConverter.ConvertJTokenToValueWithoutReferenceOwner(
                 new JValue(0), typeof(CameraClearFlags), null, zeroFailures);
 
             var validFailures = new List<string>();
-            object valid = SerializedFieldConverter.ConvertJTokenToValue(
+            object valid = SerializedFieldConverter.ConvertJTokenToValueWithoutReferenceOwner(
                 new JValue(3), typeof(CameraClearFlags), null, validFailures);
 
             Assert.IsNull(invalid);
@@ -610,7 +610,7 @@ namespace McpUnity.Tests
             HideFlags requested = HideFlags.HideInHierarchy | HideFlags.DontSaveInEditor;
             var failures = new List<string>();
 
-            object converted = SerializedFieldConverter.ConvertJTokenToValue(
+            object converted = SerializedFieldConverter.ConvertJTokenToValueWithoutReferenceOwner(
                 new JValue((int)requested), typeof(HideFlags), null, failures);
 
             Assert.AreEqual(requested, converted);
@@ -622,7 +622,7 @@ namespace McpUnity.Tests
         {
             var failures = new List<string>();
 
-            object converted = SerializedFieldConverter.ConvertJTokenToValue(
+            object converted = SerializedFieldConverter.ConvertJTokenToValueWithoutReferenceOwner(
                 new JValue(4), typeof(ConverterFidelityFlags), null, failures);
 
             Assert.IsNull(converted);
@@ -638,7 +638,7 @@ namespace McpUnity.Tests
                 : typeof(CameraClearFlags);
             var failures = new List<string>();
 
-            object converted = SerializedFieldConverter.ConvertJTokenToValue(
+            object converted = SerializedFieldConverter.ConvertJTokenToValueWithoutReferenceOwner(
                 new JValue(requestedValue), enumType, null, failures);
 
             Assert.IsNull(converted);
@@ -651,7 +651,7 @@ namespace McpUnity.Tests
         {
             var failures = new List<string>();
 
-            object converted = SerializedFieldConverter.ConvertJTokenToValue(
+            object converted = SerializedFieldConverter.ConvertJTokenToValueWithoutReferenceOwner(
                 new JValue("257"), typeof(ConverterFidelityByteEnum), null, failures);
 
             Assert.IsNull(converted);
@@ -664,9 +664,9 @@ namespace McpUnity.Tests
             var validFailures = new List<string>();
             var invalidFailures = new List<string>();
 
-            object valid = SerializedFieldConverter.ConvertJTokenToValue(
+            object valid = SerializedFieldConverter.ConvertJTokenToValueWithoutReferenceOwner(
                 new JValue("A"), typeof(ConverterFidelityByteEnum?), null, validFailures);
-            object invalid = SerializedFieldConverter.ConvertJTokenToValue(
+            object invalid = SerializedFieldConverter.ConvertJTokenToValueWithoutReferenceOwner(
                 new JValue(257), typeof(ConverterFidelityByteEnum?), null, invalidFailures);
 
             Assert.AreEqual(ConverterFidelityByteEnum.A, valid);
@@ -680,7 +680,7 @@ namespace McpUnity.Tests
         {
             var failures = new List<string>();
 
-            object converted = SerializedFieldConverter.ConvertJTokenToValue(
+            object converted = SerializedFieldConverter.ConvertJTokenToValueWithoutReferenceOwner(
                 new JObject { ["x"] = 1f, ["y"] = 2f, ["z"] = 3f },
                 typeof(Vector3?),
                 null,
@@ -695,7 +695,7 @@ namespace McpUnity.Tests
         {
             var failures = new List<string>();
 
-            object converted = SerializedFieldConverter.ConvertJTokenToValue(
+            object converted = SerializedFieldConverter.ConvertJTokenToValueWithoutReferenceOwner(
                 new JObject { ["sword"] = 3 },
                 typeof(IDictionary<string, int>),
                 null,
@@ -712,12 +712,12 @@ namespace McpUnity.Tests
             var vectorFailures = new List<string>();
             var colorFailures = new List<string>();
 
-            object vector = SerializedFieldConverter.ConvertJTokenToValue(
+            object vector = SerializedFieldConverter.ConvertJTokenToValueWithoutReferenceOwner(
                 new JObject { ["x"] = 1.0, ["y"] = 2.0 },
                 typeof(Vector2Int),
                 null,
                 vectorFailures);
-            object color = SerializedFieldConverter.ConvertJTokenToValue(
+            object color = SerializedFieldConverter.ConvertJTokenToValueWithoutReferenceOwner(
                 new JObject { ["r"] = 10.0, ["g"] = 20.0, ["b"] = 30.0, ["a"] = 40.0 },
                 typeof(Color32),
                 null,
@@ -1280,7 +1280,7 @@ namespace McpUnity.Tests
             var failures = new List<string>();
             var warnings = new List<string>();
 
-            object converted = SerializedFieldConverter.ConvertJTokenToValue(
+            object converted = SerializedFieldConverter.ConvertJTokenToValueWithoutReferenceOwner(
                 new JObject
                 {
                     ["instanceId"] = 0,
@@ -1336,7 +1336,7 @@ namespace McpUnity.Tests
             var failures = new List<string>();
             var warnings = new List<string>();
 
-            object converted = SerializedFieldConverter.ConvertJTokenToValue(
+            object converted = SerializedFieldConverter.ConvertJTokenToValueWithoutReferenceOwner(
                 new JObject
                 {
                     ["assetPath"] = TestAssetDirectory + "/Missing.asset",
@@ -1404,7 +1404,7 @@ namespace McpUnity.Tests
             var converterFailures = new List<string>();
             var converterWarnings = new List<string>();
 
-            object converted = SerializedFieldConverter.ConvertJTokenToValue(
+            object converted = SerializedFieldConverter.ConvertJTokenToValueWithoutReferenceOwner(
                 readerShape,
                 typeof(UnityEngine.Object),
                 null,

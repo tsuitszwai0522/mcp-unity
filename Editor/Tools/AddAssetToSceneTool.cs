@@ -4,6 +4,7 @@ using UnityEditor;
 using Newtonsoft.Json.Linq;
 using McpUnity.Unity;
 using McpUnity.Utils;
+using McpUnity.Services;
 
 namespace McpUnity.Tools
 {
@@ -12,10 +13,12 @@ namespace McpUnity.Tools
     /// </summary>
     public class AddAssetToSceneTool : McpToolBase
     {
+        private static Action<UnityEngine.Object> _pingObject = EditorGUIUtility.PingObject;
+
         public AddAssetToSceneTool()
         {
             Name = "add_asset_to_scene";
-            Description = "Adds an asset from the AssetDatabase to the Unity scene";
+            Description = "Instantiates an AssetDatabase prefab in the active loaded-scene or open-Prefab context";
         }
         
         /// <summary>
@@ -83,47 +86,60 @@ namespace McpUnity.Tools
                 );
             }
             
+            JObject scopeError = PrefabSessionScope.TryGetPrefabRoot(out GameObject prefabRoot);
+            if (scopeError != null) return scopeError;
+
+            GameObject parent = null;
+            bool parentRequested = !string.IsNullOrEmpty(parentPath) || parentId.HasValue;
+            if (parentRequested)
+            {
+                scopeError = PrefabSessionScope.TryResolveGameObject(
+                    parentId, parentPath, out parent);
+                if (scopeError != null) return scopeError;
+                if (parent == null)
+                {
+                    string parentIdentifier = parentId.HasValue
+                        ? $"instance ID {parentId.Value}"
+                        : $"path '{parentPath}'";
+                    return McpUnitySocketHandler.CreateErrorResponse(
+                        $"Parent GameObject not found using {parentIdentifier}; the asset was not instantiated.",
+                        "not_found_error");
+                }
+            }
+            else if (prefabRoot != null)
+            {
+                parent = prefabRoot;
+            }
+
             // Instantiate the asset
             GameObject instance = null;
             try
             {
-                instance = (GameObject)PrefabUtility.InstantiatePrefab(asset);
+                instance = prefabRoot != null
+                    ? (GameObject)PrefabUtility.InstantiatePrefab(asset, prefabRoot.scene)
+                    : (GameObject)PrefabUtility.InstantiatePrefab(asset);
                 
                 // Set position
                 instance.transform.position = position;
                 
                 // Set parent if specified
-                if (!string.IsNullOrEmpty(parentPath) || parentId.HasValue)
+                if (parentRequested || prefabRoot != null)
                 {
-                    GameObject parent = null;
-                    
-                    // Try to find parent by ID first
-                    if (parentId.HasValue)
-                    {
-                        parent = EditorUtility.InstanceIDToObject(parentId.Value) as GameObject;
-                    }
-                    // Otherwise try to find by path
-                    else if (!string.IsNullOrEmpty(parentPath))
-                    {
-                        parent = GameObject.Find(parentPath);
-                    }
-                    
                     if (parent != null)
                     {
                         instance.transform.SetParent(parent.transform, false);
-                    }
-                    else
-                    {
-                        McpLogger.LogWarning($"Parent object not found, asset will be created at the root of the scene");
                     }
                 }
                 
                 // Select the newly created object
                 Selection.activeGameObject = instance;
-                EditorGUIUtility.PingObject(instance);
+                _pingObject(instance);
             }
             catch (Exception ex)
             {
+                if (instance != null)
+                    UnityEngine.Object.DestroyImmediate(instance);
+
                 return McpUnitySocketHandler.CreateErrorResponse(
                     $"Error instantiating asset: {ex.Message}", 
                     "instantiation_error"
@@ -131,14 +147,16 @@ namespace McpUnity.Tools
             }
             
             // Log the action
-            McpLogger.LogInfo($"Added asset '{asset.name}' to scene from path '{assetPath}'");
+            McpLogger.LogInfo($"Added asset '{asset.name}' to the active context from path '{assetPath}'");
             
             // Create the response
             return new JObject
             {
                 ["success"] = true,
                 ["type"] = "text",
-                ["message"] = $"Successfully added asset '{asset.name}' with instance ID {instance.GetInstanceID()} to the scene",
+                ["message"] = prefabRoot != null
+                    ? $"Successfully added asset '{asset.name}' with instance ID {instance.GetInstanceID()} to Prefab contents '{prefabRoot.scene.path}'"
+                    : $"Successfully added asset '{asset.name}' with instance ID {instance.GetInstanceID()} to the scene",
                 ["instanceId"] = instance.GetInstanceID()
             };
         }

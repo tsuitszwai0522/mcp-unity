@@ -260,7 +260,8 @@ namespace McpUnity.Tools
                         field.FieldType,
                         SerializedFieldConverter.CloneClassSeed(field.GetValue(scriptableObject)),
                         conversionFailures,
-                        warnings);
+                        warnings,
+                        scriptableObject);
                     if (SerializedFieldConverter.CannotAssignConvertedValue(conversionFailures))
                     {
                         string reason = conversionFailures.Count > 0

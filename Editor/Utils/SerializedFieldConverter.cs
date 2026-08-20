@@ -7,7 +7,7 @@ using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEngine;
-using UnityEngine.SceneManagement;
+using McpUnity.Services;
 
 namespace McpUnity.Utils
 {
@@ -34,43 +34,67 @@ namespace McpUnity.Utils
         }
 
         /// <summary>
-        /// Convert a JToken to a value of the specified type.
+        /// Convert a JToken to a value of the specified type when there is no serialized
+        /// reference owner. Preview-object references fail closed if encountered.
         /// </summary>
         /// <param name="token">The JToken to convert</param>
         /// <param name="targetType">The target type to convert to</param>
         /// <param name="failures">Optional collection that receives conversion failure reasons</param>
         /// <returns>The converted value, or null if conversion fails</returns>
-        public static object ConvertJTokenToValue(JToken token, Type targetType, List<string> failures = null)
+        public static object ConvertJTokenToValueWithoutReferenceOwner(
+            JToken token,
+            Type targetType,
+            List<string> failures = null)
         {
-            return ConvertJTokenToValue(token, targetType, null, failures);
+            return ConvertJTokenToValueWithoutReferenceOwner(
+                token, targetType, null, failures);
         }
 
         /// <summary>
-        /// Convert a JToken to a value of the specified type, preserving state omitted by the caller.
+        /// Convert a JToken without a serialized reference owner, preserving state omitted
+        /// by the caller. Preview-object references fail closed if encountered.
         /// </summary>
         /// <param name="token">The JToken to convert</param>
         /// <param name="targetType">The target type to convert to</param>
         /// <param name="currentValue">The current value used as the seed for partial object writes</param>
         /// <param name="failures">Collection that receives conversion failure reasons</param>
         /// <returns>The converted value, or null if conversion fails</returns>
-        public static object ConvertJTokenToValue(
+        public static object ConvertJTokenToValueWithoutReferenceOwner(
             JToken token,
             Type targetType,
             object currentValue,
             List<string> failures)
         {
-            return ConvertJTokenToValue(token, targetType, currentValue, failures, null);
+            return ConvertJTokenToValueWithoutReferenceOwner(
+                token, targetType, currentValue, failures, null);
         }
 
         /// <summary>
-        /// Convert a JToken while separately reporting non-fatal conversion disclosures.
+        /// Convert a JToken without a serialized reference owner while separately reporting
+        /// non-fatal conversion disclosures. Preview-object references fail closed if encountered.
+        /// </summary>
+        public static object ConvertJTokenToValueWithoutReferenceOwner(
+            JToken token,
+            Type targetType,
+            object currentValue,
+            List<string> failures,
+            List<string> warnings)
+        {
+            return ConvertJTokenToValue(
+                token, targetType, currentValue, failures, warnings, null);
+        }
+
+        /// <summary>
+        /// Convert a JToken with the object that will own any resolved serialized reference.
+        /// Prefab-preview references fail closed when the owner is unknown or outside the preview.
         /// </summary>
         public static object ConvertJTokenToValue(
             JToken token,
             Type targetType,
             object currentValue,
             List<string> failures,
-            List<string> warnings)
+            List<string> warnings,
+            UnityEngine.Object referenceOwner)
         {
             failures ??= new List<string>();
 
@@ -100,14 +124,15 @@ namespace McpUnity.Utils
             if (typeof(UnityEngine.Object).IsAssignableFrom(targetType) && token.Type == JTokenType.Integer)
             {
                 int id = token.ToObject<int>();
-                return ResolveUnityObjectByInstanceId(id, targetType, failures);
+                return ResolveUnityObjectByInstanceId(
+                    id, targetType, failures, referenceOwner);
             }
 
             // Unity object reference via structured reference.
             if (typeof(UnityEngine.Object).IsAssignableFrom(targetType) && token.Type == JTokenType.Object)
             {
                 return ResolveUnityObjectByStructuredRef(
-                    (JObject)token, targetType, failures, warnings);
+                    (JObject)token, targetType, failures, warnings, referenceOwner);
             }
 
             // Asset reference via path or GUID (string value)
@@ -142,7 +167,7 @@ namespace McpUnity.Utils
                         elementSeed = CloneClassSeed(elementSeed);
                     }
                     object elementValue = ConvertJTokenToValue(
-                        jArray[i], elementType, elementSeed, failures, warnings);
+                        jArray[i], elementType, elementSeed, failures, warnings, referenceOwner);
                     if (failures.Count > failureCount)
                     {
                         PrefixFailures(failures, failureCount, $"Array element {i}");
@@ -173,7 +198,7 @@ namespace McpUnity.Utils
                         elementSeed = CloneClassSeed(elementSeed);
                     }
                     object elementValue = ConvertJTokenToValue(
-                        jArray[i], elementType, elementSeed, failures, warnings);
+                        jArray[i], elementType, elementSeed, failures, warnings, referenceOwner);
                     if (failures.Count > failureCount)
                     {
                         PrefixFailures(failures, failureCount, $"List element {i}");
@@ -280,7 +305,12 @@ namespace McpUnity.Utils
                             ? CloneClassSeed(fieldSeed)
                             : fieldSeed;
                         object fieldValue = ConvertJTokenToValue(
-                            fieldToken, field.FieldType, conversionSeed, failures, warnings);
+                            fieldToken,
+                            field.FieldType,
+                            conversionSeed,
+                            failures,
+                            warnings,
+                            referenceOwner);
                         if (failures.Count > failureCount)
                         {
                             PrefixFailures(failures, failureCount, $"Nested field '{field.Name}'");
@@ -671,11 +701,30 @@ namespace McpUnity.Utils
         /// <summary>
         /// Resolve a UnityEngine.Object by instance ID
         /// </summary>
-        private static object ResolveUnityObjectByInstanceId(int id, Type targetType, List<string> failures)
+        private static object ResolveUnityObjectByInstanceId(
+            int id,
+            Type targetType,
+            List<string> failures,
+            UnityEngine.Object referenceOwner)
         {
-            UnityEngine.Object obj = EditorUtility.InstanceIDToObject(id);
+            JObject scopeError = PrefabSessionScope.TryResolveObjectByInstanceId(
+                id, out UnityEngine.Object obj);
+            if (scopeError != null)
+            {
+                failures.Add(FormatScopeError(scopeError));
+                return null;
+            }
+
             if (obj != null)
             {
+                JObject assignmentError = PrefabSessionScope.ValidateReferenceAssignment(
+                    referenceOwner, obj);
+                if (assignmentError != null)
+                {
+                    failures.Add(FormatScopeError(assignmentError));
+                    return null;
+                }
+
                 object resolved = CastUnityObject(obj, targetType);
                 if (resolved != null)
                     return resolved;
@@ -698,7 +747,8 @@ namespace McpUnity.Utils
             JObject refObj,
             Type targetType,
             List<string> failures,
-            List<string> warnings)
+            List<string> warnings,
+            UnityEngine.Object referenceOwner)
         {
             string[] locatorKeys = { "assetPath", "instanceId", "objectPath" };
             string[] validKeys = { "instanceId", "assetPath", "objectPath", "name", "type" };
@@ -719,8 +769,10 @@ namespace McpUnity.Utils
                     locatorKey,
                     locatorToken,
                     targetType,
+                    referenceOwner,
                     out object resolved,
-                    out string attemptFailure))
+                    out string attemptFailure,
+                    out JObject scopeError))
                 {
                     foreach (string priorFailure in attemptFailures)
                     {
@@ -729,6 +781,14 @@ namespace McpUnity.Utils
                             $"(value {FormatLocatorValue(locatorToken)})");
                     }
                     return resolved;
+                }
+
+                if (scopeError != null)
+                {
+                    attemptFailures.Add(
+                        $"Locator '{locatorKey}' (value {FormatLocatorValue(locatorToken)}) " +
+                        $"was rejected: {FormatScopeError(scopeError)}");
+                    continue;
                 }
 
                 attemptFailures.Add(attemptFailure);
@@ -751,11 +811,14 @@ namespace McpUnity.Utils
             string locatorKey,
             JToken locatorToken,
             Type targetType,
+            UnityEngine.Object referenceOwner,
             out object resolved,
-            out string failure)
+            out string failure,
+            out JObject scopeError)
         {
             resolved = null;
             failure = null;
+            scopeError = null;
             UnityEngine.Object candidate;
             try
             {
@@ -769,13 +832,25 @@ namespace McpUnity.Utils
                         break;
                     case "instanceId":
                         int instanceId = locatorToken.ToObject<int>();
-                        candidate = EditorUtility.InstanceIDToObject(instanceId);
+                        scopeError = PrefabSessionScope.TryResolveObjectByInstanceId(
+                            instanceId, out candidate);
+                        if (scopeError != null)
+                            return false;
                         break;
                     case "objectPath":
                         string objectPath = locatorToken?.ToObject<string>();
-                        candidate = string.IsNullOrEmpty(objectPath)
-                            ? null
-                            : FindGameObjectByPathAcrossScenes(objectPath);
+                        if (string.IsNullOrEmpty(objectPath))
+                        {
+                            candidate = null;
+                        }
+                        else
+                        {
+                            scopeError = PrefabSessionScope.TryResolveGameObject(
+                                null, objectPath, out GameObject gameObject);
+                            if (scopeError != null)
+                                return false;
+                            candidate = gameObject;
+                        }
                         break;
                     default:
                         failure = $"Unsupported locator '{locatorKey}'";
@@ -798,6 +873,14 @@ namespace McpUnity.Utils
                 return false;
             }
 
+            JObject assignmentError = PrefabSessionScope.ValidateReferenceAssignment(
+                referenceOwner, candidate);
+            if (assignmentError != null)
+            {
+                scopeError = assignmentError;
+                return false;
+            }
+
             resolved = CastUnityObject(candidate, targetType);
             if (resolved != null)
             {
@@ -815,6 +898,13 @@ namespace McpUnity.Utils
             return token == null || token.Type == JTokenType.Null
                 ? "null"
                 : $"'{token}'";
+        }
+
+        private static string FormatScopeError(JObject scopeError)
+        {
+            string errorType = scopeError?["error"]?["type"]?.ToString();
+            string message = scopeError?["error"]?["message"]?.ToString();
+            return $"{errorType}: {message}";
         }
 
         /// <summary>
@@ -1499,41 +1589,5 @@ namespace McpUnity.Utils
             return null;
         }
 
-        /// <summary>
-        /// Find a GameObject by path, searching across all loaded scenes
-        /// </summary>
-        private static GameObject FindGameObjectByPathAcrossScenes(string objPath)
-        {
-            GameObject found = GameObject.Find(objPath);
-            if (found != null)
-                return found;
-
-            for (int i = 0; i < SceneManager.sceneCount; i++)
-            {
-                Scene scene = SceneManager.GetSceneAt(i);
-                if (!scene.isLoaded) continue;
-                foreach (GameObject root in scene.GetRootGameObjects())
-                {
-                    Transform t = root.transform.Find(objPath);
-                    if (t == null && root.name == objPath.Split('/')[0])
-                    {
-                        // Try relative path from root
-                        string relativePath = objPath.Contains("/")
-                            ? objPath.Substring(objPath.IndexOf('/') + 1)
-                            : null;
-                        if (relativePath != null)
-                            t = root.transform.Find(relativePath);
-                        else if (root.name == objPath)
-                            t = root.transform;
-                    }
-                    if (t != null)
-                    {
-                        return t.gameObject;
-                    }
-                }
-            }
-
-            return null;
-        }
     }
 }
