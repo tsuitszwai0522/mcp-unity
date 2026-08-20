@@ -15,7 +15,7 @@ namespace McpUnity.Tools
         public RemoveComponentTool()
         {
             Name = "remove_component";
-            Description = "Removes a component from a GameObject. Identifies the GameObject by instance ID or hierarchy path.";
+            Description = "Removes a component from a GameObject. Identifies the GameObject by instance ID or hierarchy path. Ambiguous short or partial component names require exactly one exact candidate type on the target; otherwise use a fully-qualified name.";
         }
 
         /// <summary>
@@ -42,7 +42,17 @@ namespace McpUnity.Tools
                 return error;
 
             // Resolve the component type
-            Type componentType = ComponentTypeResolver.FindComponentType(componentName);
+            Type componentType = ComponentTypeResolver.FindComponentType(
+                componentName,
+                gameObject,
+                out string resolutionWarning,
+                out string ambiguityError);
+            if (!string.IsNullOrEmpty(ambiguityError))
+            {
+                return McpUnitySocketHandler.CreateErrorResponse(
+                    ambiguityError,
+                    "component_ambiguity_error");
+            }
 
             // Find the component on the GameObject
             Component component = componentType != null
@@ -74,7 +84,7 @@ namespace McpUnity.Tools
             Undo.DestroyObjectImmediate(component);
             EditorUtility.SetDirty(gameObject);
 
-            return new JObject
+            var response = new JObject
             {
                 ["success"] = true,
                 ["type"] = "text",
@@ -83,6 +93,13 @@ namespace McpUnity.Tools
                 ["name"] = goName,
                 ["path"] = goPath
             };
+
+            if (!string.IsNullOrEmpty(resolutionWarning))
+            {
+                response["warnings"] = new JArray(resolutionWarning);
+            }
+
+            return response;
         }
     }
 }

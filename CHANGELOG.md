@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [fork-1.5.0] - 2026-08-20
+
+Third-batch rollout of the MCP write contract established in `fork-1.2.0` and `fork-1.3.0`.
+**The contract changes and package API removal below are breaking.**
+
+### Changed
+
+- **Breaking: `update_gameobject` accounts for every supplied field** — every `gameObjectData` key now appears in either `updatedFields[]` or `failedFields[{field,reason}]`. This includes empty/null names, unregistered tags, invalid or mistyped layers, mistyped booleans, duplicate legacy aliases, and unknown fields; any failure produces `success:false`, while independently valid fields may still be applied. The Canvas-without-RectTransform advisory is exposed through `warnings[]`, and the Node wrapper returns partial results as `isError:true` with a structured payload instead of discarding the field-level details. This release makes only this tool's nested `gameObjectData` schema strict so unknown keys fail validation before dispatch; it does not establish repo-wide strictness for other Zod schemas.
+- **Breaking: `add_asset_to_scene` position defaults to world space** — new `positionSpace:"world"|"local"` defaults to `"world"`, so a parented instance now keeps the caller's requested final world position. Callers relying on the previous effective local-space behavior must pass `positionSpace:"local"`. Responses contain Transform-read-back `worldPosition` and `localPosition`, both preserved by the Node wrapper.
+- **Breaking: ambiguous component names no longer resolve first-wins** — fully-qualified matches take priority; ambiguous short or partial namespace names are narrowed only when exactly one candidate's **exact runtime type** is attached to the target GameObject, so a derived component is not also counted as every matching base type. The selected and alternate full names are disclosed in `warnings[]`. Otherwise `update_component`, `remove_component`, `read_serialized_fields`, and `write_serialized_fields` return `component_ambiguity_error` listing every candidate and require a fully-qualified name. Component types are indexed once per loaded assembly set so ambiguity detection does not rescan every type on this hot path. The public one-argument `ComponentTypeResolver.FindComponentType(string)` API was removed because it could only report ambiguity to the Unity console; package consumers must use the overload that explicitly returns warning and ambiguity details.
+- **Breaking: `create_sprite_atlas.atlasName` is now a filename assertion** — `atlasName` must exactly match the extensionless filename in `savePath` or the tool returns `validation_error` before creating an asset. `.spriteatlas` and `.spriteatlasv2` extensions are recognized case-insensitively. Successful responses read `atlasName`, `includeInBuild`, `allowRotation`, and `tightPacking` back from the saved SpriteAtlas, and the Node wrapper preserves that read-back payload.
+- **Caller-visible tool metadata documents the new contracts** — the affected C# and Node tool descriptions now state `add_asset_to_scene.positionSpace`'s world-space default and local-space option, `update_gameobject`'s per-field partial-failure behavior, component-name ambiguity handling, and the SpriteAtlas filename assertion so MCP clients see the constraints in `tools/list` rather than only in this changelog.
+
+### Tests
+
+- Added EditMode coverage for all four contracts, including both `positionSpace` modes, every ambiguous component call site, exact-type target narrowing across inheritance, ordinary Unity short-name resolution, complete supplied-key accounting, case-insensitive SpriteAtlas extensions, atlas no-side-effect validation, and mutation-sensitive SpriteAtlas settings read-back.
+- Added Node tests for field-level `isError` payloads and strict schema metadata, position schema/default/read-back forwarding, valid SpriteAtlas request/read-back forwarding, the filename constraint in `tools/list`, component ambiguity guidance, and warning preservation.
+
 ## [fork-1.4.0] - 2026-08-20
 
 S6 — Prefab contents editing sessions become a hard, recoverable boundary. **Breaking for callers that relied on

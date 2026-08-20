@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 using UnityEditor;
@@ -16,10 +17,22 @@ namespace McpUnity.Tools
     /// </summary>
     public class UpdateGameObjectTool : McpToolBase
     {
+        private static readonly HashSet<string> SupportedGameObjectFields =
+            new HashSet<string>(StringComparer.Ordinal)
+            {
+                "name",
+                "tag",
+                "layer",
+                "activeSelf",
+                "isActiveSelf",
+                "isStatic",
+                "static"
+            };
+
         public UpdateGameObjectTool()
         {
             Name = "update_gameobject";
-            Description = "Updates or creates a GameObject and its properties (name, tag, layer, active state, static state) based on instance ID or object path.";
+            Description = "Updates or creates a GameObject and its properties (name, tag, layer, active state, static state) based on instance ID or object path. Every supplied gameObjectData key is reported in updatedFields or failedFields; valid fields may still be applied when another field fails.";
             IsAsync = false; // Operations are expected to be quick
         }
 
@@ -34,12 +47,6 @@ namespace McpUnity.Tools
             int? instanceId = parameters["instanceId"]?.ToObject<int?>();
             string objectPath = parameters["objectPath"]?.ToObject<string>();
             JObject gameObjectData = parameters["gameObjectData"] as JObject;
-
-            string newName = gameObjectData? ["name"]?.ToObject<string>();
-            string newTag = gameObjectData? ["tag"]?.ToObject<string>();
-            int? newLayer = gameObjectData? ["layer"]?.ToObject<int?>();
-            bool? newIsActiveSelf = (gameObjectData?["activeSelf"] ?? gameObjectData?["isActiveSelf"])?.ToObject<bool?>();
-            bool? newIsStatic = (gameObjectData?["isStatic"] ?? gameObjectData?["static"])?.ToObject<bool?>();
 
             GameObject targetGameObject = null;
             string identifierInfo = "";
@@ -75,55 +82,151 @@ namespace McpUnity.Tools
             Undo.RecordObject(targetGameObject, "Update GameObject Properties");
             bool propertiesUpdated = false;
             string originalNameForLog = targetGameObject.name;
+            var updatedFields = new List<string>();
+            var failedFields = new List<JObject>();
+            var warnings = new List<string>();
 
-            // Update name if provided and different
-            if (!string.IsNullOrEmpty(newName) && targetGameObject.name != newName)
+            JProperty nameProperty = gameObjectData?.Property("name");
+            if (nameProperty != null)
             {
-                targetGameObject.name = newName;
-                propertiesUpdated = true;
+                if (nameProperty.Value.Type != JTokenType.String
+                    || string.IsNullOrEmpty(nameProperty.Value.ToObject<string>()))
+                {
+                    failedFields.Add(CreateFieldFailure(
+                        "name", "Name must be a non-empty JSON string. Name was not changed."));
+                }
+                else
+                {
+                    string newName = nameProperty.Value.ToObject<string>();
+                    if (targetGameObject.name != newName)
+                    {
+                        targetGameObject.name = newName;
+                        propertiesUpdated = true;
+                    }
+                    updatedFields.Add("name");
+                }
             }
 
-            // Update tag if provided and different, warn if tag doesn't exist
-            if (!string.IsNullOrEmpty(newTag))
+            JProperty tagProperty = gameObjectData?.Property("tag");
+            if (tagProperty != null)
             {
-                bool tagExists = Array.Exists(UnityEditorInternal.InternalEditorUtility.tags, t => t.Equals(newTag));
+                string newTag = tagProperty.Value.Type == JTokenType.String
+                    ? tagProperty.Value.ToObject<string>()
+                    : null;
+                bool tagExists = !string.IsNullOrEmpty(newTag)
+                    && Array.Exists(
+                        UnityEditorInternal.InternalEditorUtility.tags,
+                        tag => tag.Equals(newTag));
                 if (!tagExists)
                 {
-                    McpLogger.LogWarning($"UpdateGameObjectTool: Tag '{newTag}' does not exist for GameObject '{originalNameForLog}'. Tag not changed. Please create the tag in Unity's Tag Manager.");
+                    string reason = $"Tag '{newTag}' does not exist. Tag was not changed; " +
+                        "create it in Unity's Tag Manager before retrying.";
+                    failedFields.Add(CreateFieldFailure("tag", reason));
+                    McpLogger.LogWarning(
+                        $"UpdateGameObjectTool: {reason} GameObject: '{originalNameForLog}'.");
                 }
-                else if (!targetGameObject.CompareTag(newTag))
+                else
                 {
-                    targetGameObject.tag = newTag;
-                    propertiesUpdated = true;
+                    if (!targetGameObject.CompareTag(newTag))
+                    {
+                        targetGameObject.tag = newTag;
+                        propertiesUpdated = true;
+                    }
+                    updatedFields.Add("tag");
                 }
             }
 
-            // Update layer if provided and valid
-            if (newLayer.HasValue)
+            JProperty layerProperty = gameObjectData?.Property("layer");
+            if (layerProperty != null)
             {
-                if (newLayer.Value < 0 || newLayer.Value > 31)
+                if (layerProperty.Value.Type != JTokenType.Integer)
                 {
-                    McpLogger.LogWarning($"UpdateGameObjectTool: Invalid layer value {newLayer.Value} for GameObject '{originalNameForLog}'. Layer must be between 0 and 31. Layer not changed.");
+                    failedFields.Add(CreateFieldFailure(
+                        "layer", "Layer must be a JSON integer between 0 and 31. Layer was not changed."));
                 }
-                else if (targetGameObject.layer != newLayer.Value)
+                else
                 {
-                    targetGameObject.layer = newLayer.Value;
-                    propertiesUpdated = true;
+                    long newLayer = layerProperty.Value.ToObject<long>();
+                    if (newLayer < 0 || newLayer > 31)
+                    {
+                        string reason = $"Layer value {newLayer} is outside the valid range 0-31. " +
+                            "Layer was not changed.";
+                        failedFields.Add(CreateFieldFailure("layer", reason));
+                        McpLogger.LogWarning(
+                            $"UpdateGameObjectTool: {reason} GameObject: '{originalNameForLog}'.");
+                    }
+                    else
+                    {
+                        if (targetGameObject.layer != (int)newLayer)
+                        {
+                            targetGameObject.layer = (int)newLayer;
+                            propertiesUpdated = true;
+                        }
+                        updatedFields.Add("layer");
+                    }
                 }
             }
 
-            // Update active state if provided and different
-            if (newIsActiveSelf.HasValue && targetGameObject.activeSelf != newIsActiveSelf.Value)
+            JProperty activeSelfProperty = gameObjectData?.Property("activeSelf");
+            JProperty legacyActiveSelfProperty = gameObjectData?.Property("isActiveSelf");
+            propertiesUpdated |= ApplyBooleanField(
+                activeSelfProperty,
+                value => targetGameObject.activeSelf != value,
+                value => targetGameObject.SetActive(value),
+                updatedFields,
+                failedFields);
+            if (legacyActiveSelfProperty != null && activeSelfProperty != null)
             {
-                targetGameObject.SetActive(newIsActiveSelf.Value);
-                propertiesUpdated = true;
+                failedFields.Add(CreateFieldFailure(
+                    "isActiveSelf",
+                    "Both 'activeSelf' and legacy alias 'isActiveSelf' were provided; use only 'activeSelf'."));
+            }
+            else
+            {
+                propertiesUpdated |= ApplyBooleanField(
+                    legacyActiveSelfProperty,
+                    value => targetGameObject.activeSelf != value,
+                    value => targetGameObject.SetActive(value),
+                    updatedFields,
+                    failedFields);
             }
 
-            // Update static state if provided and different
-            if (newIsStatic.HasValue && targetGameObject.isStatic != newIsStatic.Value)
+            JProperty isStaticProperty = gameObjectData?.Property("isStatic");
+            JProperty legacyStaticProperty = gameObjectData?.Property("static");
+            propertiesUpdated |= ApplyBooleanField(
+                isStaticProperty,
+                value => targetGameObject.isStatic != value,
+                value => targetGameObject.isStatic = value,
+                updatedFields,
+                failedFields);
+            if (legacyStaticProperty != null && isStaticProperty != null)
             {
-                targetGameObject.isStatic = newIsStatic.Value;
-                propertiesUpdated = true;
+                failedFields.Add(CreateFieldFailure(
+                    "static",
+                    "Both 'isStatic' and legacy alias 'static' were provided; use only 'isStatic'."));
+            }
+            else
+            {
+                propertiesUpdated |= ApplyBooleanField(
+                    legacyStaticProperty,
+                    value => targetGameObject.isStatic != value,
+                    value => targetGameObject.isStatic = value,
+                    updatedFields,
+                    failedFields);
+            }
+
+            if (gameObjectData != null)
+            {
+                foreach (JProperty property in gameObjectData.Properties())
+                {
+                    if (!SupportedGameObjectFields.Contains(property.Name))
+                    {
+                        failedFields.Add(CreateFieldFailure(
+                            property.Name,
+                            $"Unknown GameObject field '{property.Name}'. Valid fields: " +
+                            "name, tag, layer, activeSelf, isActiveSelf, isStatic, static."));
+                    }
+                }
             }
 
             // Mark as dirty if any property was changed
@@ -133,34 +236,71 @@ namespace McpUnity.Tools
             }
 
             // Check if the GameObject is under a Canvas but lacks RectTransform
-            string warningMessage = null;
             if (targetGameObject.GetComponentInParent<Canvas>() != null
                 && targetGameObject.GetComponent<RectTransform>() == null)
             {
-                warningMessage = "WARNING: This GameObject is under a Canvas but has no RectTransform. "
-                               + "Use 'create_ui_element' for UI objects to get RectTransform automatically, "
-                               + "or add a RectTransform via 'update_component'.";
+                warnings.Add("This GameObject is under a Canvas but has no RectTransform. "
+                    + "Use 'create_ui_element' for UI objects to get RectTransform automatically, "
+                    + "or add a RectTransform via 'update_component'.");
             }
 
             // Compose result message and return as JObject (like UpdateComponentTool)
-            string message = propertiesUpdated
-                ? $"GameObject '{targetGameObject.name}' (identified by {identifierInfo}) updated successfully."
-                : $"No properties were changed for GameObject '{targetGameObject.name}' (identified by {identifierInfo}).";
-
-            if (warningMessage != null)
+            string message = $"Updated GameObject '{targetGameObject.name}' (identified by {identifierInfo}): " +
+                $"{updatedFields.Count} field(s) succeeded, {failedFields.Count} field(s) failed";
+            if (warnings.Count > 0)
             {
-                message += $"\n{warningMessage}";
+                message += $" (with {warnings.Count} warning(s))";
             }
 
             return new JObject
             {
-                ["success"] = true,
+                ["success"] = failedFields.Count == 0,
                 ["type"] = "text",
                 ["message"] = message,
                 ["instanceId"] = targetGameObject.GetInstanceID(),
                 ["name"] = targetGameObject.name,
-                ["path"] = GetGameObjectPath(targetGameObject)
+                ["path"] = GetGameObjectPath(targetGameObject),
+                ["updatedFields"] = new JArray(updatedFields.ToArray()),
+                ["failedFields"] = new JArray(failedFields.ToArray()),
+                ["warnings"] = new JArray(warnings.ToArray())
             };
+        }
+
+        private static JObject CreateFieldFailure(string fieldName, string reason)
+        {
+            return new JObject
+            {
+                ["field"] = fieldName,
+                ["reason"] = reason
+            };
+        }
+
+        private static bool ApplyBooleanField(
+            JProperty property,
+            Func<bool, bool> differsFromCurrent,
+            Action<bool> apply,
+            List<string> updatedFields,
+            List<JObject> failedFields)
+        {
+            if (property == null)
+                return false;
+
+            if (property.Value.Type != JTokenType.Boolean)
+            {
+                failedFields.Add(CreateFieldFailure(
+                    property.Name,
+                    $"Field '{property.Name}' must be a JSON boolean. Field was not changed."));
+                return false;
+            }
+
+            bool value = property.Value.ToObject<bool>();
+            bool changed = differsFromCurrent(value);
+            if (changed)
+            {
+                apply(value);
+            }
+            updatedFields.Add(property.Name);
+            return changed;
         }
 
         /// <summary>

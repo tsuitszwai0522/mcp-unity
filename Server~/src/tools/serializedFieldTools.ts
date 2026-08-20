@@ -15,12 +15,13 @@ const readToolDescription = `Reads serialized fields from a component using Unit
 More reliable than get_gameobject for reading specific component fields.
 Accepts both serialized names (m_Color, m_Sprite) and property names (color, sprite).
 If fieldNames is omitted, returns all visible serialized fields.
+Ambiguous short or partial component names require exactly one exact candidate type on the target; otherwise use a fully-qualified name.
 For enums, value is the underlying enum value and index is the enumValueIndex.`;
 
 const readParamsSchema = z.object({
   instanceId: z.number().optional().describe('The instance ID of the GameObject'),
   objectPath: z.string().optional().describe('The path of the GameObject in the hierarchy (alternative to instanceId)'),
-  componentName: z.string().describe('The name of the component to read from (e.g., "Image", "Text", "Button")'),
+  componentName: z.string().describe('The component type to read. Ambiguous short/partial names require exactly one exact candidate type on the target; otherwise use a fully-qualified name.'),
   fieldNames: z.array(z.string()).optional().describe('Specific field names to read. Accepts both serialized names (m_Color) and property names (color). If omitted, reads all visible fields.'),
 });
 
@@ -94,6 +95,7 @@ async function readHandler(mcpUnity: McpUnity, params: any): Promise<CallToolRes
           instanceId: response.instanceId,
           componentName: response.componentName,
           fields: response.fields,
+          warnings: response.warnings,
           message: response.message
         })
     ]
@@ -109,6 +111,7 @@ const writeToolDescription = `Writes serialized fields on a component using Unit
 Best for: Unity built-in component fields (m_Color, m_Sprite, etc.) and when exact serialized field control is needed.
 Does NOT add missing components — use update_component for that.
 Accepts both serialized names (m_Color) and property names (color).
+Ambiguous short or partial component names require exactly one exact candidate type on the target; otherwise use a fully-qualified name.
 Integer enum input is treated as the underlying enum value (not an index); invalid values are rejected with the valid names listed.
 Partial struct writes (for example, {"r":1}) preserve unmentioned components of the current value; on freshly-created objects, unmentioned components are the type's default.
 For object references, use asset path string, instance ID number, or structured {instanceId: N} / {assetPath: "..."} / {objectPath: "Path/To/Object"}.`;
@@ -116,7 +119,7 @@ For object references, use asset path string, instance ID number, or structured 
 const writeParamsSchema = z.object({
   instanceId: z.number().optional().describe('The instance ID of the GameObject'),
   objectPath: z.string().optional().describe('The path of the GameObject in the hierarchy (alternative to instanceId)'),
-  componentName: z.string().describe('The name of the component to write to (e.g., "Image", "Text", "Button")'),
+  componentName: z.string().describe('The component type to write. Ambiguous short/partial names require exactly one exact candidate type on the target; otherwise use a fully-qualified name.'),
   fieldData: z.record(z.string(), z.any()).describe('Object mapping field names to values. Accepts both serialized names (m_Color) and property names (color). For colors: {r, g, b, a}. For vectors: {x, y, z}. For object refs: asset path string or instance ID.'),
 });
 

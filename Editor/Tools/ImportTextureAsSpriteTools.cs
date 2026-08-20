@@ -137,10 +137,15 @@ namespace McpUnity.Tools
     /// </summary>
     public class CreateSpriteAtlasTool : McpToolBase
     {
+        private static Func<SpriteAtlas, bool> _readIncludeInBuild =
+            atlas => atlas.IsIncludeInBuild();
+        private static Func<SpriteAtlas, SpriteAtlasPackingSettings> _readPackingSettings =
+            atlas => atlas.GetPackingSettings();
+
         public CreateSpriteAtlasTool()
         {
             Name = "create_sprite_atlas";
-            Description = "Creates a SpriteAtlas asset that packs sprites from a specified folder";
+            Description = "Creates a SpriteAtlas asset that packs sprites from a specified folder. atlasName must exactly match the savePath filename without its .spriteatlas or .spriteatlasv2 extension; mismatches return validation_error before any asset is created.";
         }
 
         public override JObject Execute(JObject parameters)
@@ -189,9 +194,20 @@ namespace McpUnity.Tools
             }
 
             // Ensure save path has .spriteatlas extension
-            if (!savePath.EndsWith(".spriteatlas") && !savePath.EndsWith(".spriteatlasv2"))
+            if (!savePath.EndsWith(".spriteatlas", StringComparison.OrdinalIgnoreCase)
+                && !savePath.EndsWith(".spriteatlasv2", StringComparison.OrdinalIgnoreCase))
             {
                 savePath += ".spriteatlas";
+            }
+
+            string savePathAtlasName = Path.GetFileNameWithoutExtension(savePath);
+            if (!string.Equals(atlasName, savePathAtlasName, StringComparison.Ordinal))
+            {
+                return McpUnitySocketHandler.CreateErrorResponse(
+                    $"atlasName '{atlasName}' must exactly match savePath filename " +
+                    $"'{savePathAtlasName}' (without extension). No asset was created.",
+                    "validation_error"
+                );
             }
 
             // Verify the folder exists
@@ -252,19 +268,33 @@ namespace McpUnity.Tools
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
 
-            McpLogger.LogInfo($"[MCP Unity] Created SpriteAtlas '{atlasName}' at '{savePath}' with folder '{folderPath}'");
+            SpriteAtlas savedAtlas = AssetDatabase.LoadAssetAtPath<SpriteAtlas>(savePath);
+            if (savedAtlas == null)
+            {
+                return McpUnitySocketHandler.CreateErrorResponse(
+                    $"SpriteAtlas could not be read back after creation at '{savePath}'",
+                    "asset_creation_error"
+                );
+            }
+
+            string actualAtlasName = savedAtlas.name;
+            bool actualIncludeInBuild = _readIncludeInBuild(savedAtlas);
+            SpriteAtlasPackingSettings actualPackingSettings = _readPackingSettings(savedAtlas);
+            bool actualAllowRotation = actualPackingSettings.enableRotation;
+            bool actualTightPacking = actualPackingSettings.enableTightPacking;
+            McpLogger.LogInfo($"[MCP Unity] Created SpriteAtlas '{actualAtlasName}' at '{savePath}' with folder '{folderPath}'");
 
             return new JObject
             {
                 ["success"] = true,
                 ["type"] = "text",
-                ["message"] = $"Successfully created SpriteAtlas '{atlasName}' at '{savePath}' including folder '{folderPath}'",
-                ["atlasName"] = atlasName,
+                ["message"] = $"Successfully created SpriteAtlas '{actualAtlasName}' at '{savePath}' including folder '{folderPath}'",
+                ["atlasName"] = actualAtlasName,
                 ["savePath"] = savePath,
                 ["folderPath"] = folderPath,
-                ["includeInBuild"] = includeInBuild,
-                ["allowRotation"] = allowRotation,
-                ["tightPacking"] = tightPacking
+                ["includeInBuild"] = actualIncludeInBuild,
+                ["allowRotation"] = actualAllowRotation,
+                ["tightPacking"] = actualTightPacking
             };
         }
     }

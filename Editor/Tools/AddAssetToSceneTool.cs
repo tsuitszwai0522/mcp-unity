@@ -18,7 +18,7 @@ namespace McpUnity.Tools
         public AddAssetToSceneTool()
         {
             Name = "add_asset_to_scene";
-            Description = "Instantiates an AssetDatabase prefab in the active loaded-scene or open-Prefab context";
+            Description = "Instantiates an AssetDatabase prefab in the active loaded-scene or open-Prefab context. positionSpace defaults to 'world', preserving the requested final world position after parenting; use 'local' for parent-relative coordinates.";
         }
         
         /// <summary>
@@ -30,6 +30,7 @@ namespace McpUnity.Tools
             // Extract parameters
             string assetPath = parameters["assetPath"]?.ToObject<string>();
             string guid = parameters["guid"]?.ToObject<string>();
+            string positionSpace = parameters["positionSpace"]?.ToObject<string>() ?? "world";
             Vector3 position = parameters["position"]?.ToObject<JObject>() != null 
                 ? new Vector3(
                     parameters["position"]["x"]?.ToObject<float>() ?? 0f,
@@ -37,6 +38,14 @@ namespace McpUnity.Tools
                     parameters["position"]["z"]?.ToObject<float>() ?? 0f
                 ) 
                 : Vector3.zero;
+
+            if (positionSpace != "world" && positionSpace != "local")
+            {
+                return McpUnitySocketHandler.CreateErrorResponse(
+                    $"Invalid positionSpace '{positionSpace}'. Expected 'world' or 'local'.",
+                    "validation_error"
+                );
+            }
             
             // Optional parent game object
             string parentPath = parameters["parentPath"]?.ToObject<string>();
@@ -119,9 +128,6 @@ namespace McpUnity.Tools
                     ? (GameObject)PrefabUtility.InstantiatePrefab(asset, prefabRoot.scene)
                     : (GameObject)PrefabUtility.InstantiatePrefab(asset);
                 
-                // Set position
-                instance.transform.position = position;
-                
                 // Set parent if specified
                 if (parentRequested || prefabRoot != null)
                 {
@@ -129,6 +135,17 @@ namespace McpUnity.Tools
                     {
                         instance.transform.SetParent(parent.transform, false);
                     }
+                }
+
+                // Apply the requested position after parenting so its coordinate-space
+                // semantics remain true in the final hierarchy.
+                if (positionSpace == "local")
+                {
+                    instance.transform.localPosition = position;
+                }
+                else
+                {
+                    instance.transform.position = position;
                 }
                 
                 // Select the newly created object
@@ -149,7 +166,10 @@ namespace McpUnity.Tools
             // Log the action
             McpLogger.LogInfo($"Added asset '{asset.name}' to the active context from path '{assetPath}'");
             
-            // Create the response
+            Vector3 finalWorldPosition = instance.transform.position;
+            Vector3 finalLocalPosition = instance.transform.localPosition;
+
+            // Create the response from the instantiated object's final transform.
             return new JObject
             {
                 ["success"] = true,
@@ -157,7 +177,19 @@ namespace McpUnity.Tools
                 ["message"] = prefabRoot != null
                     ? $"Successfully added asset '{asset.name}' with instance ID {instance.GetInstanceID()} to Prefab contents '{prefabRoot.scene.path}'"
                     : $"Successfully added asset '{asset.name}' with instance ID {instance.GetInstanceID()} to the scene",
-                ["instanceId"] = instance.GetInstanceID()
+                ["instanceId"] = instance.GetInstanceID(),
+                ["worldPosition"] = ToJObject(finalWorldPosition),
+                ["localPosition"] = ToJObject(finalLocalPosition)
+            };
+        }
+
+        private static JObject ToJObject(Vector3 value)
+        {
+            return new JObject
+            {
+                ["x"] = value.x,
+                ["y"] = value.y,
+                ["z"] = value.z
             };
         }
     }

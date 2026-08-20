@@ -4,10 +4,11 @@ import { Logger } from '../utils/logger.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { McpUnityError, ErrorType } from '../utils/errors.js';
 import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+import { payloadContent } from '../utils/toolPayload.js';
 
 // Constants for the tool
 const toolName = 'update_gameobject';
-const toolDescription = 'Updates properties of a GameObject in the Unity scene by its instance ID or path. If the GameObject does not exist at the specified path, it will be created.';
+const toolDescription = 'Updates properties of a GameObject in the Unity scene by its instance ID or path. If the GameObject does not exist at the specified path, it will be created. Every supplied gameObjectData key is reported in updatedFields or failedFields; valid fields may still be applied when another field fails, and any field failure returns isError=true with the full payload.';
 const paramsSchema = z.object({
   instanceId: z.number().optional().describe('The instance ID of the GameObject to update'),
   objectPath: z.string().optional().describe('The path of the GameObject in the hierarchy to update (alternative to instanceId)'),
@@ -17,7 +18,7 @@ const paramsSchema = z.object({
     layer: z.number().int().optional().describe('New layer for the GameObject'),
     activeSelf: z.boolean().optional().describe('Set the active state of the GameObject (GameObject.SetActive(value))'),
     isStatic: z.boolean().optional().describe('Set the static state of the GameObject (GameObject.isStatic = value)'),
-  }).describe('An object containing the fields to update on the GameObject. If the GameObject does not exist at objectPath, it will be created.')
+  }).strict().describe('An object containing supported fields to update on the GameObject. Unknown keys are rejected instead of being ignored. If the GameObject does not exist at objectPath, it will be created.')
     .refine(data => Object.keys(data).length > 0, { message: 'gameObjectData must contain at least one property to update.' }),
 });
 
@@ -77,7 +78,9 @@ async function toolHandler(mcpUnity: McpUnity, params: any): Promise<CallToolRes
         }
       });
   
-      if (!response.success) {
+      const hasFieldFailures = Array.isArray(response.failedFields) && response.failedFields.length > 0;
+
+      if (!response.success && !hasFieldFailures) {
         throw new McpUnityError(
           ErrorType.TOOL_EXECUTION,
           response.message || `Failed to update the GameObject`
@@ -89,10 +92,27 @@ async function toolHandler(mcpUnity: McpUnity, params: any): Promise<CallToolRes
         ? `path '${params.objectPath}'` 
         : `ID ${params.instanceId}`;
       
-      return {
-        content: [{
-          type: response.type || 'text',
-          text: response.message || `Successfully updated the GameObject with ${targetDescription}`
-        }]
+      const result: CallToolResult = {
+        content: [
+          {
+            type: response.type || 'text',
+            text: response.message || `Successfully updated the GameObject with ${targetDescription}`
+          },
+          payloadContent({
+            message: response.message,
+            instanceId: response.instanceId,
+            name: response.name,
+            path: response.path,
+            updatedFields: response.updatedFields,
+            failedFields: response.failedFields,
+            warnings: response.warnings
+          })
+        ]
       };
+
+      if (hasFieldFailures) {
+        result.isError = true;
+      }
+
+      return result;
 }

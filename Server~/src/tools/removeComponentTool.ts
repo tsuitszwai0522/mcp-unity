@@ -4,13 +4,14 @@ import { Logger } from '../utils/logger.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { McpUnityError, ErrorType } from '../utils/errors.js';
 import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+import { payloadContent } from '../utils/toolPayload.js';
 
 const toolName = 'remove_component';
-const toolDescription = 'Removes a component from a GameObject. Identifies the GameObject by instance ID or hierarchy path.';
+const toolDescription = 'Removes a component from a GameObject. Identifies the GameObject by instance ID or hierarchy path. Ambiguous short or partial component names require exactly one exact candidate type on the target; otherwise use a fully-qualified name.';
 const paramsSchema = z.object({
   instanceId: z.number().optional().describe('The instance ID of the GameObject'),
   objectPath: z.string().optional().describe('The path of the GameObject in the hierarchy (alternative to instanceId)'),
-  componentName: z.string().describe('The name of the component to remove'),
+  componentName: z.string().describe('The component type name to remove. Ambiguous short/partial names require exactly one exact candidate type on the target; otherwise use a fully-qualified name.'),
 });
 
 /**
@@ -71,9 +72,18 @@ async function toolHandler(mcpUnity: McpUnity, params: any): Promise<CallToolRes
   }
 
   return {
-    content: [{
-      type: response.type || 'text',
-      text: response.message || 'Successfully removed component from GameObject'
-    }]
+    content: [
+      {
+        type: response.type || 'text',
+        text: response.message || 'Successfully removed component from GameObject'
+      },
+      payloadContent({
+        message: response.message,
+        instanceId: response.instanceId,
+        name: response.name,
+        path: response.path,
+        warnings: response.warnings
+      })
+    ]
   };
 }

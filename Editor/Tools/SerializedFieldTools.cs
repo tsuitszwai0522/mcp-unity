@@ -23,7 +23,8 @@ namespace McpUnity.Tools
             Description = "Reads serialized fields from a component using Unity's SerializedProperty API. " +
                 "Supports both serialized names (m_Color) and property names (color). Returns field names, " +
                 "types, and current values. For enums, 'value' is the underlying enum value and 'index' " +
-                "is the enumValueIndex.";
+                "is the enumValueIndex. Ambiguous short or partial component names require exactly one " +
+                "exact candidate type on the target; otherwise use a fully-qualified name.";
         }
 
         public override JObject Execute(JObject parameters)
@@ -46,7 +47,17 @@ namespace McpUnity.Tools
             }
 
             // Resolve component
-            Type componentType = ComponentResolver.FindComponentType(componentName);
+            Type componentType = ComponentResolver.FindComponentType(
+                componentName,
+                gameObject,
+                out string resolutionWarning,
+                out string ambiguityError);
+            if (!string.IsNullOrEmpty(ambiguityError))
+            {
+                return McpUnitySocketHandler.CreateErrorResponse(
+                    ambiguityError,
+                    "component_ambiguity_error");
+            }
             Component component = componentType != null
                 ? gameObject.GetComponents(componentType).FirstOrDefault()
                 : gameObject.GetComponent(componentName);
@@ -93,7 +104,7 @@ namespace McpUnity.Tools
                 }
             }
 
-            return new JObject
+            var response = new JObject
             {
                 ["success"] = true,
                 ["type"] = "text",
@@ -102,6 +113,13 @@ namespace McpUnity.Tools
                 ["componentName"] = componentName,
                 ["fields"] = fields
             };
+
+            if (!string.IsNullOrEmpty(resolutionWarning))
+            {
+                response["warnings"] = new JArray(resolutionWarning);
+            }
+
+            return response;
         }
 
         private JToken SerializedPropertyToJToken(SerializedProperty prop)
@@ -195,7 +213,8 @@ namespace McpUnity.Tools
                 "are rejected with the valid names listed. Partial struct writes (for example, {\"r\":1}) " +
                 "preserve unmentioned components of the current value; on freshly-created objects, " +
                 "unmentioned components are the type's default. More reliable than update_component for " +
-                "Unity built-in component fields.";
+                "Unity built-in component fields. Ambiguous short or partial component names require " +
+                "exactly one exact candidate type on the target; otherwise use a fully-qualified name.";
         }
 
         public override JObject Execute(JObject parameters)
@@ -226,7 +245,17 @@ namespace McpUnity.Tools
             }
 
             // Resolve component
-            Type componentType = ComponentResolver.FindComponentType(componentName);
+            Type componentType = ComponentResolver.FindComponentType(
+                componentName,
+                gameObject,
+                out string resolutionWarning,
+                out string ambiguityError);
+            if (!string.IsNullOrEmpty(ambiguityError))
+            {
+                return McpUnitySocketHandler.CreateErrorResponse(
+                    ambiguityError,
+                    "component_ambiguity_error");
+            }
             Component component = componentType != null
                 ? gameObject.GetComponents(componentType).FirstOrDefault()
                 : gameObject.GetComponent(componentName);
@@ -242,6 +271,10 @@ namespace McpUnity.Tools
             var updatedFields = new List<string>();
             var failedFields = new List<JObject>();
             var warnings = new List<string>();
+            if (!string.IsNullOrEmpty(resolutionWarning))
+            {
+                warnings.Add(resolutionWarning);
+            }
 
             foreach (var property in fieldData.Properties())
             {

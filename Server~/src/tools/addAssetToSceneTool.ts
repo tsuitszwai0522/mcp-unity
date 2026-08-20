@@ -3,20 +3,23 @@ import { McpUnity } from '../unity/mcpUnity.js';
 import { McpUnityError, ErrorType } from '../utils/errors.js';
 import * as z from 'zod';
 import { Logger } from '../utils/logger.js';
+import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+import { payloadContent } from '../utils/toolPayload.js';
 
 // Constants for the tool
 const toolName = 'add_asset_to_scene';
-const toolDescription = 'Instantiates an AssetDatabase prefab in the active context: a loaded scene normally, or the open Prefab contents when a Prefab editing session is active';
+const toolDescription = 'Instantiates an AssetDatabase prefab in the active context: a loaded scene normally, or the open Prefab contents when a Prefab editing session is active. Position defaults to final world-space coordinates; use positionSpace="local" for coordinates relative to the parent.';
 
 // Parameter schema for the tool
 const paramsSchema = z.object({
   assetPath: z.string().optional().describe('The path of the asset in the AssetDatabase'),
   guid: z.string().optional().describe('The GUID of the asset'),
   position: z.object({
-    x: z.number().default(0).describe('X position in the active context'),
-    y: z.number().default(0).describe('Y position in the active context'),
-    z: z.number().default(0).describe('Z position in the active context')
-  }).optional().describe('Position in the active context (defaults to Vector3.zero)'),
+    x: z.number().default(0).describe('X coordinate in the selected position space'),
+    y: z.number().default(0).describe('Y coordinate in the selected position space'),
+    z: z.number().default(0).describe('Z coordinate in the selected position space')
+  }).optional().describe('Position coordinates (defaults to Vector3.zero)'),
+  positionSpace: z.enum(['world', 'local']).optional().default('world').describe('Coordinate space for position. "world" (default) guarantees the final world position even when parented; "local" treats position as relative to the parent.'),
   parentPath: z.string().optional().describe('Parent path in the active scene or Prefab contents; an unresolved parent fails without instantiating'),
   parentId: z.number().optional().describe('Parent instance ID in the active context; an unresolved parent fails without instantiating')
 });
@@ -58,7 +61,7 @@ export function registerAddAssetToSceneTool(server: McpServer, mcpUnity: McpUnit
  * @returns A promise that resolves to the tool execution result
  * @throws McpUnityError if validation fails or the request to Unity fails
  */
-async function toolHandler(mcpUnity: McpUnity, params: any) {  
+async function toolHandler(mcpUnity: McpUnity, params: any): Promise<CallToolResult> {
   if (!params.assetPath && !params.guid) {
     throw new McpUnityError(
       ErrorType.VALIDATION,
@@ -68,7 +71,10 @@ async function toolHandler(mcpUnity: McpUnity, params: any) {
   
   const response = await mcpUnity.sendRequest({
     method: toolName,
-    params
+    params: {
+      ...params,
+      positionSpace: params.positionSpace ?? 'world'
+    }
   });
   
   if (!response.success) {
@@ -79,9 +85,17 @@ async function toolHandler(mcpUnity: McpUnity, params: any) {
   }
   
   return {
-    content: [{
-      type: response.type || 'text',
-      text: response.message || `Successfully added asset to the active context`
-    }]
+    content: [
+      {
+        type: response.type || 'text',
+        text: response.message || `Successfully added asset to the active context`
+      },
+      payloadContent({
+        message: response.message,
+        instanceId: response.instanceId,
+        worldPosition: response.worldPosition,
+        localPosition: response.localPosition
+      })
+    ]
   };
 }

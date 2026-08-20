@@ -25,7 +25,8 @@ namespace McpUnity.Tools
                 "the valid names listed. Partial struct writes (for example, {\"r\":1}) preserve " +
                 "unmentioned components of the current value; on freshly-created objects, unmentioned " +
                 "components are the type's default. Prefer passing componentData in the same call to avoid " +
-                "duplicate additions.";
+                "duplicate additions. Ambiguous short or partial component names are accepted only when " +
+                "exactly one candidate type is already attached; otherwise use a fully-qualified name.";
         }
         
         /// <summary>
@@ -76,7 +77,17 @@ namespace McpUnity.Tools
             McpLogger.LogInfo($"[MCP Unity] Updating component '{componentName}' on GameObject '{gameObject.name}' (found by {identifier})");
             
             // Resolve the component type first for reliable lookup
-            Type componentType = ComponentResolver.FindComponentType(componentName);
+            Type componentType = ComponentResolver.FindComponentType(
+                componentName,
+                gameObject,
+                out string resolutionWarning,
+                out string ambiguityError);
+            if (!string.IsNullOrEmpty(ambiguityError))
+            {
+                return McpUnitySocketHandler.CreateErrorResponse(
+                    ambiguityError,
+                    "component_ambiguity_error");
+            }
 
             // Try to find the existing component using resolved Type (preferred) or string fallback
             // Use GetComponents (plural) to ensure we find all instances and take the first
@@ -117,6 +128,10 @@ namespace McpUnity.Tools
             }
             // Update component fields
             var updateWarnings = new List<string>();
+            if (!string.IsNullOrEmpty(resolutionWarning))
+            {
+                updateWarnings.Add(resolutionWarning);
+            }
             var updatedFields = new List<string>();
             var failedFields = new List<JObject>();
             if (componentData != null && componentData.Count > 0)
@@ -125,9 +140,10 @@ namespace McpUnity.Tools
                     component,
                     componentData,
                     out string errorMessage,
-                    out updateWarnings,
+                    out List<string> fieldWarnings,
                     out updatedFields,
                     out failedFields);
+                updateWarnings.AddRange(fieldWarnings);
                 // If update failed, return error
                 if (!success)
                 {

@@ -4,6 +4,7 @@ import { McpUnity } from '../unity/mcpUnity.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { McpUnityError, ErrorType } from '../utils/errors.js';
 import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+import { payloadContent } from '../utils/toolPayload.js';
 
 // ============================================================================
 // IMPORT TEXTURE AS SPRITE TOOL
@@ -80,10 +81,10 @@ async function importTextureAsSpriteHandler(mcpUnity: McpUnity, params: any): Pr
 // ============================================================================
 
 const createSpriteAtlasName = 'create_sprite_atlas';
-const createSpriteAtlasDescription = 'Creates a SpriteAtlas asset that packs sprites from a specified folder';
+const createSpriteAtlasDescription = 'Creates a SpriteAtlas asset that packs sprites from a specified folder. atlasName must exactly match the savePath filename without its .spriteatlas or .spriteatlasv2 extension; mismatches return validation_error before asset creation.';
 const createSpriteAtlasSchema = z.object({
-  atlasName: z.string().describe('The name of the SpriteAtlas'),
-  savePath: z.string().describe('The asset path to save the SpriteAtlas (e.g., "Assets/SpriteAtlas/Cart/Cart.spriteatlas")'),
+  atlasName: z.string().describe('Required consistency assertion: must exactly equal the savePath filename without the .spriteatlas or .spriteatlasv2 extension'),
+  savePath: z.string().describe('The asset path to save the SpriteAtlas; its extensionless filename must exactly match atlasName (e.g., "Assets/SpriteAtlas/Cart/Cart.spriteatlas" for atlasName "Cart")'),
   folderPath: z.string().describe('The folder containing sprites to include (e.g., "Assets/Sprites/Cart")'),
   includeInBuild: z.boolean().optional().default(true).describe('Whether to include this atlas in builds (default: true)'),
   allowRotation: z.boolean().optional().default(true).describe('Allow sprite rotation during packing (default: true)'),
@@ -156,9 +157,22 @@ async function createSpriteAtlasHandler(mcpUnity: McpUnity, params: any): Promis
   }
 
   return {
-    content: [{
-      type: response.type || 'text',
-      text: response.message || `Successfully created SpriteAtlas '${params.atlasName}'`
-    }]
+    content: [
+      {
+        type: response.type || 'text',
+        text: response.message || (response.atlasName
+          ? `Successfully created SpriteAtlas '${response.atlasName}'`
+          : 'Successfully created SpriteAtlas')
+      },
+      payloadContent({
+        message: response.message,
+        atlasName: response.atlasName,
+        savePath: response.savePath,
+        folderPath: response.folderPath,
+        includeInBuild: response.includeInBuild,
+        allowRotation: response.allowRotation,
+        tightPacking: response.tightPacking
+      })
+    ]
   };
 }
