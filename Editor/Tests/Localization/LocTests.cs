@@ -1,6 +1,8 @@
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using McpUnity.Tools.Localization;
 using Newtonsoft.Json.Linq;
 using NUnit.Framework;
@@ -25,16 +27,38 @@ namespace McpUnity.Tests.Localization
 
         private Locale _testLocale;
         private bool _ownsTestLocale;
+        private bool _ownsPrimaryTestTable;
+        private bool _ownsAssetsTestsFolder;
+        private bool _ownsTestDirectory;
+        private UnityEngine.Object _addressablesSettingsBefore;
+        private HashSet<string> _addressableGroupPathsBefore;
+        private HashSet<string> _addressableLabelsBefore;
+        private UnityEngine.Hash128 _addressablesCurrentHashBefore;
+        private HashSet<string> _addressableAssetPathsBefore;
+        private bool _addressablesDataFolderExisted;
+
+        private const string AddressablesDataFolder = "Assets/AddressableAssetsData";
 
         [OneTimeSetUp]
         public void OneTimeSetUp()
         {
-            if (!AssetDatabase.IsValidFolder("Assets/Tests"))
-                AssetDatabase.CreateFolder("Assets", "Tests");
-            if (!AssetDatabase.IsValidFolder(TestDir))
-                AssetDatabase.CreateFolder("Assets/Tests", "LocalizationTests");
+            SnapshotAddressablesState();
 
-            DeleteExistingTestTableIfAny();
+            if (!AssetDatabase.IsValidFolder("Assets/Tests"))
+            {
+                AssetDatabase.CreateFolder("Assets", "Tests");
+                _ownsAssetsTestsFolder = true;
+            }
+            if (!AssetDatabase.IsValidFolder(TestDir))
+            {
+                AssetDatabase.CreateFolder("Assets/Tests", "LocalizationTests");
+                _ownsTestDirectory = true;
+            }
+
+            Assert.IsNull(
+                FindTestCollection(),
+                $"A StringTableCollection named '{TestTableName}' already exists. The hermetic " +
+                "fixture refuses to delete a collection it did not create.");
 
             var identifier = new LocaleIdentifier(TestLocaleCode);
             _testLocale = LocalizationEditorSettings.GetLocales()
@@ -54,31 +78,372 @@ namespace McpUnity.Tests.Localization
         [OneTimeTearDown]
         public void OneTimeTearDown()
         {
-            DeleteExistingTestTableIfAny();
-
-            if (_ownsTestLocale && _testLocale != null)
+            var cleanupFailures = new List<string>();
+            try
             {
-                LocalizationEditorSettings.RemoveLocale(_testLocale, createUndo: false);
-                string path = AssetDatabase.GetAssetPath(_testLocale);
-                if (!string.IsNullOrEmpty(path))
-                    AssetDatabase.DeleteAsset(path);
+                DeleteOwnedTestTableIfAny();
+            }
+            catch (Exception ex)
+            {
+                cleanupFailures.Add($"Failed to delete the fixture StringTableCollection: {ex.Message}");
             }
 
-            if (AssetDatabase.IsValidFolder(TestDir))
-                AssetDatabase.DeleteAsset(TestDir);
+            CleanupOwnedLocale(_testLocale, _ownsTestLocale, cleanupFailures);
+
+            AssetDatabase.SaveAssets();
+            RestoreAddressablesState(cleanupFailures);
+
+            if (_ownsTestDirectory && AssetDatabase.IsValidFolder(TestDir)
+                && !AssetDatabase.DeleteAsset(TestDir))
+            {
+                cleanupFailures.Add($"Failed to delete fixture directory '{TestDir}'.");
+            }
+
+            if (_ownsAssetsTestsFolder && AssetDatabase.IsValidFolder("Assets/Tests"))
+            {
+                if (Directory.EnumerateFileSystemEntries("Assets/Tests").Any())
+                {
+                    cleanupFailures.Add(
+                        "Fixture created 'Assets/Tests' but could not remove it because it contains " +
+                        "assets not owned by this fixture.");
+                }
+                else if (!AssetDatabase.DeleteAsset("Assets/Tests"))
+                {
+                    cleanupFailures.Add("Failed to delete fixture-created 'Assets/Tests'.");
+                }
+            }
 
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
+
+            Assert.That(
+                cleanupFailures,
+                Is.Empty,
+                "Localization fixture teardown did not restore the consumer project:\n" +
+                string.Join("\n", cleanupFailures));
         }
 
-        private static void DeleteExistingTestTableIfAny()
+        private void SnapshotAddressablesState()
         {
+            _addressablesDataFolderExisted = AssetDatabase.IsValidFolder(AddressablesDataFolder);
+            _addressableAssetPathsBefore = GetAssetPathsUnder(AddressablesDataFolder);
+            _addressablesSettingsBefore = GetAddressableAssetSettings(create: false);
+            if (_addressablesSettingsBefore == null)
+            {
+                return;
+            }
+
+            var serializedSettings = new SerializedObject(_addressablesSettingsBefore);
+            _addressableGroupPathsBefore = GetObjectReferencePaths(
+                serializedSettings.FindProperty("m_GroupAssets"));
+            _addressableLabelsBefore = GetAddressableLabels(_addressablesSettingsBefore);
+            _addressablesCurrentHashBefore = GetAddressablesCurrentHash(
+                _addressablesSettingsBefore);
+        }
+
+        private static void CleanupOwnedLocale(
+            Locale locale,
+            bool ownsLocale,
+            List<string> cleanupFailures)
+        {
+            if (!ownsLocale || locale == null)
+            {
+                return;
+            }
+
+            try
+            {
+                LocalizationEditorSettings.RemoveLocale(locale, createUndo: false);
+                string path = AssetDatabase.GetAssetPath(locale);
+                if (!string.IsNullOrEmpty(path) && !AssetDatabase.DeleteAsset(path))
+                {
+                    cleanupFailures.Add($"Failed to delete fixture locale asset '{path}'.");
+                }
+            }
+            catch (Exception ex)
+            {
+                cleanupFailures.Add($"Failed to remove the fixture locale: {ex.Message}");
+            }
+        }
+
+        private void RestoreAddressablesState(List<string> cleanupFailures)
+        {
+            UnityEngine.Object currentSettings = GetAddressableAssetSettings(create: false);
+            if (_addressablesSettingsBefore == null)
+            {
+                RestoreInitiallyMissingAddressablesSettings(currentSettings, cleanupFailures);
+                return;
+            }
+            if (currentSettings == null)
+            {
+                cleanupFailures.Add("Addressables settings existed before the fixture but are now missing.");
+                return;
+            }
+
+            try
+            {
+                RemoveFixtureCreatedAddressableGroups(currentSettings);
+                RestoreAddressableLabelsAndHash(currentSettings);
+                AssetDatabase.SaveAssets();
+                ValidateAddressablesRestored(currentSettings, cleanupFailures);
+            }
+            catch (Exception ex)
+            {
+                cleanupFailures.Add($"Failed to restore Addressables state: {ex.Message}");
+            }
+        }
+
+        private void RestoreInitiallyMissingAddressablesSettings(
+            UnityEngine.Object currentSettings,
+            List<string> cleanupFailures)
+        {
+            if (currentSettings == null)
+            {
+                return;
+            }
+
+            try
+            {
+                HashSet<string> currentPaths = GetAssetPathsUnder(AddressablesDataFolder);
+                foreach (string createdPath in currentPaths
+                    .Where(path => !_addressableAssetPathsBefore.Contains(path))
+                    .OrderByDescending(path => path.Length))
+                {
+                    AssetDatabase.DeleteAsset(createdPath);
+                }
+
+                if (!_addressablesDataFolderExisted
+                    && AssetDatabase.IsValidFolder(AddressablesDataFolder))
+                {
+                    AssetDatabase.DeleteAsset(AddressablesDataFolder);
+                }
+                AssetDatabase.SaveAssets();
+
+                HashSet<string> remainingPaths = GetAssetPathsUnder(AddressablesDataFolder);
+                if (!remainingPaths.SetEquals(_addressableAssetPathsBefore))
+                {
+                    cleanupFailures.Add(
+                        "Addressables settings were created by the fixture, but their generated assets " +
+                        "could not be restored to the original path set.");
+                }
+            }
+            catch (Exception ex)
+            {
+                cleanupFailures.Add(
+                    $"Failed to remove fixture-created Addressables settings: {ex.Message}");
+            }
+        }
+
+        private void RemoveFixtureCreatedAddressableGroups(UnityEngine.Object settings)
+        {
+            var serializedSettings = new SerializedObject(settings);
+            SerializedProperty groups = serializedSettings.FindProperty("m_GroupAssets");
+            var createdGroups = new List<UnityEngine.Object>();
+            for (int i = 0; i < groups.arraySize; i++)
+            {
+                UnityEngine.Object group = groups.GetArrayElementAtIndex(i).objectReferenceValue;
+                string groupPath = AssetDatabase.GetAssetPath(group);
+                if (group != null && !_addressableGroupPathsBefore.Contains(groupPath))
+                {
+                    createdGroups.Add(group);
+                }
+            }
+
+            MethodInfo removeGroup = settings.GetType()
+                .GetMethods(BindingFlags.Public | BindingFlags.Instance)
+                .Single(method => method.Name == "RemoveGroup"
+                    && method.GetParameters().Length == 1);
+            foreach (UnityEngine.Object group in createdGroups)
+            {
+                removeGroup.Invoke(settings, new object[] { group });
+            }
+        }
+
+        private void RestoreAddressableLabelsAndHash(UnityEngine.Object settings)
+        {
+            RestoreAddressableLabelsAndHash(
+                settings,
+                _addressableLabelsBefore,
+                _addressablesCurrentHashBefore);
+        }
+
+        private static void RestoreAddressableLabelsAndHash(
+            UnityEngine.Object settings,
+            HashSet<string> labelsBefore,
+            UnityEngine.Hash128 currentHashBefore)
+        {
+            HashSet<string> currentLabels = GetAddressableLabels(settings);
+            foreach (string createdLabel in currentLabels.Where(label => !labelsBefore.Contains(label)))
+            {
+                InvokeAddressablesLabelMethod(settings, "RemoveLabel", createdLabel);
+            }
+
+            HashSet<string> restoredLabels = GetAddressableLabels(settings);
+            if (!restoredLabels.SetEquals(labelsBefore))
+            {
+                throw new InvalidOperationException(
+                    "Addressables labels differ after removing fixture-created labels.");
+            }
+
+            // RemoveLabel invalidates both LabelTable.m_CurrentHash and the settings hash.
+            // Clear only the outer cache once more so the persisted value is proven to be
+            // derivable from the restored state instead of copied from the snapshot.
+            InvalidateAddressablesCurrentHash(settings);
+            UnityEngine.Hash128 rebuiltHash = GetAddressablesCurrentHash(settings);
+            if (rebuiltHash != currentHashBefore)
+            {
+                throw new InvalidOperationException(
+                    $"Addressables currentHash rebuilt as {rebuiltHash} instead of " +
+                    $"the pre-fixture value {currentHashBefore}.");
+            }
+            EditorUtility.SetDirty(settings);
+        }
+
+        private void ValidateAddressablesRestored(
+            UnityEngine.Object settings,
+            List<string> cleanupFailures)
+        {
+            var serializedSettings = new SerializedObject(settings);
+            HashSet<string> groupPaths = GetObjectReferencePaths(
+                serializedSettings.FindProperty("m_GroupAssets"));
+            HashSet<string> labels = GetAddressableLabels(settings);
+            UnityEngine.Hash128 currentHash = GetAddressablesCurrentHash(settings);
+
+            if (!groupPaths.SetEquals(_addressableGroupPathsBefore))
+                cleanupFailures.Add("Addressables group references differ from the pre-fixture snapshot.");
+            if (!labels.SetEquals(_addressableLabelsBefore))
+                cleanupFailures.Add("Addressables labels differ from the pre-fixture snapshot.");
+            if (currentHash != _addressablesCurrentHashBefore)
+                cleanupFailures.Add("Addressables m_currentHash differs from the pre-fixture snapshot.");
+        }
+
+        private static UnityEngine.Object GetAddressableAssetSettings(bool create)
+        {
+            PropertyInfo instanceProperty = typeof(LocalizationEditorSettings).GetProperty(
+                "Instance",
+                BindingFlags.NonPublic | BindingFlags.Static);
+            MethodInfo getter = typeof(LocalizationEditorSettings).GetMethod(
+                "GetAddressableAssetSettings",
+                BindingFlags.NonPublic | BindingFlags.Instance);
+            if (instanceProperty == null || getter == null)
+            {
+                throw new MissingMethodException(
+                    typeof(LocalizationEditorSettings).FullName,
+                    "Instance/GetAddressableAssetSettings");
+            }
+            return getter.Invoke(
+                instanceProperty.GetValue(null),
+                new object[] { create }) as UnityEngine.Object;
+        }
+
+        private static HashSet<string> GetObjectReferencePaths(SerializedProperty array)
+        {
+            var paths = new HashSet<string>();
+            if (array == null || !array.isArray)
+            {
+                return paths;
+            }
+            for (int i = 0; i < array.arraySize; i++)
+            {
+                UnityEngine.Object value = array.GetArrayElementAtIndex(i).objectReferenceValue;
+                if (value != null)
+                {
+                    paths.Add(AssetDatabase.GetAssetPath(value));
+                }
+            }
+            return paths;
+        }
+
+        private static HashSet<string> GetAddressableLabels(UnityEngine.Object settings)
+        {
+            MethodInfo getLabels = settings.GetType().GetMethod(
+                "GetLabels",
+                BindingFlags.Public | BindingFlags.Instance,
+                binder: null,
+                types: Type.EmptyTypes,
+                modifiers: null);
+            if (getLabels == null)
+            {
+                throw new MissingMethodException(settings.GetType().FullName, "GetLabels");
+            }
+
+            var labels = getLabels.Invoke(settings, null) as IEnumerable<string>;
+            if (labels == null)
+            {
+                throw new InvalidOperationException(
+                    "AddressableAssetSettings.GetLabels returned an unexpected value.");
+            }
+            return new HashSet<string>(labels);
+        }
+
+        private static UnityEngine.Hash128 GetAddressablesCurrentHash(
+            UnityEngine.Object settings)
+        {
+            PropertyInfo currentHash = settings.GetType().GetProperty(
+                "currentHash",
+                BindingFlags.Public | BindingFlags.Instance);
+            if (currentHash == null || currentHash.PropertyType != typeof(UnityEngine.Hash128))
+            {
+                throw new MissingMemberException(settings.GetType().FullName, "currentHash");
+            }
+            return (UnityEngine.Hash128)currentHash.GetValue(settings);
+        }
+
+        private static void InvokeAddressablesLabelMethod(
+            UnityEngine.Object settings,
+            string methodName,
+            string label)
+        {
+            MethodInfo method = settings.GetType().GetMethod(
+                methodName,
+                BindingFlags.Public | BindingFlags.Instance,
+                binder: null,
+                types: new[] { typeof(string), typeof(bool) },
+                modifiers: null);
+            if (method == null)
+            {
+                throw new MissingMethodException(settings.GetType().FullName, methodName);
+            }
+            method.Invoke(settings, new object[] { label, false });
+        }
+
+        private static void InvalidateAddressablesCurrentHash(UnityEngine.Object settings)
+        {
+            var serializedSettings = new SerializedObject(settings);
+            SerializedProperty currentHash = serializedSettings.FindProperty("m_currentHash");
+            if (currentHash == null)
+            {
+                throw new MissingFieldException(settings.GetType().FullName, "m_currentHash");
+            }
+            currentHash.hash128Value = default(UnityEngine.Hash128);
+            serializedSettings.ApplyModifiedProperties();
+        }
+
+        private static HashSet<string> GetAssetPathsUnder(string folder)
+        {
+            if (!AssetDatabase.IsValidFolder(folder))
+            {
+                return new HashSet<string>();
+            }
+            return new HashSet<string>(
+                AssetDatabase.FindAssets(string.Empty, new[] { folder })
+                    .Select(AssetDatabase.GUIDToAssetPath)
+                    .Where(path => !string.IsNullOrEmpty(path)));
+        }
+
+        private void DeleteOwnedTestTableIfAny()
+        {
+            if (!_ownsPrimaryTestTable)
+            {
+                return;
+            }
             var existing = LocalizationEditorSettings.GetStringTableCollections()
                 .FirstOrDefault(c => c.TableCollectionName == TestTableName);
             if (existing != null)
             {
                 DeleteStringTableCollection(existing);
             }
+            _ownsPrimaryTestTable = false;
         }
 
         private static void AssertSuccess(JObject result)
@@ -118,6 +483,8 @@ namespace McpUnity.Tests.Localization
                 ["locales"] = new JArray(TestLocaleCode),
                 ["directory"] = TestDir
             });
+
+            _ownsPrimaryTestTable = FindTestCollection() != null;
 
             AssertSuccess(result);
             Assert.AreEqual(true, result.Value<bool>("created"));
@@ -356,12 +723,14 @@ namespace McpUnity.Tests.Localization
             // but this test runs unordered — make a dedicated table if needed).
             const string dupName = "McpLocToolDupTestTable";
             var locales = new[] { _testLocale }.ToList();
+            bool ownsDuplicateCollection = false;
 
             var existing = LocalizationEditorSettings.GetStringTableCollections()
                 .FirstOrDefault(c => c.TableCollectionName == dupName);
             if (existing == null)
             {
                 LocalizationEditorSettings.CreateStringTableCollection(dupName, TestDir, locales);
+                ownsDuplicateCollection = true;
             }
 
             try
@@ -379,7 +748,7 @@ namespace McpUnity.Tests.Localization
             {
                 var dup = LocalizationEditorSettings.GetStringTableCollections()
                     .FirstOrDefault(c => c.TableCollectionName == dupName);
-                if (dup != null) DeleteStringTableCollection(dup);
+                if (ownsDuplicateCollection && dup != null) DeleteStringTableCollection(dup);
             }
         }
 
@@ -833,8 +1202,11 @@ namespace McpUnity.Tests.Localization
             // identifiers (e.g. "zh-Hant"), so we warn rather than error.
             const string oddCode = "xx-NOSUCH";
             const string oddDir = "Assets/Tests/LocalizationTests/OddLocale";
-
-            CleanupLocaleIfPresent(oddCode);
+            if (FindLocaleByCode(oddCode) != null)
+            {
+                Assert.Inconclusive(
+                    $"Locale '{oddCode}' already exists — refusing to remove a consumer-owned locale.");
+            }
 
             try
             {
@@ -1019,7 +1391,11 @@ namespace McpUnity.Tests.Localization
         public void RemoveLocale_NotRegistered_ReturnsNotRegisteredAction()
         {
             const string code = "xx-MISSING-FROM-PROJECT";
-            CleanupLocaleIfPresent(code); // belt-and-braces
+            if (FindLocaleByCode(code) != null)
+            {
+                Assert.Inconclusive(
+                    $"Locale '{code}' is registered — refusing to remove a consumer-owned locale.");
+            }
 
             var result = new LocRemoveLocaleTool().Execute(new JObject
             {
@@ -1081,20 +1457,117 @@ namespace McpUnity.Tests.Localization
             }
         }
 
-        // ---- one-off cleanup of dangling xx-NOSUCH from session probe -----------
-        // (See conversation around v1.10.0 — a verification probe re-registered
-        // xx-NOSUCH after the user manually cleaned it up. This ensures it's gone
-        // for good without needing an MCP server restart.)
+        [Test, Order(10000)]
+        public void AddressablesRestore_RemovesOnlyFixtureLabelsAndRebuildsDerivedHash()
+        {
+            UnityEngine.Object settings = GetAddressableAssetSettings(create: false);
+            if (settings == null)
+            {
+                Assert.Inconclusive(
+                    "No AddressableAssetSettings exists, so label/hash restoration is not applicable.");
+            }
+
+            string fixtureLabel = $"McpFixtureOwned-{Guid.NewGuid():N}";
+            HashSet<string> projectLabelsBefore = GetAddressableLabels(settings);
+            UnityEngine.Hash128 projectHashBefore = GetAddressablesCurrentHash(settings);
+
+            try
+            {
+                InvokeAddressablesLabelMethod(settings, "AddLabel", fixtureLabel);
+                Assert.IsTrue(GetAddressableLabels(settings).Contains(fixtureLabel));
+                Assert.AreNotEqual(
+                    projectHashBefore,
+                    GetAddressablesCurrentHash(settings),
+                    "Adding the fixture label must invalidate and change the derived hash.");
+
+                RestoreAddressableLabelsAndHash(
+                    settings,
+                    projectLabelsBefore,
+                    projectHashBefore);
+
+                HashSet<string> restoredLabels = GetAddressableLabels(settings);
+                Assert.IsTrue(
+                    restoredLabels.SetEquals(projectLabelsBefore),
+                    "Restore must preserve every consumer-owned baseline label and remove only " +
+                    "the later fixture label.");
+
+                // Simulate a later Save Project/domain operation invalidating only the
+                // settings-level cache. A stale LabelTable cache would now rebuild the
+                // wrong value even though immediate serialized-field assertions passed.
+                InvalidateAddressablesCurrentHash(settings);
+                Assert.AreEqual(
+                    projectHashBefore,
+                    GetAddressablesCurrentHash(settings),
+                    "The restored labels must rebuild the same derived hash after invalidation.");
+                EditorUtility.SetDirty(settings);
+                AssetDatabase.SaveAssets();
+            }
+            finally
+            {
+                if (!projectLabelsBefore.Contains(fixtureLabel)
+                    && GetAddressableLabels(settings).Contains(fixtureLabel))
+                {
+                    InvokeAddressablesLabelMethod(settings, "RemoveLabel", fixtureLabel);
+                }
+
+                InvalidateAddressablesCurrentHash(settings);
+                UnityEngine.Hash128 cleanedHash = GetAddressablesCurrentHash(settings);
+                EditorUtility.SetDirty(settings);
+                AssetDatabase.SaveAssets();
+                Assert.AreEqual(
+                    projectHashBefore,
+                    cleanedHash,
+                    "The restoration regression test failed to restore its own probe labels.");
+            }
+        }
+
+        // ---- legacy probe guard -------------------------------------------------
         [Test]
-        public void Cleanup_RemoveDanglingXxNoSuchFromVerifyProbe()
+        public void Cleanup_DoesNotRemoveConsumerOwnedXxNoSuchLocale()
         {
             const string code = "xx-NOSUCH";
-            var existed = FindLocaleByCode(code) != null;
-            CleanupLocaleIfPresent(code);
-            Assert.IsNull(FindLocaleByCode(code));
-            // Note for test runner: we don't fail when it wasn't there — the cleanup
-            // is idempotent. existed flag is captured purely for log-value.
-            TestContext.WriteLine($"Cleanup_RemoveDanglingXxNoSuch: existed={existed}");
+            if (FindLocaleByCode(code) != null)
+            {
+                Assert.Inconclusive(
+                    $"Locale '{code}' already exists — refusing to replace a consumer-owned locale.");
+            }
+
+            string assetPath = $"{TestDir}/ConsumerOwnedLocale_{Guid.NewGuid():N}.asset";
+            Locale consumerOwned = Locale.CreateLocale(new LocaleIdentifier(code));
+            AssetDatabase.CreateAsset(consumerOwned, assetPath);
+            LocalizationEditorSettings.AddLocale(consumerOwned, createUndo: false);
+            AssetDatabase.SaveAssets();
+
+            try
+            {
+                var cleanupFailures = new List<string>();
+                CleanupOwnedLocale(
+                    consumerOwned,
+                    ownsLocale: false,
+                    cleanupFailures: cleanupFailures);
+
+                Assert.That(cleanupFailures, Is.Empty);
+                Assert.AreSame(
+                    consumerOwned,
+                    FindLocaleByCode(code),
+                    "Fixture cleanup removed a locale it did not own.");
+                Assert.AreSame(
+                    consumerOwned,
+                    AssetDatabase.LoadAssetAtPath<Locale>(assetPath),
+                    "Fixture cleanup deleted a locale asset it did not own.");
+            }
+            finally
+            {
+                if (FindLocaleByCode(code) == consumerOwned)
+                {
+                    LocalizationEditorSettings.RemoveLocale(consumerOwned, createUndo: false);
+                }
+                if (AssetDatabase.LoadAssetAtPath<Locale>(assetPath) != null)
+                {
+                    AssetDatabase.DeleteAsset(assetPath);
+                }
+                AssetDatabase.SaveAssets();
+            }
         }
 
         // ---- helpers -----------------------------------------------------------

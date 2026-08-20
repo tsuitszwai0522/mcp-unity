@@ -16,13 +16,17 @@ More reliable than get_gameobject for reading specific component fields.
 Accepts both serialized names (m_Color, m_Sprite) and property names (color, sprite).
 If fieldNames is omitted, returns all visible serialized fields.
 Ambiguous short or partial component names require exactly one exact candidate type on the target; otherwise use a fully-qualified name.
-For enums, value is the underlying enum value and index is the enumValueIndex.`;
+For enums, value is the underlying enum value and index is the enumValueIndex.
+Generic fields and arrays are expanded recursively. maxDepth defaults to 8 and can only be lowered (0-8); depth-truncated branches are reported in arrayMetadata or with an explicit _truncated marker.
+maxElements is one global returned-element budget across all visited arrays (default 100, narrowing-only range 0-100). arrayMetadata reports total, returned, truncated, and the truncation cause for every visited array property path, while the scalar message summarizes truncation so it survives the 20,000-character transport cap.`;
 
 const readParamsSchema = z.object({
   instanceId: z.number().optional().describe('The instance ID of the GameObject'),
   objectPath: z.string().optional().describe('The path of the GameObject in the hierarchy (alternative to instanceId)'),
   componentName: z.string().describe('The component type to read. Ambiguous short/partial names require exactly one exact candidate type on the target; otherwise use a fully-qualified name.'),
   fieldNames: z.array(z.string()).optional().describe('Specific field names to read. Accepts both serialized names (m_Color) and property names (color). If omitted, reads all visible fields.'),
+  maxDepth: z.number().int().min(0).max(8).optional().describe('Maximum recursive depth for Generic fields and arrays (0-8, default 8). Lower this to reduce payload size before the 20,000-character transport cap is applied.'),
+  maxElements: z.number().int().min(0).max(100).optional().describe('Global maximum number of returned elements across all visited arrays (0-100, default 100). Lower this to bound aggregate array width. See arrayMetadata and the scalar message for total, returned, truncated, and truncation causes.'),
 });
 
 export function registerReadSerializedFieldsTool(server: McpServer, mcpUnity: McpUnity, logger: Logger) {
@@ -69,6 +73,8 @@ async function readHandler(mcpUnity: McpUnity, params: any): Promise<CallToolRes
       objectPath: params.objectPath,
       componentName: params.componentName,
       fieldNames: params.fieldNames,
+      maxDepth: params.maxDepth ?? 8,
+      maxElements: params.maxElements ?? 100,
     }
   });
 
@@ -84,6 +90,9 @@ async function readHandler(mcpUnity: McpUnity, params: any): Promise<CallToolRes
   if (response.fields) {
     text += JSON.stringify(response.fields, null, 2);
   }
+  if (response.arrayMetadata && Object.keys(response.arrayMetadata).length > 0) {
+    text += '\n\nArray metadata:\n' + JSON.stringify(response.arrayMetadata, null, 2);
+  }
 
   return {
     content: [
@@ -95,6 +104,9 @@ async function readHandler(mcpUnity: McpUnity, params: any): Promise<CallToolRes
           instanceId: response.instanceId,
           componentName: response.componentName,
           fields: response.fields,
+          maxDepth: response.maxDepth,
+          maxElements: response.maxElements,
+          arrayMetadata: response.arrayMetadata,
           warnings: response.warnings,
           message: response.message
         })

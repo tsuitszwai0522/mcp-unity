@@ -131,6 +131,28 @@ namespace McpUnity.Utils
                         prop.rectValue = (Rect)rectValue;
                         return true;
                     case SerializedPropertyType.Enum:
+                        if (value is JObject enumObject)
+                        {
+                            string[] allowedEnumKeys = { "value", "index", "name" };
+                            foreach (JProperty suppliedKey in enumObject.Properties())
+                            {
+                                if (Array.IndexOf(allowedEnumKeys, suppliedKey.Name) < 0)
+                                {
+                                    warnings?.Add(
+                                        $"Unknown enum key '{suppliedKey.Name}' for '{fieldName}'. " +
+                                        $"Valid reader-shape keys: {string.Join(", ", allowedEnumKeys)}");
+                                    return false;
+                                }
+                            }
+                            if (!enumObject.TryGetValue("value", out JToken underlyingValue))
+                            {
+                                warnings?.Add(
+                                    $"Reader-shaped enum object for '{fieldName}' must include 'value'");
+                                return false;
+                            }
+                            value = underlyingValue;
+                        }
+
                         if (value.Type == JTokenType.String)
                         {
                             string strValue = value.ToObject<string>();

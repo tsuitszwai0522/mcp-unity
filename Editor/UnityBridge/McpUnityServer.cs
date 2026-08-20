@@ -502,6 +502,9 @@ namespace McpUnity.Unity
             WriteSerializedFieldsTool writeSerializedFieldsTool = new WriteSerializedFieldsTool();
             _tools.Add(writeSerializedFieldsTool.Name, writeSerializedFieldsTool);
 
+            WireUnityEventTool wireUnityEventTool = new WireUnityEventTool();
+            _tools.Add(wireUnityEventTool.Name, wireUnityEventTool);
+
             // Register UI Automation Tools
             GetInteractableElementsTool getInteractableElementsTool = new GetInteractableElementsTool();
             _tools.Add(getInteractableElementsTool.Name, getInteractableElementsTool);

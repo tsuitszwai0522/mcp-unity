@@ -17,13 +17,22 @@ namespace McpUnity.Tools
     /// </summary>
     public class ReadSerializedFieldsTool : McpToolBase
     {
+        internal const int DefaultMaxDepth = 8;
+        internal const int MaximumMaxDepth = 8;
+        internal const int DefaultMaxElements = 100;
+        internal const int MaximumMaxElements = 100;
+
         public ReadSerializedFieldsTool()
         {
             Name = "read_serialized_fields";
             Description = "Reads serialized fields from a component using Unity's SerializedProperty API. " +
                 "Supports both serialized names (m_Color) and property names (color). Returns field names, " +
                 "types, and current values. For enums, 'value' is the underlying enum value and 'index' " +
-                "is the enumValueIndex. Ambiguous short or partial component names require exactly one " +
+                "is the enumValueIndex. Generic fields and arrays are expanded recursively up to maxDepth " +
+                $"(default {DefaultMaxDepth}, range 0-{MaximumMaxDepth}); lower maxDepth to reduce payload size. " +
+                $"maxElements is one global returned-element budget across all arrays (default {DefaultMaxElements}, " +
+                $"range 0-{MaximumMaxElements}); arrayMetadata and the scalar message report totals and truncation causes. " +
+                "Ambiguous short or partial component names require exactly one " +
                 "exact candidate type on the target; otherwise use a fully-qualified name.";
         }
 
@@ -33,6 +42,24 @@ namespace McpUnity.Tools
             string objectPath = parameters["objectPath"]?.ToObject<string>();
             string componentName = parameters["componentName"]?.ToObject<string>();
             JArray fieldNames = parameters["fieldNames"] as JArray;
+            int maxDepth = parameters["maxDepth"]?.ToObject<int?>() ?? DefaultMaxDepth;
+            int maxElements = parameters["maxElements"]?.ToObject<int?>() ?? DefaultMaxElements;
+
+            if (maxDepth < 0 || maxDepth > MaximumMaxDepth)
+            {
+                return McpUnitySocketHandler.CreateErrorResponse(
+                    $"Parameter 'maxDepth' must be between 0 and {MaximumMaxDepth}",
+                    "validation_error"
+                );
+            }
+
+            if (maxElements < 0 || maxElements > MaximumMaxElements)
+            {
+                return McpUnitySocketHandler.CreateErrorResponse(
+                    $"Parameter 'maxElements' must be between 0 and {MaximumMaxElements}",
+                    "validation_error"
+                );
+            }
 
             // Find the GameObject
             JObject error = GameObjectToolUtils.FindGameObject(instanceId, objectPath, out GameObject gameObject, out string identifierInfo);
@@ -72,6 +99,8 @@ namespace McpUnity.Tools
 
             var serializedObject = new SerializedObject(component);
             var fields = new JObject();
+            var arrayMetadata = new JObject();
+            var elementBudget = new ArrayElementBudget(maxElements);
 
             if (fieldNames != null && fieldNames.Count > 0)
             {
@@ -82,7 +111,12 @@ namespace McpUnity.Tools
                     SerializedProperty prop = SerializedPropertyHelper.FindProperty(serializedObject, fieldName);
                     if (prop != null)
                     {
-                        fields[prop.name] = SerializedPropertyToJToken(prop);
+                        fields[prop.name] = SerializeProperty(
+                            prop,
+                            0,
+                            maxDepth,
+                            arrayMetadata,
+                            elementBudget);
                     }
                     else
                     {
@@ -100,7 +134,12 @@ namespace McpUnity.Tools
                     enterChildren = false;
                     // Skip the script reference
                     if (iterator.name == "m_Script") continue;
-                    fields[iterator.name] = SerializedPropertyToJToken(iterator);
+                    fields[iterator.name] = SerializeProperty(
+                        iterator,
+                        0,
+                        maxDepth,
+                        arrayMetadata,
+                        elementBudget);
                 }
             }
 
@@ -108,10 +147,18 @@ namespace McpUnity.Tools
             {
                 ["success"] = true,
                 ["type"] = "text",
-                ["message"] = $"Read {fields.Count} fields from '{componentName}' on '{gameObject.name}'",
+                ["message"] = BuildReadMessage(
+                    fields.Count,
+                    componentName,
+                    gameObject.name,
+                    maxElements,
+                    arrayMetadata),
                 ["instanceId"] = gameObject.GetInstanceID(),
                 ["componentName"] = componentName,
-                ["fields"] = fields
+                ["fields"] = fields,
+                ["maxDepth"] = maxDepth,
+                ["maxElements"] = maxElements,
+                ["arrayMetadata"] = arrayMetadata
             };
 
             if (!string.IsNullOrEmpty(resolutionWarning))
@@ -122,10 +169,37 @@ namespace McpUnity.Tools
             return response;
         }
 
-        private JToken SerializedPropertyToJToken(SerializedProperty prop)
+        internal static JToken SerializedPropertyToJToken(
+            SerializedProperty prop,
+            int currentDepth = 0,
+            int maxDepth = DefaultMaxDepth,
+            int maxElements = DefaultMaxElements,
+            JObject arrayMetadata = null)
+        {
+            return SerializeProperty(
+                prop,
+                currentDepth,
+                maxDepth,
+                arrayMetadata,
+                new ArrayElementBudget(maxElements));
+        }
+
+        private static JToken SerializeProperty(
+            SerializedProperty prop,
+            int currentDepth,
+            int maxDepth,
+            JObject arrayMetadata,
+            ArrayElementBudget elementBudget)
         {
             switch (prop.propertyType)
             {
+                case SerializedPropertyType.Generic:
+                    return SerializeGenericProperty(
+                        prop,
+                        currentDepth,
+                        maxDepth,
+                        arrayMetadata,
+                        elementBudget);
                 case SerializedPropertyType.Integer:
                     return prop.intValue;
                 case SerializedPropertyType.Boolean:
@@ -194,6 +268,159 @@ namespace McpUnity.Tools
                         ["_type"] = prop.propertyType.ToString(),
                         ["_info"] = "Unsupported property type for direct reading"
                     };
+            }
+        }
+
+        private static JToken SerializeGenericProperty(
+            SerializedProperty prop,
+            int currentDepth,
+            int maxDepth,
+            JObject arrayMetadata,
+            ArrayElementBudget elementBudget)
+        {
+            if (prop.isArray)
+            {
+                return SerializeArrayProperty(
+                    prop,
+                    currentDepth,
+                    maxDepth,
+                    arrayMetadata,
+                    elementBudget);
+            }
+
+            if (currentDepth >= maxDepth)
+            {
+                return new JObject
+                {
+                    ["_type"] = prop.type,
+                    ["_truncated"] = true,
+                    ["_info"] = $"Maximum serialized-property depth {maxDepth} reached"
+                };
+            }
+
+            var children = new JObject();
+            SerializedProperty iterator = prop.Copy();
+            SerializedProperty end = prop.GetEndProperty(true);
+            bool enterChildren = true;
+            while (iterator.Next(enterChildren) && !SerializedProperty.EqualContents(iterator, end))
+            {
+                enterChildren = false;
+                children[iterator.name] = SerializeProperty(
+                    iterator,
+                    currentDepth + 1,
+                    maxDepth,
+                    arrayMetadata,
+                    elementBudget);
+            }
+            return children;
+        }
+
+        private static JArray SerializeArrayProperty(
+            SerializedProperty prop,
+            int currentDepth,
+            int maxDepth,
+            JObject arrayMetadata,
+            ArrayElementBudget elementBudget)
+        {
+            var elements = new JArray();
+            int total = prop.arraySize;
+            bool depthTruncated = currentDepth >= maxDepth && total > 0;
+
+            if (!depthTruncated)
+            {
+                for (int i = 0; i < total && elementBudget.TryConsume(); i++)
+                {
+                    SerializedProperty element = prop.GetArrayElementAtIndex(i);
+                    elements.Add(SerializeProperty(
+                        element,
+                        currentDepth + 1,
+                        maxDepth,
+                        arrayMetadata,
+                        elementBudget));
+                }
+            }
+
+            int returned = elements.Count;
+            bool budgetTruncated = !depthTruncated && returned < total;
+            if (arrayMetadata != null)
+            {
+                arrayMetadata[prop.propertyPath] = new JObject
+                {
+                    ["total"] = total,
+                    ["returned"] = returned,
+                    ["truncated"] = returned < total,
+                    ["depthTruncated"] = depthTruncated,
+                    ["budgetTruncated"] = budgetTruncated
+                };
+            }
+            return elements;
+        }
+
+        private static string BuildReadMessage(
+            int fieldCount,
+            string componentName,
+            string gameObjectName,
+            int maxElements,
+            JObject arrayMetadata)
+        {
+            string message = $"Read {fieldCount} fields from '{componentName}' on '{gameObjectName}'";
+            if (arrayMetadata.Count == 0)
+            {
+                return message;
+            }
+
+            long total = 0;
+            long returned = 0;
+            int truncated = 0;
+            int depthTruncated = 0;
+            int budgetTruncated = 0;
+            foreach (JProperty metadataProperty in arrayMetadata.Properties())
+            {
+                JObject metadata = metadataProperty.Value as JObject;
+                if (metadata == null)
+                {
+                    continue;
+                }
+
+                total += metadata["total"]?.ToObject<long>() ?? 0;
+                returned += metadata["returned"]?.ToObject<long>() ?? 0;
+                if (metadata["truncated"]?.ToObject<bool>() == true)
+                {
+                    truncated++;
+                }
+                if (metadata["depthTruncated"]?.ToObject<bool>() == true)
+                {
+                    depthTruncated++;
+                }
+                if (metadata["budgetTruncated"]?.ToObject<bool>() == true)
+                {
+                    budgetTruncated++;
+                }
+            }
+
+            return message + $". Array traversal returned {returned} of {total} visited element slots " +
+                $"across {arrayMetadata.Count} array(s) under global maxElements={maxElements}; " +
+                $"truncated arrays={truncated} (depth={depthTruncated}, budget={budgetTruncated}).";
+        }
+
+        private sealed class ArrayElementBudget
+        {
+            private int _remaining;
+
+            public ArrayElementBudget(int limit)
+            {
+                _remaining = Math.Max(0, limit);
+            }
+
+            public bool TryConsume()
+            {
+                if (_remaining <= 0)
+                {
+                    return false;
+                }
+
+                _remaining--;
+                return true;
             }
         }
     }

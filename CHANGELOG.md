@@ -4,6 +4,28 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [fork-1.6.0] - 2026-08-20
+
+### Added
+
+- **`wire_unity_event`** — adds persistent UnityEvent listeners from source/listener locators, an event field, a method name, and an optional static argument. The tool derives `PersistentListenerMode` from the event and method signatures, strictly rejects unknown inputs, rejects missing/ambiguous methods and duplicate matching component instances, and returns the inferred mode plus the serialized persistent call read back from Unity.
+- **Recursive serialized-field reads** — `read_serialized_fields` now expands Generic fields, arrays, Lists, and UnityEvent persistent calls. `maxDepth` defaults to 8 and may be narrowed to reduce payload size before the 20,000-character transport cap is applied; depth-truncated branches are explicit.
+
+### Fixed
+
+- **Localization tests restore consumer Addressables state** — the fixture tracks ownership of `Assets/Tests`, removes only groups and labels created during the run through Addressables' cache-invalidating APIs, rebuilds and verifies `AddressableAssetSettings.currentHash` against the pre-fixture value **in memory**, and no longer deletes a pre-existing `xx-NOSUCH` locale as a one-off cleanup side effect. **Known residue:** the on-disk `m_currentHash` field still differs after a run even though labels, orphan group assets, and `Assets/Tests` are fully restored; the in-memory assertion passes but the value written by a later project save does not match the pre-run baseline. Tracked separately.
+- **`wire_unity_event` failure envelope** — every validation, locator, prefab-session, component, method, write, and verification failure now returns `success: false`, a top-level message, and a typed nested error; component ambiguity details include every candidate instance ID.
+- **Bounded serialized array reads** — `read_serialized_fields` now accepts a narrowing-only global `maxElements` budget, reports `total`, `returned`, `truncated`, and truncation causes in per-property `arrayMetadata`, and repeats the truncation summary in the scalar message retained by transport-level payload truncation.
+- **Mutation-sensitive Localization ownership guard** — teardown locale removal and its test share one ownership-gated cleanup seam; the test creates a non-fixture-owned locale and proves both its registration and asset survive that path.
+- **Serializable UnityEvent test probe** — the prefab round-trip probe now has a same-named `MonoScript` asset, and the test verifies the saved component's `m_Script` reference before reloading the prefab.
+
+### Tests
+
+- Added EditMode coverage for UnityEvent mode inference, runtime invocation, method guards, component ambiguity, and recursive/depth- and aggregate-width-limited reads.
+- Added Jest coverage for strict `wire_unity_event` input rejection, forwarding/read-back behavior, real transport-rejected Unity errors, recursive read bounds, and scalar truncation-summary preservation.
+- Added an attributable EditMode diagnostic control that round-trips a wired prefab, proves its RuntimeOnly listener does not fire, then flips only the test instance to EditorAndRuntime and proves the preserved target/method/mode/static argument fires; also added array-width truncation metadata coverage.
+- Added mutation-sensitive Addressables label/hash restoration coverage that treats the pre-test label set as consumer-owned, creates and removes only one later fixture label, invalidates the outer hash cache, and proves the derived hash rebuilds to the snapshot value without introducing a synthetic consumer sentinel.
+
 ## [fork-1.5.0] - 2026-08-20
 
 Third-batch rollout of the MCP write contract established in `fork-1.2.0` and `fork-1.3.0`.
