@@ -1,11 +1,9 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using McpUnity.Tools;
 using Newtonsoft.Json.Linq;
 using NUnit.Framework;
-using UnityEditor;
 using UnityEngine;
 using UnityEngine.Events;
 
@@ -21,6 +19,46 @@ namespace McpUnity.Tests
     {
         public string label;
         public PersistentListenerMode mode;
+    }
+
+    public class UnityEventWiringProbe : MonoBehaviour
+    {
+        public UnityEvent noArgs = new UnityEvent();
+        public UnityEventWiringIntEvent intEvent = new UnityEventWiringIntEvent();
+        public List<UnityEventWiringPayload> payloads = new List<UnityEventWiringPayload>();
+
+        public int receivedInt;
+        public string receivedString;
+
+        public void ReceiveInt(int value)
+        {
+            receivedInt = value;
+        }
+
+        public void ReceiveString(string value)
+        {
+            receivedString = value;
+        }
+
+        public void ReceiveAmbiguous(int value)
+        {
+            receivedInt = value;
+        }
+
+        public void ReceiveAmbiguous()
+        {
+            receivedInt = -1;
+        }
+
+        public void ReceiveNumber(int value)
+        {
+            receivedInt = value;
+        }
+
+        public void ReceiveNumber(float value)
+        {
+            receivedInt = (int)value;
+        }
     }
 
     [Serializable]
@@ -147,123 +185,49 @@ namespace McpUnity.Tests
         }
 
         [Test]
-        public void WireUnityEvent_AfterPrefabRoundTrip_RuntimeOnlyGateIsCausallyVerified()
+        public void WireUnityEvent_RuntimeOnlyGateIsCausallyVerified()
         {
-            string prefabPath = $"Assets/McpUnityEventWiringRoundTrip_{Guid.NewGuid():N}.prefab";
-            UnityEventWiringProbe source = Spawn("WireEvent_PrefabRoundTrip")
+            UnityEventWiringProbe probe = Spawn("WireEvent_RuntimeOnlyGate")
                 .AddComponent<UnityEventWiringProbe>();
 
-            try
+            JObject result = new WireUnityEventTool().Execute(new JObject
             {
-                JObject result = new WireUnityEventTool().Execute(new JObject
-                {
-                    ["instanceId"] = source.gameObject.GetInstanceID(),
-                    ["componentName"] = typeof(UnityEventWiringProbe).FullName,
-                    ["eventFieldName"] = "intEvent",
-                    ["listenerInstanceId"] = source.gameObject.GetInstanceID(),
-                    ["listenerComponentName"] = typeof(UnityEventWiringProbe).FullName,
-                    ["methodName"] = "ReceiveString",
-                    ["staticArgument"] = "after-round-trip"
-                });
+                ["instanceId"] = probe.gameObject.GetInstanceID(),
+                ["componentName"] = typeof(UnityEventWiringProbe).FullName,
+                ["eventFieldName"] = "intEvent",
+                ["listenerInstanceId"] = probe.gameObject.GetInstanceID(),
+                ["listenerComponentName"] = typeof(UnityEventWiringProbe).FullName,
+                ["methodName"] = "ReceiveString",
+                ["staticArgument"] = "causal-static-value"
+            });
 
-                Assert.IsTrue(result["success"].ToObject<bool>(), result.ToString());
-                Assert.AreEqual("String", result["mode"]["name"].ToString());
+            Assert.IsTrue(result["success"].ToObject<bool>(), result.ToString());
+            Assert.AreEqual("ReceiveString", result["methodName"].ToString());
+            Assert.AreEqual("String", result["mode"]["name"].ToString());
+            Assert.AreEqual(
+                (int)PersistentListenerMode.String,
+                result["mode"]["value"].ToObject<int>());
+            Assert.AreEqual("causal-static-value", result["staticArgument"].ToString());
+            Assert.AreEqual(
+                UnityEventCallState.RuntimeOnly,
+                probe.intEvent.GetPersistentListenerState(0));
+            Assert.IsFalse(Application.isPlaying,
+                "This causal control must run in EditMode.");
 
-                MonoScript probeScript = MonoScript.FromMonoBehaviour(source);
-                Assert.IsNotNull(
-                    probeScript,
-                    "The prefab probe must have a real MonoScript asset before serialization.");
-                Assert.AreEqual(
-                    typeof(UnityEventWiringProbe),
-                    probeScript.GetClass(),
-                    "The MonoScript asset must resolve to the probe type, not the test fixture type.");
-                string probeScriptPath = AssetDatabase.GetAssetPath(probeScript);
-                Assert.AreEqual(
-                    "UnityEventWiringProbe.cs",
-                    Path.GetFileName(probeScriptPath),
-                    "The probe MonoBehaviour must live in its same-named source file.");
-                Assert.IsNotEmpty(
-                    AssetDatabase.AssetPathToGUID(probeScriptPath),
-                    "The probe MonoScript must have a persistent asset GUID.");
+            probe.receivedString = null;
+            probe.intEvent.Invoke(123);
+            Assert.IsNull(
+                probe.receivedString,
+                "Negative control failed: a RuntimeOnly listener fired in EditMode.");
 
-                GameObject savedPrefab = PrefabUtility.SaveAsPrefabAsset(
-                    source.gameObject,
-                    prefabPath);
-                Assert.IsNotNull(savedPrefab, "Failed to serialize the wired object as a prefab.");
-                UnityEventWiringProbe savedProbe =
-                    savedPrefab.GetComponent<UnityEventWiringProbe>();
-                Assert.IsNotNull(
-                    savedProbe,
-                    "The saved prefab must retain the probe component before reload.");
-                Assert.AreSame(
-                    probeScript,
-                    new SerializedObject(savedProbe).FindProperty("m_Script").objectReferenceValue,
-                    "The saved prefab component must serialize the probe MonoScript reference.");
-                AssetDatabase.SaveAssets();
-                AssetDatabase.ImportAsset(
-                    prefabPath,
-                    ImportAssetOptions.ForceSynchronousImport | ImportAssetOptions.ForceUpdate);
-
-                UnityEngine.Object.DestroyImmediate(source.gameObject);
-                GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath);
-                Assert.IsNotNull(prefab, "Failed to reload the serialized prefab asset.");
-                GameObject roundTripped = PrefabUtility.InstantiatePrefab(prefab) as GameObject;
-                Assert.IsNotNull(roundTripped, "Failed to instantiate the deserialized prefab.");
-                _spawned.Add(roundTripped);
-
-                UnityEventWiringProbe deserializedProbe =
-                    roundTripped.GetComponent<UnityEventWiringProbe>();
-                Assert.IsNotNull(deserializedProbe);
-
-                var serializedProbe = new SerializedObject(deserializedProbe);
-                SerializedProperty call = serializedProbe
-                    .FindProperty("intEvent")
-                    .FindPropertyRelative("m_PersistentCalls")
-                    .FindPropertyRelative("m_Calls")
-                    .GetArrayElementAtIndex(0);
-                Assert.AreSame(
-                    deserializedProbe,
-                    call.FindPropertyRelative("m_Target").objectReferenceValue);
-                Assert.AreEqual(
-                    "ReceiveString",
-                    call.FindPropertyRelative("m_MethodName").stringValue);
-                Assert.AreEqual(
-                    (int)PersistentListenerMode.String,
-                    call.FindPropertyRelative("m_Mode").intValue);
-                Assert.AreEqual(
-                    "after-round-trip",
-                    call.FindPropertyRelative("m_Arguments")
-                        .FindPropertyRelative("m_StringArgument")
-                        .stringValue);
-                Assert.AreEqual(
-                    (int)UnityEventCallState.RuntimeOnly,
-                    call.FindPropertyRelative("m_CallState").intValue);
-                Assert.AreEqual(
-                    UnityEventCallState.RuntimeOnly,
-                    deserializedProbe.intEvent.GetPersistentListenerState(0));
-                Assert.IsFalse(Application.isPlaying,
-                    "This causal control must run in EditMode.");
-
-                deserializedProbe.receivedString = null;
-                deserializedProbe.intEvent.Invoke(123);
-                Assert.IsNull(
-                    deserializedProbe.receivedString,
-                    "Negative control failed: a RuntimeOnly listener fired in EditMode.");
-
-                deserializedProbe.intEvent.SetPersistentListenerState(
-                    0,
-                    UnityEventCallState.EditorAndRuntime);
-                Assert.AreEqual(
-                    UnityEventCallState.EditorAndRuntime,
-                    deserializedProbe.intEvent.GetPersistentListenerState(0));
-                deserializedProbe.intEvent.Invoke(456);
-                Assert.AreEqual("after-round-trip", deserializedProbe.receivedString);
-            }
-            finally
-            {
-                AssetDatabase.DeleteAsset(prefabPath);
-                AssetDatabase.SaveAssets();
-            }
+            probe.intEvent.SetPersistentListenerState(
+                0,
+                UnityEventCallState.EditorAndRuntime);
+            Assert.AreEqual(
+                UnityEventCallState.EditorAndRuntime,
+                probe.intEvent.GetPersistentListenerState(0));
+            probe.intEvent.Invoke(456);
+            Assert.AreEqual("causal-static-value", probe.receivedString);
         }
 
         [Test]

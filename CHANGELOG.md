@@ -4,6 +4,27 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [fork-1.6.1] - 2026-08-20
+
+Patch release. `fork-1.6.0` shipped a broken EditMode test class; no production tool behaviour changed.
+
+### Fixed
+
+- **Reverted the standalone UnityEvent test probe.** `fork-1.6.0` moved `UnityEventWiringProbe` into
+  its own same-named file so that Unity would create a `MonoScript` asset for it and a wired component
+  could survive a prefab round-trip. Measured effect was the opposite: with the probe in its own file
+  `AddComponent<UnityEventWiringProbe>()` returns `null`, leaving `McpUnity.Tests.UnityEventWiringTests`
+  at **2/15** in `fork-1.6.0`. Verified across four configurations — inline vs standalone, hand-written
+  vs Unity-generated `.meta`, ad-hoc `PackageCache` deployment vs a real package re-resolve, and with the
+  probe's helper types co-located — the split is the trigger and the deployment method is not. The probe
+  is inline again and the class is back to **15/15**.
+- **Reworked the causal diagnostic** (`WireUnityEvent_RuntimeOnlyGateIsCausallyVerified`, formerly
+  `..._AfterPrefabRoundTrip_...`). The prefab save/reload half cannot work without a `MonoScript`, so it
+  and the `MonoScript` assertions are gone. The attributable part is kept in full: one listener is invoked
+  under `RuntimeOnly` and asserted **not** to fire, then the same listener is flipped to `EditorAndRuntime`
+  and asserted to fire with the preserved method, mode and static argument. Serialization fidelity stays
+  covered by the `SerializedObject` read-back assertions elsewhere in the class.
+
 ## [fork-1.6.0] - 2026-08-20
 
 ### Added
@@ -17,13 +38,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - **`wire_unity_event` failure envelope** — every validation, locator, prefab-session, component, method, write, and verification failure now returns `success: false`, a top-level message, and a typed nested error; component ambiguity details include every candidate instance ID.
 - **Bounded serialized array reads** — `read_serialized_fields` now accepts a narrowing-only global `maxElements` budget, reports `total`, `returned`, `truncated`, and truncation causes in per-property `arrayMetadata`, and repeats the truncation summary in the scalar message retained by transport-level payload truncation.
 - **Mutation-sensitive Localization ownership guard** — teardown locale removal and its test share one ownership-gated cleanup seam; the test creates a non-fixture-owned locale and proves both its registration and asset survive that path.
-- **Serializable UnityEvent test probe** — the prefab round-trip probe now has a same-named `MonoScript` asset, and the test verifies the saved component's `m_Script` reference before reloading the prefab.
 
 ### Tests
 
 - Added EditMode coverage for UnityEvent mode inference, runtime invocation, method guards, component ambiguity, and recursive/depth- and aggregate-width-limited reads.
 - Added Jest coverage for strict `wire_unity_event` input rejection, forwarding/read-back behavior, real transport-rejected Unity errors, recursive read bounds, and scalar truncation-summary preservation.
-- Added an attributable EditMode diagnostic control that round-trips a wired prefab, proves its RuntimeOnly listener does not fire, then flips only the test instance to EditorAndRuntime and proves the preserved target/method/mode/static argument fires; also added array-width truncation metadata coverage.
+- Added an attributable EditMode diagnostic control that proves a RuntimeOnly listener does not fire, then flips only that listener to EditorAndRuntime and proves the same method, inferred mode, and static argument fire correctly; also added array-width truncation metadata coverage.
 - Added mutation-sensitive Addressables label/hash restoration coverage that treats the pre-test label set as consumer-owned, creates and removes only one later fixture label, invalidates the outer hash cache, and proves the derived hash rebuilds to the snapshot value without introducing a synthetic consumer sentinel.
 
 ## [fork-1.5.0] - 2026-08-20
