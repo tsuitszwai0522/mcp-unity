@@ -6,6 +6,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [fork-1.10.0] - 2026-08-22
+
+### Breaking
+
+- `import_texture_as_sprite` now returns `validation_error` for unknown top-level parameters,
+  including calls routed through `batch_execute`; these parameters were previously ignored.
+- `import_texture_as_sprite` now returns `validation_error` when the legacy `spriteMode`,
+  `meshType`, or `compression` parameter is explicitly JSON `null`; `null` previously selected the
+  field's default.
+- `import_texture_as_sprite` now rejects `spriteBorder` when the effective `spriteMode` is
+  `Multiple`. Borders in Multiple mode must be set in each sprite's metadata; the old combination
+  returned success even though the requested border was ineffective.
+
+### Added
+
+- Added `manage_asset` for GUID-preserving asset moves and renames, new-GUID copies, and explicit
+  single-folder creation without overwrite or implicit parent-folder creation.
+- Added optional `wrapMode` and `spriteBorder` writes and persisted read-back to
+  `import_texture_as_sprite`, and documented that the tool always forces
+  `textureType = TextureImporterType.Sprite`.
+
+### Fixed
+
+- Fixed `add_package` GitHub URLs to preserve `.git` and emit UPM's `?path=...#branch` ordering,
+  and guarded completion logging when Package Manager returns no package information.
+- `import_texture_as_sprite` now warns when changing `textureType` to Sprite resets omitted importer
+  settings to Unity's Sprite defaults; it then writes `spriteMode`, `meshType`, and `compression`
+  (using tool defaults when omitted), plus any provided `wrapMode` or `spriteBorder`.
+
 ## [fork-1.9.0] - 2026-08-21
 
 ### Added

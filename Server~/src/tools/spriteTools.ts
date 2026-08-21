@@ -12,12 +12,19 @@ import { explicitAssetPathSchema } from '../utils/assetPathSchema.js';
 // ============================================================================
 
 const importTextureAsSpriteName = 'import_texture_as_sprite';
-const importTextureAsSpriteDescription = 'Sets import settings for a texture at an explicit path inside this Unity project\'s Assets directory. The result reports assetPath, spriteMode, meshType, and compression read back from the persisted importer. Unknown enum values reaching Unity through batch_execute return validation_error with the valid values before the importer is changed.';
+const importTextureAsSpriteDescription = 'Sets Sprite import settings for a texture at an explicit path inside this Unity project\'s Assets directory. This tool ensures textureType = TextureImporterType.Sprite; when the previous type differs, Unity resets other importer settings to Sprite defaults. This call then writes spriteMode, meshType, and compression (using tool defaults when omitted), plus any provided wrapMode or spriteBorder; all other settings remain at the Sprite defaults. The result reports assetPath, spriteMode, meshType, compression, wrapMode, wrapModeU/V/W, and spriteBorder read back from the persisted importer; wrapMode is Mixed when the axes differ. Setting wrapMode writes all three axes. spriteBorder is valid only with spriteMode Single; Multiple requires per-sprite metadata. Unknown enum values or malformed or incompatible spriteBorder objects reaching Unity through batch_execute return validation_error before the importer is changed.';
 const importTextureAsSpriteSchema = z.object({
   assetPath: explicitAssetPathSchema('Explicit texture asset path inside this project\'s Assets directory (e.g., "Assets/Sprites/Cart/tomato.png"); bare relative, absolute, and Assets/../.. escape paths are rejected'),
   spriteMode: z.enum(['Single', 'Multiple']).optional().default('Single').describe('Sprite import mode (Single or Multiple)'),
   meshType: z.enum(['FullRect', 'Tight']).optional().default('FullRect').describe('Sprite mesh type (FullRect or Tight)'),
-  compression: z.enum(['None', 'LowQuality', 'NormalQuality', 'HighQuality']).optional().default('None').describe('Texture compression level')
+  compression: z.enum(['None', 'LowQuality', 'NormalQuality', 'HighQuality']).optional().default('None').describe('Texture compression level'),
+  wrapMode: z.enum(['Repeat', 'Clamp', 'Mirror', 'MirrorOnce']).optional().describe('Optional texture wrap mode written to the U, V, and W axes. Omitted skips this write: persisted values remain unchanged when textureType is already Sprite, while conversion to Sprite resets them to Sprite defaults.'),
+  spriteBorder: z.object({
+    left: z.number(),
+    bottom: z.number(),
+    right: z.number(),
+    top: z.number(),
+  }).strict().optional().describe('Optional sprite border for spriteMode Single, mapped to Vector4 x=left, y=bottom, z=right, w=top. spriteMode Multiple is rejected because it requires per-sprite metadata. Omitted skips this write: the persisted border remains unchanged when textureType is already Sprite, while conversion to Sprite resets it to the Sprite default.')
 });
 
 /**
@@ -58,14 +65,16 @@ async function importTextureAsSpriteHandler(mcpUnity: McpUnity, params: any): Pr
       assetPath: params.assetPath,
       spriteMode: params.spriteMode ?? 'Single',
       meshType: params.meshType ?? 'FullRect',
-      compression: params.compression ?? 'None'
+      compression: params.compression ?? 'None',
+      ...(params.wrapMode !== undefined && { wrapMode: params.wrapMode }),
+      ...(params.spriteBorder !== undefined && { spriteBorder: params.spriteBorder })
     }
   });
 
   if (!response.success) {
     throw new McpUnityError(
       ErrorType.TOOL_EXECUTION,
-      response.message || 'Failed to import texture as sprite'
+      response.error?.message || response.message || 'Failed to import texture as sprite'
     );
   }
 
@@ -75,13 +84,7 @@ async function importTextureAsSpriteHandler(mcpUnity: McpUnity, params: any): Pr
         type: response.type || 'text',
         text: response.message || `Successfully imported texture as sprite`
       },
-      payloadContent({
-        message: response.message,
-        assetPath: response.assetPath,
-        spriteMode: response.spriteMode,
-        meshType: response.meshType,
-        compression: response.compression
-      })
+      payloadContent(response)
     ]
   };
 }

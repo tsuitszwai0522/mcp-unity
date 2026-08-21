@@ -142,6 +142,28 @@ namespace McpUnity.Tools
         /// <summary>
         /// Add a package from GitHub
         /// </summary>
+        internal static string BuildGitHubPackageUrl(
+            string repositoryUrl,
+            string branch,
+            string path)
+        {
+            string packageUrl = repositoryUrl;
+            string normalizedPath = string.IsNullOrEmpty(path)
+                ? null
+                : path.TrimStart('/');
+
+            if (!string.IsNullOrEmpty(normalizedPath))
+            {
+                packageUrl += "?path=" + normalizedPath;
+            }
+            if (!string.IsNullOrEmpty(branch))
+            {
+                packageUrl += "#" + branch;
+            }
+
+            return packageUrl;
+        }
+
         private AddRequest AddFromGitHub(JObject parameters, TaskCompletionSource<JObject> tcs)
         {
             // Extract parameters
@@ -158,33 +180,25 @@ namespace McpUnity.Tools
             
             string branch = parameters["branch"]?.ToObject<string>();
             string path = parameters["path"]?.ToObject<string>();
-            
-            // Remove any .git suffix if present
-            if (packageUrl.EndsWith(".git", StringComparison.OrdinalIgnoreCase))
+            if (packageUrl.IndexOf('?') >= 0 || packageUrl.IndexOf('#') >= 0)
             {
-                packageUrl = packageUrl.Substring(0, packageUrl.Length - 4);
+                tcs.SetResult(McpUnitySocketHandler.CreateErrorResponse(
+                    "Parameter 'repositoryUrl' must not include '?' or '#'; use the 'branch' " +
+                    "and 'path' parameters instead of embedding them in the URL.",
+                    "validation_error"));
+                return null;
             }
-            
-            // Add branch if specified
-            if (!string.IsNullOrEmpty(branch))
+            if (!string.IsNullOrEmpty(path)
+                && (path.IndexOf('?') >= 0
+                    || path.IndexOf('#') >= 0
+                    || path.IndexOf('&') >= 0))
             {
-                packageUrl += "#" + branch;
+                tcs.SetResult(McpUnitySocketHandler.CreateErrorResponse(
+                    "Parameter 'path' for github must not include '?', '#', or '&'.",
+                    "validation_error"));
+                return null;
             }
-            
-            // Add path if specified
-            if (!string.IsNullOrEmpty(path))
-            {
-                if (!string.IsNullOrEmpty(branch))
-                {
-                    // Branch is already added, append path with slash
-                    packageUrl += "/" + path;
-                }
-                else
-                {
-                    // No branch, use hash followed by path
-                    packageUrl += "#" + path;
-                }
-            }
+            packageUrl = BuildGitHubPackageUrl(packageUrl, branch, path);
             
             McpLogger.LogInfo($"Adding package from GitHub: {packageUrl}");
             
@@ -310,6 +324,7 @@ namespace McpUnity.Tools
                             version = result.version
                         })
                     });
+                    McpLogger.LogInfo($"Added package {result.displayName} ({result.name}) version {result.version}");
                 }
                 else
                 {
@@ -321,7 +336,6 @@ namespace McpUnity.Tools
                     });
                 }
                 
-                McpLogger.LogInfo($"Added package {result.displayName} ({result.name}) version {result.version}");
             }
             else if (operation.Request.Status == StatusCode.Failure)
             {

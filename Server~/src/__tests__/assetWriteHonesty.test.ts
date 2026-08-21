@@ -103,6 +103,10 @@ describe('S7-b asset write honesty contracts', () => {
     expect(importDescription).toContain('batch_execute');
     expect(importDescription).toContain('validation_error');
     expect(importDescription).toContain('before the importer is changed');
+    expect(importDescription).toContain('textureType = TextureImporterType.Sprite');
+    expect(importDescription).toContain('resets other importer settings to Sprite defaults');
+    expect(importDescription).toContain('using tool defaults when omitted');
+    expect(importDescription).toContain('all other settings remain at the Sprite defaults');
     expect(importSchema.assetPath.description).toContain('escape paths are rejected');
 
     const [, atlasDescription, atlasSchema] = getRegistration('create_sprite_atlas');
@@ -123,7 +127,7 @@ describe('S7-b asset write honesty contracts', () => {
   });
 
   it('import_texture_as_sprite returns Unity read-back values even when they differ from the request', async () => {
-    mockSendRequest.mockResolvedValue({
+    const unityResponse = {
       success: true,
       type: 'text',
       message: 'Imported with persisted values',
@@ -131,7 +135,13 @@ describe('S7-b asset write honesty contracts', () => {
       spriteMode: 'Multiple',
       meshType: 'Tight',
       compression: 'HighQuality',
-    });
+      wrapMode: 'MirrorOnce',
+      wrapModeU: 'MirrorOnce',
+      wrapModeV: 'MirrorOnce',
+      wrapModeW: 'MirrorOnce',
+      spriteBorder: { left: 1, bottom: 2, right: 3, top: 4 },
+    };
+    mockSendRequest.mockResolvedValue(unityResponse);
     registerImportTextureAsSpriteTool(mockServer, mockMcpUnity, mockLogger);
 
     const result = await getRegistration('import_texture_as_sprite')[3]({
@@ -141,12 +151,105 @@ describe('S7-b asset write honesty contracts', () => {
       compression: 'None',
     });
 
-    expect(JSON.parse(result.content[1].text)).toEqual({
-      message: 'Imported with persisted values',
+    expect(JSON.parse(result.content[1].text)).toEqual(unityResponse);
+  });
+
+  it('import_texture_as_sprite preserves conversion warnings in payload and summary text', async () => {
+    const warning =
+      'textureType changed from Default to Sprite; Unity reset other importer settings to Sprite defaults.';
+    const unityResponse = {
+      success: true,
+      type: 'text',
+      message: `Imported with persisted values. Warning: ${warning}`,
       assetPath: 'Assets/Sprites/Probe.png',
-      spriteMode: 'Multiple',
-      meshType: 'Tight',
-      compression: 'HighQuality',
+      spriteMode: 'Single',
+      meshType: 'FullRect',
+      compression: 'None',
+      wrapMode: 'Repeat',
+      wrapModeU: 'Repeat',
+      wrapModeV: 'Repeat',
+      wrapModeW: 'Repeat',
+      spriteBorder: { left: 0, bottom: 0, right: 0, top: 0 },
+      warnings: [warning],
+    };
+    mockSendRequest.mockResolvedValue(unityResponse);
+    registerImportTextureAsSpriteTool(mockServer, mockMcpUnity, mockLogger);
+
+    const result = await getRegistration('import_texture_as_sprite')[3]({
+      assetPath: 'Assets/Sprites/Probe.png',
+    });
+
+    expect(JSON.parse(result.content[1].text).warnings).toEqual([warning]);
+    expect(result.content[0].text).toContain(warning);
+  });
+
+  it('import_texture_as_sprite exposes optional no-default wrapMode and strict spriteBorder schemas', () => {
+    registerImportTextureAsSpriteTool(mockServer, mockMcpUnity, mockLogger);
+
+    const [, description, schema] = getRegistration('import_texture_as_sprite');
+    expect(description).toContain('textureType = TextureImporterType.Sprite');
+    for (const wrapMode of ['Repeat', 'Clamp', 'Mirror', 'MirrorOnce']) {
+      expect(schema.wrapMode.safeParse(wrapMode).success).toBe(true);
+    }
+    expect(schema.wrapMode.safeParse('PingPong').success).toBe(false);
+    expect(schema.wrapMode.parse(undefined)).toBeUndefined();
+    expect(schema.wrapMode.description).toContain('Omitted');
+    expect(schema.wrapMode.description).toContain('U, V, and W');
+    expect(schema.wrapMode.description).toContain('already Sprite');
+    expect(schema.wrapMode.description).toContain('resets them to Sprite defaults');
+    expect(schema.spriteBorder.safeParse({
+      left: 1,
+      bottom: 2,
+      right: 3,
+      top: 4,
+    }).success).toBe(true);
+    expect(schema.spriteBorder.safeParse({ left: 1, bottom: 2, right: 3 }).success)
+      .toBe(false);
+    expect(schema.spriteBorder.safeParse({
+      left: 1,
+      bottom: 2,
+      right: 3,
+      top: 4,
+      center: 5,
+    }).success).toBe(false);
+    expect(schema.spriteBorder.parse(undefined)).toBeUndefined();
+    expect(schema.spriteBorder.description).toContain('x=left');
+    expect(schema.spriteBorder.description).toContain('Single');
+    expect(schema.spriteBorder.description).toContain('Multiple is rejected');
+    expect(description).toContain('wrapMode is Mixed');
+    expect(description).toContain('per-sprite metadata');
+    expect(schema.spriteBorder.description).toContain('Omitted');
+    expect(schema.spriteBorder.description).toContain('already Sprite');
+    expect(schema.spriteBorder.description).toContain('resets it to the Sprite default');
+  });
+
+  it('import_texture_as_sprite omits new parameters when the caller does not provide them', async () => {
+    mockSendRequest.mockResolvedValue({
+      success: true,
+      type: 'text',
+      message: 'Imported with existing optional settings',
+      assetPath: 'Assets/Sprites/Probe.png',
+      spriteMode: 'Single',
+      meshType: 'FullRect',
+      compression: 'LowQuality',
+      wrapMode: 'Mirror',
+      spriteBorder: { left: 0, bottom: 0, right: 0, top: 0 },
+    });
+    registerImportTextureAsSpriteTool(mockServer, mockMcpUnity, mockLogger);
+
+    await getRegistration('import_texture_as_sprite')[3]({
+      assetPath: 'Assets/Sprites/Probe.png',
+      compression: 'LowQuality',
+    });
+
+    expect(mockSendRequest).toHaveBeenCalledWith({
+      method: 'import_texture_as_sprite',
+      params: {
+        assetPath: 'Assets/Sprites/Probe.png',
+        spriteMode: 'Single',
+        meshType: 'FullRect',
+        compression: 'LowQuality',
+      },
     });
   });
 });

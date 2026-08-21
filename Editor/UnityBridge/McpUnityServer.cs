@@ -399,6 +399,10 @@ namespace McpUnity.Unity
             GetGameObjectsByComponentTool getGameObjectsByComponentTool = new GetGameObjectsByComponentTool();
             _tools.Add(getGameObjectsByComponentTool.Name, getGameObjectsByComponentTool);
 
+            // Register ManageAssetTool
+            ManageAssetTool manageAssetTool = new ManageAssetTool();
+            _tools.Add(manageAssetTool.Name, manageAssetTool);
+
             // Register DuplicateGameObjectTool
             DuplicateGameObjectTool duplicateGameObjectTool = new DuplicateGameObjectTool();
             _tools.Add(duplicateGameObjectTool.Name, duplicateGameObjectTool);

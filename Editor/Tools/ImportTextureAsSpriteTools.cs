@@ -34,24 +34,57 @@ namespace McpUnity.Tools
             Description = "Sets Sprite import settings for a texture at an explicit path inside this " +
                           "project's Assets directory. Invalid enum values return validation_error and " +
                           "list valid values before the importer is changed. Successful responses report " +
-                          "assetPath, spriteMode, meshType, and compression read back after reimport.";
+                          "assetPath, spriteMode, meshType, compression, wrapMode, per-axis wrap modes, " +
+                          "and spriteBorder read back after reimport. Setting wrapMode writes the U, V, " +
+                          "and W axes. spriteBorder applies only to Single mode; Multiple mode requires " +
+                          "per-sprite metadata. This tool ensures textureType = " +
+                          "TextureImporterType.Sprite; when the previous type differs, Unity resets " +
+                          "other importer settings to Sprite defaults. This call then writes " +
+                          "spriteMode, meshType, and compression (using tool defaults when omitted), " +
+                          "plus any provided wrapMode or spriteBorder; all other settings remain at " +
+                          "the Sprite defaults.";
         }
 
         public override JObject Execute(JObject parameters)
         {
             // Extract parameters
-            string assetPath = parameters["assetPath"]?.ToObject<string>();
-            string spriteMode = parameters["spriteMode"]?.ToObject<string>() ?? "Single";
-            string meshType = parameters["meshType"]?.ToObject<string>() ?? "FullRect";
-            string compression = parameters["compression"]?.ToObject<string>() ?? "None";
+            JToken assetPathToken = parameters?["assetPath"];
+            string assetPath = assetPathToken != null
+                && assetPathToken.Type == JTokenType.String
+                ? assetPathToken.Value<string>()
+                : null;
+            string spriteMode = ReadEnumParameter(parameters, "spriteMode", "Single");
+            string meshType = ReadEnumParameter(parameters, "meshType", "FullRect");
+            string compression = ReadEnumParameter(parameters, "compression", "None");
+            bool wrapModeProvided = parameters.TryGetValue("wrapMode", out JToken wrapModeToken);
+            bool spriteBorderProvided =
+                parameters.TryGetValue("spriteBorder", out JToken spriteBorderToken);
 
             // Validate required parameters
             if (string.IsNullOrEmpty(assetPath))
             {
                 return McpUnitySocketHandler.CreateErrorResponse(
-                    "Required parameter 'assetPath' not provided",
+                    assetPathToken != null && assetPathToken.Type != JTokenType.String
+                        ? "Parameter 'assetPath' must be a string"
+                        : "Required parameter 'assetPath' not provided",
                     "validation_error"
                 );
+            }
+
+            foreach (JProperty property in parameters.Properties())
+            {
+                if (property.Name != "assetPath"
+                    && property.Name != "spriteMode"
+                    && property.Name != "meshType"
+                    && property.Name != "compression"
+                    && property.Name != "wrapMode"
+                    && property.Name != "spriteBorder")
+                {
+                    return McpUnitySocketHandler.CreateErrorResponse(
+                        $"Unknown parameter '{property.Name}'. Valid parameters: assetPath, " +
+                        "spriteMode, meshType, compression, wrapMode, spriteBorder.",
+                        "validation_error");
+                }
             }
 
             if (!AssetPathUtils.TryNormalizeAssetPath(
@@ -81,6 +114,41 @@ namespace McpUnity.Tools
                     "compression",
                     compression,
                     "None, LowQuality, NormalQuality, HighQuality");
+            }
+            TextureWrapMode wrapModeSetting = default(TextureWrapMode);
+            if (wrapModeProvided)
+            {
+                string wrapMode = wrapModeToken == null || wrapModeToken.Type == JTokenType.Null
+                    ? "<null>"
+                    : wrapModeToken.Type == JTokenType.String
+                        ? wrapModeToken.Value<string>()
+                        : wrapModeToken.ToString(Newtonsoft.Json.Formatting.None);
+                if (!TryParseWrapMode(wrapMode, out wrapModeSetting))
+                {
+                    return InvalidEnumResponse(
+                        "wrapMode",
+                        wrapMode,
+                        "Repeat, Clamp, Mirror, MirrorOnce");
+                }
+            }
+
+            Vector4 spriteBorderSetting = default(Vector4);
+            if (spriteBorderProvided
+                && !TryParseSpriteBorder(
+                    spriteBorderToken,
+                    out spriteBorderSetting,
+                    out string spriteBorderError))
+            {
+                return McpUnitySocketHandler.CreateErrorResponse(
+                    spriteBorderError,
+                    "validation_error");
+            }
+            if (spriteImportMode == SpriteImportMode.Multiple && spriteBorderProvided)
+            {
+                return McpUnitySocketHandler.CreateErrorResponse(
+                    "Parameter 'spriteBorder' applies only to spriteMode 'Single'; " +
+                    "spriteMode 'Multiple' requires setting the border for each sprite.",
+                    "validation_error");
             }
 
             // Verify the asset exists
@@ -130,14 +198,26 @@ namespace McpUnity.Tools
             string actualSpriteMode;
             string actualMeshType;
             string actualCompression;
+            string actualWrapMode;
+            string actualWrapModeU;
+            string actualWrapModeV;
+            string actualWrapModeW;
+            Vector4 actualSpriteBorder;
+            TextureImporterType previousType = importer.textureType;
+            bool textureTypeChanged = previousType != TextureImporterType.Sprite;
             try
             {
-                importer.textureType = TextureImporterType.Sprite;
+                if (textureTypeChanged)
+                    importer.textureType = TextureImporterType.Sprite;
                 importer.spriteImportMode = spriteImportMode;
 
                 TextureImporterSettings settings = new TextureImporterSettings();
                 importer.ReadTextureSettings(settings);
                 settings.spriteMeshType = spriteMeshType;
+                if (wrapModeProvided)
+                    settings.wrapMode = wrapModeSetting;
+                if (spriteBorderProvided)
+                    settings.spriteBorder = spriteBorderSetting;
                 importer.SetTextureSettings(settings);
                 importer.textureCompression = compressionSetting;
                 importer.SaveAndReimport();
@@ -158,6 +238,14 @@ namespace McpUnity.Tools
                 actualSpriteMode = ReadSpriteMode(_readSpriteImportMode(persistedImporter));
                 actualMeshType = ReadMeshType(_readSpriteMeshType(persistedSettings));
                 actualCompression = ReadCompression(_readTextureCompression(persistedImporter));
+                actualWrapModeU = ReadWrapMode(persistedSettings.wrapModeU);
+                actualWrapModeV = ReadWrapMode(persistedSettings.wrapModeV);
+                actualWrapModeW = ReadWrapMode(persistedSettings.wrapModeW);
+                actualWrapMode = persistedSettings.wrapModeU == persistedSettings.wrapModeV
+                    && persistedSettings.wrapModeU == persistedSettings.wrapModeW
+                        ? actualWrapModeU
+                        : "Mixed";
+                actualSpriteBorder = persistedSettings.spriteBorder;
                 if (string.IsNullOrEmpty(actualAssetPath))
                 {
                     return CreateReadbackFailureWithRollback(
@@ -169,21 +257,47 @@ namespace McpUnity.Tools
                 McpLogger.LogInfo(
                     $"[MCP Unity] Imported texture as sprite: '{actualAssetPath}' " +
                     $"(mode={actualSpriteMode}, mesh={actualMeshType}, " +
-                    $"compression={actualCompression})");
+                    $"compression={actualCompression}, wrap={actualWrapMode}, " +
+                    $"border={actualSpriteBorder})");
 
-                return new JObject
+                var response = new JObject
                 {
                     ["success"] = true,
                     ["type"] = "text",
                     ["message"] =
                         $"Successfully set texture '{actualAssetPath}' as Sprite " +
                         $"(mode={actualSpriteMode}, mesh={actualMeshType}, " +
-                        $"compression={actualCompression})",
+                        $"compression={actualCompression}, wrap={actualWrapMode}, " +
+                        $"border={actualSpriteBorder})",
                     ["assetPath"] = actualAssetPath,
                     ["spriteMode"] = actualSpriteMode,
                     ["meshType"] = actualMeshType,
-                    ["compression"] = actualCompression
+                    ["compression"] = actualCompression,
+                    ["wrapMode"] = actualWrapMode,
+                    ["wrapModeU"] = actualWrapModeU,
+                    ["wrapModeV"] = actualWrapModeV,
+                    ["wrapModeW"] = actualWrapModeW,
+                    ["spriteBorder"] = new JObject
+                    {
+                        ["left"] = actualSpriteBorder.x,
+                        ["bottom"] = actualSpriteBorder.y,
+                        ["right"] = actualSpriteBorder.z,
+                        ["top"] = actualSpriteBorder.w
+                    }
                 };
+                if (textureTypeChanged)
+                {
+                    string warning =
+                        $"textureType changed from {previousType} to Sprite; Unity reset other " +
+                        "importer settings to Sprite defaults. This call then wrote " +
+                        "spriteMode/meshType/compression (tool defaults when omitted) and any " +
+                        "provided wrapMode/spriteBorder; all other settings remain at the Sprite " +
+                        "defaults.";
+                    response["warnings"] = new JArray(warning);
+                    response["message"] = response["message"].ToString() + " Warning: " + warning;
+                }
+
+                return response;
             }
             catch (Exception ex)
             {
@@ -209,6 +323,20 @@ namespace McpUnity.Tools
             }
             result = default(SpriteImportMode);
             return false;
+        }
+
+        private static string ReadEnumParameter(
+            JObject parameters,
+            string field,
+            string defaultValue)
+        {
+            if (parameters == null || !parameters.TryGetValue(field, out JToken token))
+                return defaultValue;
+            if (token == null || token.Type == JTokenType.Null)
+                return "<null>";
+            return token.Type == JTokenType.String
+                ? token.Value<string>()
+                : token.ToString(Newtonsoft.Json.Formatting.None);
         }
 
         private static bool TryParseMeshType(string value, out SpriteMeshType result)
@@ -253,6 +381,99 @@ namespace McpUnity.Tools
             }
             result = default(TextureImporterCompression);
             return false;
+        }
+
+        private static bool TryParseWrapMode(string value, out TextureWrapMode result)
+        {
+            if (string.Equals(value, "Repeat", StringComparison.OrdinalIgnoreCase))
+            {
+                result = TextureWrapMode.Repeat;
+                return true;
+            }
+            if (string.Equals(value, "Clamp", StringComparison.OrdinalIgnoreCase))
+            {
+                result = TextureWrapMode.Clamp;
+                return true;
+            }
+            if (string.Equals(value, "Mirror", StringComparison.OrdinalIgnoreCase))
+            {
+                result = TextureWrapMode.Mirror;
+                return true;
+            }
+            if (string.Equals(value, "MirrorOnce", StringComparison.OrdinalIgnoreCase))
+            {
+                result = TextureWrapMode.MirrorOnce;
+                return true;
+            }
+            result = default(TextureWrapMode);
+            return false;
+        }
+
+        private static bool TryParseSpriteBorder(
+            JToken token,
+            out Vector4 result,
+            out string error)
+        {
+            const string validKeys = "left, bottom, right, top";
+            result = default(Vector4);
+            error = null;
+
+            if (!(token is JObject borderObject))
+            {
+                error =
+                    $"Parameter 'spriteBorder' must be an object. Valid keys: {validKeys}.";
+                return false;
+            }
+
+            foreach (JProperty property in borderObject.Properties())
+            {
+                if (property.Name != "left"
+                    && property.Name != "bottom"
+                    && property.Name != "right"
+                    && property.Name != "top")
+                {
+                    error =
+                        $"Parameter 'spriteBorder' contains unknown key '{property.Name}'. " +
+                        $"Valid keys: {validKeys}.";
+                    return false;
+                }
+            }
+
+            string[] keys = { "left", "bottom", "right", "top" };
+            foreach (string key in keys)
+            {
+                if (!borderObject.TryGetValue(key, out JToken value))
+                {
+                    error =
+                        $"Parameter 'spriteBorder' is missing required key '{key}'. " +
+                        $"Valid keys: {validKeys}.";
+                    return false;
+                }
+                if (value.Type != JTokenType.Integer && value.Type != JTokenType.Float)
+                {
+                    error =
+                        $"Parameter 'spriteBorder.{key}' must be numeric. " +
+                        $"Valid keys: {validKeys}.";
+                    return false;
+                }
+            }
+
+            try
+            {
+                result = new Vector4(
+                    borderObject["left"].ToObject<float>(),
+                    borderObject["bottom"].ToObject<float>(),
+                    borderObject["right"].ToObject<float>(),
+                    borderObject["top"].ToObject<float>());
+                return true;
+            }
+            catch (Exception ex)
+            {
+                error =
+                    $"Parameter 'spriteBorder' values must be numeric. Valid keys: {validKeys}. " +
+                    ex.Message;
+                return false;
+            }
         }
 
         private static JObject InvalidEnumResponse(
@@ -335,6 +556,23 @@ namespace McpUnity.Tools
                     return "HighQuality";
                 case TextureImporterCompression.Uncompressed:
                     return "None";
+                default:
+                    return value.ToString();
+            }
+        }
+
+        private static string ReadWrapMode(TextureWrapMode value)
+        {
+            switch (value)
+            {
+                case TextureWrapMode.Repeat:
+                    return "Repeat";
+                case TextureWrapMode.Clamp:
+                    return "Clamp";
+                case TextureWrapMode.Mirror:
+                    return "Mirror";
+                case TextureWrapMode.MirrorOnce:
+                    return "MirrorOnce";
                 default:
                     return value.ToString();
             }
