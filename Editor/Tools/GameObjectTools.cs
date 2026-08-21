@@ -86,6 +86,7 @@ namespace McpUnity.Tools
             string newName = parameters["newName"]?.ToObject<string>();
             string newParentPath = parameters["newParent"]?.ToObject<string>();
             int? newParentId = parameters["newParentId"]?.ToObject<int?>();
+            bool worldPositionStays = parameters["worldPositionStays"]?.ToObject<bool?>() ?? false;
             int count = parameters["count"]?.ToObject<int?>() ?? 1;
 
             // Validate count
@@ -136,7 +137,7 @@ namespace McpUnity.Tools
                 Transform targetParent = newParent != null ? newParent.transform : sourceObject.transform.parent;
                 if (targetParent != null)
                 {
-                    duplicate.transform.SetParent(targetParent, true);
+                    duplicate.transform.SetParent(targetParent, worldPositionStays);
                 }
 
                 duplicatedObjects.Add(new JObject

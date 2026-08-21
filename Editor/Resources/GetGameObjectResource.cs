@@ -209,7 +209,9 @@ namespace McpUnity.Resources
 
                 // Field-projection: skip the property dump for components not in the filter (when one is set)
                 bool wantDetail = includeDetailedInfo
-                    && (detailedTypeFilter == null || detailedTypeFilter.Contains(componentType.Name));
+                    && (detailedTypeFilter == null
+                        || detailedTypeFilter.Contains(componentType.Name)
+                        || detailedTypeFilter.Contains(componentType.FullName));
 
                 // Add detailed information if requested and component is safe to inspect
                 if (wantDetail)

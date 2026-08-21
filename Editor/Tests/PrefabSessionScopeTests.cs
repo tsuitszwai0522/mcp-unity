@@ -41,6 +41,10 @@ namespace McpUnity.Tests
         private const string SessionRootInstanceIdKey = "McpUnity.PrefabEditingService.RootInstanceId";
         private static readonly System.Func<GameObject, string, bool> OriginalSavePrefabContents =
             (System.Func<GameObject, string, bool>)GetServiceField("_savePrefabContents");
+        private static readonly System.Action<GameObject> OriginalUnloadPrefabContents =
+            (System.Action<GameObject>)GetServiceField("_unloadPrefabContents");
+        private static readonly System.Action<UnityEngine.Object> OriginalPingObject =
+            (System.Action<UnityEngine.Object>)GetAddAssetToolField("_pingObject");
 
         private GameObject _sceneObject;
         private Scene _additiveTestScene;
@@ -180,6 +184,26 @@ namespace McpUnity.Tests
             Assert.AreEqual(originalRootId, PrefabEditingService.PrefabRoot.GetInstanceID());
             Assert.IsNotNull(PrefabEditingService.PrefabRoot.transform.Find("UnsavedReloadMarker"));
             Assert.AreEqual(TestPrefabPath, PrefabEditingService.AssetPath);
+        }
+
+        [Test]
+        public void InjectedDelegateDefaults_AreCapturedFromUnityEditorApis()
+        {
+            MethodInfo expectedUnload = typeof(PrefabUtility).GetMethod(
+                nameof(PrefabUtility.UnloadPrefabContents),
+                BindingFlags.Public | BindingFlags.Static,
+                null,
+                new[] { typeof(GameObject) },
+                null);
+            MethodInfo expectedPing = typeof(EditorGUIUtility).GetMethod(
+                nameof(EditorGUIUtility.PingObject),
+                BindingFlags.Public | BindingFlags.Static,
+                null,
+                new[] { typeof(UnityEngine.Object) },
+                null);
+
+            Assert.AreEqual(expectedUnload, OriginalUnloadPrefabContents.Method);
+            Assert.AreEqual(expectedPing, OriginalPingObject.Method);
         }
 
         [Test]
@@ -1308,7 +1332,7 @@ namespace McpUnity.Tests
         {
             SetServiceField(
                 "_unloadPrefabContents",
-                (System.Action<GameObject>)PrefabUtility.UnloadPrefabContents);
+                OriginalUnloadPrefabContents);
         }
 
         private static void RestoreSavePrefabContents()
@@ -1322,7 +1346,7 @@ namespace McpUnity.Tests
         {
             SetAddAssetToolField(
                 "_pingObject",
-                (System.Action<UnityEngine.Object>)EditorGUIUtility.PingObject);
+                OriginalPingObject);
         }
 
         private static void SetAddAssetToolField(string name, object value)
@@ -1332,6 +1356,16 @@ namespace McpUnity.Tests
             if (field == null)
                 Assert.Fail($"AddAssetToSceneTool private field '{name}' was not found");
             field.SetValue(null, value);
+        }
+
+        private static object GetAddAssetToolField(string name)
+        {
+            FieldInfo field = typeof(AddAssetToSceneTool).GetField(
+                name, BindingFlags.NonPublic | BindingFlags.Static);
+            if (field == null)
+                throw new System.MissingFieldException(
+                    typeof(AddAssetToSceneTool).FullName, name);
+            return field.GetValue(null);
         }
 
         private static void SetServiceField(string name, object value)

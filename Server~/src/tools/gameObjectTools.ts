@@ -18,6 +18,7 @@ const duplicateParamsSchema = z.object({
   newName: z.string().optional().describe('New name for the duplicated GameObject(s). If count > 1, numbers will be appended.'),
   newParent: z.string().optional().describe('Path to the new parent GameObject. If not specified, uses the same parent as the original. Same-name hierarchy segments return object_path_ambiguity_error; use canonical Name[n] syntax (0-based among same-name siblings or loaded roots).'),
   newParentId: z.number().optional().describe('Instance ID of the new parent GameObject (alternative to newParent path).'),
+  worldPositionStays: z.boolean().default(false).describe('Parenting semantics for the duplicate. false (default) carries the source local position, rotation, and scale into the new parent; true preserves the clone\'s world pose immediately after Instantiate.'),
   count: z.number().int().min(1).max(100).default(1).describe('Number of copies to create. Default: 1, Max: 100'),
 });
 
@@ -63,6 +64,7 @@ async function duplicateHandler(mcpUnity: McpUnity, params: any): Promise<CallTo
       newName: params.newName,
       newParent: params.newParent,
       newParentId: params.newParentId,
+      worldPositionStays: params.worldPositionStays ?? false,
       count: params.count ?? 1,
     }
   });

@@ -131,10 +131,11 @@ namespace McpUnity.Utils
                         prop.rectValue = (Rect)rectValue;
                         return true;
                     case SerializedPropertyType.Enum:
-                        if (value is JObject enumObject)
+                        JObject enumReaderShape = value as JObject;
+                        if (enumReaderShape != null)
                         {
                             string[] allowedEnumKeys = { "value", "index", "name" };
-                            foreach (JProperty suppliedKey in enumObject.Properties())
+                            foreach (JProperty suppliedKey in enumReaderShape.Properties())
                             {
                                 if (Array.IndexOf(allowedEnumKeys, suppliedKey.Name) < 0)
                                 {
@@ -144,7 +145,7 @@ namespace McpUnity.Utils
                                     return false;
                                 }
                             }
-                            if (!enumObject.TryGetValue("value", out JToken underlyingValue))
+                            if (!enumReaderShape.TryGetValue("value", out JToken underlyingValue))
                             {
                                 warnings?.Add(
                                     $"Reader-shaped enum object for '{fieldName}' must include 'value'");
@@ -164,6 +165,8 @@ namespace McpUnity.Utils
                                 if (string.Equals(displayNames[i], strValue, StringComparison.OrdinalIgnoreCase))
                                 {
                                     prop.enumValueIndex = i;
+                                    AddEnumReaderShapeMismatchWarnings(
+                                        prop, enumReaderShape, warnings, fieldName);
                                     return true;
                                 }
                             }
@@ -178,6 +181,8 @@ namespace McpUnity.Utils
                                 if (string.Equals(internalNames[i], strValue, StringComparison.OrdinalIgnoreCase))
                                 {
                                     prop.enumValueIndex = i;
+                                    AddEnumReaderShapeMismatchWarnings(
+                                        prop, enumReaderShape, warnings, fieldName);
                                     return true;
                                 }
                             }
@@ -188,8 +193,14 @@ namespace McpUnity.Utils
                                 CultureInfo.InvariantCulture,
                                 out int numericValue))
                             {
-                                return TrySetEnumInteger(
+                                bool written = TrySetEnumInteger(
                                     prop, numericValue, warnings, fieldName, internalNames);
+                                if (written)
+                                {
+                                    AddEnumReaderShapeMismatchWarnings(
+                                        prop, enumReaderShape, warnings, fieldName);
+                                }
+                                return written;
                             }
 
                             warnings?.Add(
@@ -202,8 +213,14 @@ namespace McpUnity.Utils
 #pragma warning disable CS0618 // enumNames is obsolete but no non-obsolete API returns internal C# enum names
                             string[] validNames = prop.enumNames;
 #pragma warning restore CS0618
-                            return TrySetEnumInteger(
+                            bool written = TrySetEnumInteger(
                                 prop, requestedValue, warnings, fieldName, validNames);
+                            if (written)
+                            {
+                                AddEnumReaderShapeMismatchWarnings(
+                                    prop, enumReaderShape, warnings, fieldName);
+                            }
+                            return written;
                         }
                         break;
                     case SerializedPropertyType.ObjectReference:
@@ -485,6 +502,103 @@ namespace McpUnity.Utils
                 $"Valid names: {string.Join(", ", validNames)}. " +
                 "Combined numeric values are accepted only for [Flags] enums when every bit is defined.");
             return false;
+        }
+
+        private static void AddEnumReaderShapeMismatchWarnings(
+            SerializedProperty prop,
+            JObject readerShape,
+            List<string> warnings,
+            string fieldName)
+        {
+            if (readerShape == null || warnings == null)
+            {
+                return;
+            }
+
+#pragma warning disable CS0618 // enumNames is obsolete but no non-obsolete API returns internal C# enum names
+            string[] enumNames = prop.enumNames;
+#pragma warning restore CS0618
+            bool hasEnumType = TryGetSerializedEnumType(prop, out Type enumType);
+            string resolvedName = hasEnumType
+                ? Enum.ToObject(enumType, prop.intValue).ToString()
+                : enumNames != null
+                    && prop.enumValueIndex >= 0
+                    && prop.enumValueIndex < enumNames.Length
+                        ? enumNames[prop.enumValueIndex]
+                        : prop.intValue.ToString(CultureInfo.InvariantCulture);
+
+            if (readerShape.TryGetValue("name", out JToken suppliedNameToken))
+            {
+                string suppliedName = suppliedNameToken.Type == JTokenType.Null
+                    ? null
+                    : suppliedNameToken.ToString();
+                bool suppliedNameMatches = false;
+
+                if (suppliedName != null
+                    && hasEnumType
+                    && Enum.TryParse(enumType, suppliedName, true, out object suppliedEnumValue))
+                {
+                    suppliedNameMatches = suppliedEnumValue.Equals(
+                        Enum.ToObject(enumType, prop.intValue));
+                }
+
+                if (suppliedName != null)
+                {
+                    string[] displayNames = prop.enumDisplayNames;
+                    for (int i = 0; displayNames != null && i < displayNames.Length; i++)
+                    {
+                        if (i == prop.enumValueIndex
+                            && string.Equals(
+                                displayNames[i], suppliedName,
+                                StringComparison.OrdinalIgnoreCase))
+                        {
+                            suppliedNameMatches = true;
+                            break;
+                        }
+                    }
+
+                    for (int i = 0; enumNames != null && i < enumNames.Length; i++)
+                    {
+                        if (i == prop.enumValueIndex
+                            && string.Equals(
+                                enumNames[i], suppliedName,
+                                StringComparison.OrdinalIgnoreCase))
+                        {
+                            suppliedNameMatches = true;
+                            break;
+                        }
+                    }
+
+                    suppliedNameMatches = suppliedNameMatches
+                        || string.Equals(
+                            suppliedName, resolvedName, StringComparison.OrdinalIgnoreCase);
+                }
+
+                if (!suppliedNameMatches)
+                {
+                    warnings.Add(
+                        $"Reader-shaped enum metadata mismatch for '{fieldName}': supplied name " +
+                        $"'{suppliedName ?? "null"}', but 'value' resolved to name '{resolvedName}'. Used 'value'.");
+                }
+            }
+
+            if (readerShape.TryGetValue("index", out JToken suppliedIndexToken))
+            {
+                string suppliedIndex = suppliedIndexToken.Type == JTokenType.Null
+                    ? "null"
+                    : suppliedIndexToken.ToString();
+                bool hasIntegerIndex = int.TryParse(
+                    suppliedIndex,
+                    NumberStyles.Integer,
+                    CultureInfo.InvariantCulture,
+                    out int suppliedIndexValue);
+                if (!hasIntegerIndex || suppliedIndexValue != prop.enumValueIndex)
+                {
+                    warnings.Add(
+                        $"Reader-shaped enum metadata mismatch for '{fieldName}': supplied index " +
+                        $"'{suppliedIndex}', but 'value' resolved to index {prop.enumValueIndex}. Used 'value'.");
+                }
+            }
         }
 
         private static bool TryGetSerializedEnumType(SerializedProperty prop, out Type enumType)

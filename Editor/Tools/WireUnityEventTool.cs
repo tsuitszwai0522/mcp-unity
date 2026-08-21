@@ -213,6 +213,7 @@ namespace McpUnity.Tools
             int listenerIndex = unityEvent.GetPersistentEventCount();
             try
             {
+                Undo.RecordObject(sourceComponent, "Wire UnityEvent");
                 AddPersistentListener(unityEvent, listenerTarget, binding);
                 unityEvent.SetPersistentListenerState(
                     listenerIndex,
@@ -605,13 +606,20 @@ namespace McpUnity.Tools
                         new[] { typeof(int) },
                         PersistentListenerMode.Int,
                         intValue);
+                    float floatValue = Convert.ToSingle(intValue);
+                    string floatWarning = (long)floatValue != intValue
+                        ? $"Static integer argument {intValue} cannot be represented exactly as a float; " +
+                            $"the selected Float listener stored " +
+                            $"{floatValue.ToString("R", System.Globalization.CultureInfo.InvariantCulture)}."
+                        : null;
                     AddCandidate(
                         candidates,
                         listenerTarget,
                         methodName,
                         new[] { typeof(float) },
                         PersistentListenerMode.Float,
-                        Convert.ToSingle(intValue));
+                        floatValue,
+                        floatWarning);
                     return;
                 case JTokenType.Float:
                     AddCandidate(

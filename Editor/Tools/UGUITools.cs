@@ -456,42 +456,67 @@ namespace McpUnity.Tools
 
                 // For Camera/WorldSpace modes, validate camera
                 Camera targetCamera = null;
+                string cameraSource = "none";
                 if (renderMode == RenderMode.ScreenSpaceCamera || renderMode == RenderMode.WorldSpace)
                 {
                     if (!string.IsNullOrEmpty(cameraPath))
                     {
                         JObject cameraScopeError = PrefabSessionScope.TryResolveGameObject(
                             null, cameraPath, out GameObject cameraObj);
-                        if (cameraScopeError != null) return cameraScopeError;
-                        if (cameraObj != null)
-                            targetCamera = cameraObj.GetComponent<Camera>();
-                    }
-
-                    if (targetCamera == null)
-                    {
-                        JObject rootScopeError = PrefabSessionScope.TryGetPrefabRoot(out GameObject prefabRoot);
-                        if (rootScopeError != null) return rootScopeError;
-                        if (prefabRoot != null)
+                        if (cameraScopeError != null)
                         {
-                            foreach (Camera candidate in prefabRoot.GetComponentsInChildren<Camera>(true))
+                            if (cameraScopeError["error"]?["type"]?.ToString() == "not_found_error")
                             {
-                                if (candidate.gameObject.tag == "MainCamera")
-                                {
-                                    targetCamera = candidate;
-                                    break;
-                                }
+                                return McpUnitySocketHandler.CreateErrorResponse(
+                                    $"Camera GameObject at path '{cameraPath}' not found.",
+                                    "validation_error"
+                                );
                             }
+                            return cameraScopeError;
                         }
-                        else
+                        if (cameraObj == null)
                         {
-                            targetCamera = Camera.main;
+                            return McpUnitySocketHandler.CreateErrorResponse(
+                                $"Camera GameObject at path '{cameraPath}' not found.",
+                                "validation_error"
+                            );
+                        }
+
+                        targetCamera = cameraObj.GetComponent<Camera>();
+                        if (targetCamera == null)
+                        {
+                            return McpUnitySocketHandler.CreateErrorResponse(
+                                $"GameObject at path '{cameraPath}' has no Camera component.",
+                                "validation_error"
+                            );
+                        }
+                        cameraSource = "explicit";
+                    }
+                    else
+                    {
+                        foreach (Camera candidate in UnityEngine.Object.FindObjectsByType<Camera>(
+                            FindObjectsInactive.Exclude,
+                            FindObjectsSortMode.None))
+                        {
+                            if (!candidate.enabled
+                                || !candidate.gameObject.CompareTag("MainCamera")
+                                || !PrefabSessionScope.IsLoadedNonPreviewSceneObject(
+                                    candidate.gameObject))
+                            {
+                                continue;
+                            }
+
+                            targetCamera = candidate;
+                            cameraSource = "cameraMain";
+                            break;
                         }
                     }
 
                     if (targetCamera == null && renderMode == RenderMode.ScreenSpaceCamera)
                     {
                         return McpUnitySocketHandler.CreateErrorResponse(
-                            "ScreenSpaceCamera mode requires a camera. No camera found at specified path or as Main Camera.",
+                            "ScreenSpaceCamera mode requires a camera, but no enabled Main Camera " +
+                            "was found. Provide cameraPath or tag an enabled Camera as MainCamera.",
                             "validation_error"
                         );
                     }
@@ -590,14 +615,31 @@ namespace McpUnity.Tools
 
                 EditorUtility.SetDirty(canvasGO);
 
-                return new JObject
+                string responseMessage = $"Successfully created Canvas at '{objectPath}'";
+                JArray responseWarnings = null;
+                if (renderMode == RenderMode.WorldSpace && targetCamera == null)
+                {
+                    const string warning =
+                        "WorldSpace Canvas was created with worldCamera unbound because no Main Camera was found.";
+                    responseMessage += $" ({warning})";
+                    responseWarnings = new JArray(warning);
+                }
+
+                var response = new JObject
                 {
                     ["success"] = true,
                     ["type"] = "text",
-                    ["message"] = $"Successfully created Canvas at '{objectPath}'",
+                    ["message"] = responseMessage,
                     ["instanceId"] = canvasGO.GetInstanceID(),
-                    ["path"] = GameObjectPathUtils.GetCanonicalPath(canvasGO)
+                    ["path"] = GameObjectPathUtils.GetCanonicalPath(canvasGO),
+                    ["cameraSource"] = cameraSource,
+                    ["cameraPath"] = targetCamera != null
+                        ? (JToken)GameObjectPathUtils.GetCanonicalPath(targetCamera.gameObject)
+                        : JValue.CreateNull()
                 };
+                if (responseWarnings != null)
+                    response["warnings"] = responseWarnings;
+                return response;
             }
             catch (Exception ex)
             {
@@ -853,6 +895,10 @@ namespace McpUnity.Tools
                 if (usedFallback)
                 {
                     message += " (TextMeshPro package not installed, used legacy UI fallback)";
+                }
+                else if (elementType == "Text")
+                {
+                    message += " (created legacy UnityEngine.UI.Text; TMP projects should use \"TextMeshPro\")";
                 }
 
                 return new JObject

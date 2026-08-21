@@ -152,7 +152,7 @@ const byNameParamsSchema = z.object({
     .array(z.string())
     .optional()
     .describe(
-      "Keep full property dumps only for these component type names (e.g. ['RectTransform']); all other components collapse to { type, enabled }. Ideal for reading geometry across many objects without the matrix/serialization noise. Ignored when 'compact' is true."
+      "Keep full property dumps only for these short or full component type names (e.g. ['RectTransform'] or ['UnityEngine.RectTransform']); all other components collapse to { type, enabled }. Ideal for reading geometry across many objects without the matrix/serialization noise. Ignored when 'compact' is true."
     ),
 });
 
@@ -190,6 +190,96 @@ export function registerGetGameObjectsByNameTool(
         };
       } catch (error) {
         logger.error(`Tool execution failed: ${byNameToolName}`, error);
+        throw error;
+      }
+    }
+  );
+}
+
+// ============================================================================
+// get_gameobjects_by_component (plural — assignable component match)
+// ============================================================================
+
+const byComponentToolName = "get_gameobjects_by_component";
+const byComponentToolDescription =
+  "Finds ALL GameObjects with a component assignable to the resolved component type, so a base type such as 'Collider' includes derived components such as BoxCollider. Returns canonical hierarchy paths and component data. Compact output defaults to true unless componentFilter is provided; set compact=false for all detailed component property dumps.";
+const byComponentParamsSchema = z.object({
+  componentType: z
+    .string()
+    .describe(
+      "Component short name, full name, or assembly-qualified name. Ambiguous short names fail; retry with the full name or assembly-qualified name shown by the error."
+    ),
+  includeInactive: z
+    .boolean()
+    .optional()
+    .describe("Include inactive GameObjects. Default: true"),
+  maxDepth: z
+    .number()
+    .int()
+    .gte(-1)
+    .optional()
+    .describe(
+      "Max child-traversal depth for each match. 0 = target only (default), 1 = direct children, -1 = unlimited. Deep results can be token-heavy — raise explicitly when needed."
+    ),
+  includeChildren: z
+    .boolean()
+    .optional()
+    .describe("Include child GameObjects in each match. Default: false"),
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .max(1000)
+    .optional()
+    .describe("Max number of matches to return. Default: 100"),
+  compact: z
+    .boolean()
+    .optional()
+    .describe(
+      "Drop every component's property dump, keeping only { type, enabled }. Default: true unless componentFilter is provided; set false when all component field values are required."
+    ),
+  componentFilter: z
+    .array(z.string())
+    .optional()
+    .describe(
+      "Keep full property dumps only for these short or full component type names (e.g. ['RectTransform'] or ['UnityEngine.RectTransform']); all other components collapse to { type, enabled }. Providing this without 'compact' automatically enables filtered detail; an explicit compact=true ignores the filter."
+    ),
+});
+
+export function registerGetGameObjectsByComponentTool(
+  server: McpServer,
+  mcpUnity: McpUnity,
+  logger: Logger
+) {
+  logger.info(`Registering tool: ${byComponentToolName}`);
+  server.tool(
+    byComponentToolName,
+    byComponentToolDescription,
+    byComponentParamsSchema.shape,
+    async (params: z.infer<typeof byComponentParamsSchema>) => {
+      try {
+        logger.info(`Executing tool: ${byComponentToolName}`, params);
+        const response = await mcpUnity.sendRequest({
+          method: byComponentToolName,
+          params,
+        });
+        if (!response.success) {
+          throw new McpUnityError(
+            ErrorType.TOOL_EXECUTION,
+            response.message || "Failed to find GameObjects by component"
+          );
+        }
+        logger.info(`Tool execution successful: ${byComponentToolName}`);
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(response, null, 2),
+            },
+          ],
+        };
+      } catch (error) {
+        logger.error(`Tool execution failed: ${byComponentToolName}`, error);
         throw error;
       }
     }

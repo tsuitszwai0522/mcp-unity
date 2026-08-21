@@ -6,6 +6,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [fork-1.9.0] - 2026-08-21
+
+### Added
+
+- Added `get_gameobjects_by_component`, which resolves short, full, or assembly-qualified component
+  type names, includes derived component matches, returns canonical GameObject paths, and defaults to
+  compact output for high-cardinality component queries unless `componentFilter` is provided.
+
+### Breaking
+
+- **`duplicate_gameobject` parenting now defaults to local-transform preservation.** The new optional
+  `worldPositionStays` parameter defaults to `false`, carrying the source local position, rotation,
+  and scale into the selected parent. This is a breaking correction: older releases always behaved
+  like `worldPositionStays: true`; callers that need the old world-pose-preserving behaviour must pass
+  `true` explicitly.
+
+### Fixed
+
+- `create_canvas` now rejects an explicit `cameraPath` that is missing or has no `Camera` component
+  instead of silently falling back. Its implicit fallback skips preview-scene cameras and selects the
+  first enabled, tagged Main Camera in a loaded non-preview scene. Successful responses disclose
+  `cameraSource` and canonical `cameraPath`; an unbound World Space canvas succeeds with a warning.
+- Full component type names in `componentFilter` now work for both `get_gameobject` and
+  `get_gameobjects_by_name`.
+- `create_ui_element` now warns that `"Text"` creates legacy `UnityEngine.UI.Text` and directs TMP
+  projects to request `"TextMeshPro"`.
+- `wire_unity_event` now records the UnityEvent-owning component with Undo before adding a persistent
+  listener.
+
+## [fork-1.8.0] - 2026-08-21
+
 ### Breaking
 
 - **Ambiguous `objectPath` values now fail instead of selecting the first GameObject.** Responses use

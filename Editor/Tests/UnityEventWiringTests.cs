@@ -2,8 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using McpUnity.Tools;
+using McpUnity.Utils;
 using Newtonsoft.Json.Linq;
 using NUnit.Framework;
+using UnityEditor;
 using UnityEngine;
 using UnityEngine.Events;
 
@@ -15,10 +17,29 @@ namespace McpUnity.Tests
     }
 
     [Serializable]
+    [Flags]
+    public enum UnityEventWiringFlags
+    {
+        None = 0,
+        First = 1,
+        Second = 2
+    }
+
+    [Serializable]
+    public enum UnityEventWiringInspectorNameCollision
+    {
+        [InspectorName("Bar")]
+        Alpha,
+        Bar
+    }
+
+    [Serializable]
     public class UnityEventWiringPayload
     {
         public string label;
         public PersistentListenerMode mode;
+        public UnityEventWiringFlags flags;
+        public UnityEventWiringInspectorNameCollision inspectorNameCollision;
     }
 
     public class UnityEventWiringProbe : MonoBehaviour
@@ -28,6 +49,7 @@ namespace McpUnity.Tests
         public List<UnityEventWiringPayload> payloads = new List<UnityEventWiringPayload>();
 
         public int receivedInt;
+        public float receivedFloat;
         public string receivedString;
 
         public void ReceiveInt(int value)
@@ -38,6 +60,11 @@ namespace McpUnity.Tests
         public void ReceiveString(string value)
         {
             receivedString = value;
+        }
+
+        public void ReceiveFloat(float value)
+        {
+            receivedFloat = value;
         }
 
         public void ReceiveAmbiguous(int value)
@@ -123,6 +150,22 @@ namespace McpUnity.Tests
                 (int)UnityEventCallState.RuntimeOnly,
                 result["persistentCall"]["m_CallState"]["value"].ToObject<int>());
             Assert.IsFalse(result["staticArgument"].ToObject<bool>());
+
+            Assert.AreEqual(
+                result["methodName"].ToString(),
+                source.noArgs.GetPersistentMethodName(0));
+            Assert.AreSame(listener, source.noArgs.GetPersistentTarget(0));
+            Assert.AreEqual(
+                listener.GetInstanceID(),
+                result["listenerTarget"]["instanceId"].ToObject<int>());
+            var independentSerializedObject = new SerializedObject(source);
+            int independentMode = independentSerializedObject.FindProperty("noArgs")
+                .FindPropertyRelative("m_PersistentCalls")
+                .FindPropertyRelative("m_Calls")
+                .GetArrayElementAtIndex(0)
+                .FindPropertyRelative("m_Mode")
+                .intValue;
+            Assert.AreEqual(result["mode"]["value"].ToObject<int>(), independentMode);
         }
 
         [Test]
@@ -152,6 +195,22 @@ namespace McpUnity.Tests
                 (int)UnityEventCallState.RuntimeOnly,
                 result["persistentCall"]["m_CallState"]["value"].ToObject<int>());
             Assert.AreEqual("ReceiveInt", result["persistentCall"]["m_MethodName"].ToString());
+
+            Assert.AreEqual(
+                result["methodName"].ToString(),
+                probe.intEvent.GetPersistentMethodName(0));
+            Assert.AreSame(probe, probe.intEvent.GetPersistentTarget(0));
+            Assert.AreEqual(
+                probe.GetInstanceID(),
+                result["listenerTarget"]["instanceId"].ToObject<int>());
+            var independentSerializedObject = new SerializedObject(probe);
+            int independentMode = independentSerializedObject.FindProperty("intEvent")
+                .FindPropertyRelative("m_PersistentCalls")
+                .FindPropertyRelative("m_Calls")
+                .GetArrayElementAtIndex(0)
+                .FindPropertyRelative("m_Mode")
+                .intValue;
+            Assert.AreEqual(result["mode"]["value"].ToObject<int>(), independentMode);
         }
 
         [Test]
@@ -182,6 +241,227 @@ namespace McpUnity.Tests
             Assert.AreEqual(
                 (int)UnityEventCallState.RuntimeOnly,
                 result["persistentCall"]["m_CallState"]["value"].ToObject<int>());
+
+            Assert.AreEqual(
+                result["methodName"].ToString(),
+                probe.intEvent.GetPersistentMethodName(0));
+            Assert.AreSame(probe, probe.intEvent.GetPersistentTarget(0));
+            Assert.AreEqual(
+                probe.GetInstanceID(),
+                result["listenerTarget"]["instanceId"].ToObject<int>());
+            var independentSerializedObject = new SerializedObject(probe);
+            int independentMode = independentSerializedObject.FindProperty("intEvent")
+                .FindPropertyRelative("m_PersistentCalls")
+                .FindPropertyRelative("m_Calls")
+                .GetArrayElementAtIndex(0)
+                .FindPropertyRelative("m_Mode")
+                .intValue;
+            Assert.AreEqual(result["mode"]["value"].ToObject<int>(), independentMode);
+        }
+
+        [Test]
+        public void WireUnityEvent_LossyIntegerToSelectedFloatSurfacesWarning()
+        {
+            const int requestedValue = 16777217;
+            UnityEventWiringProbe probe = Spawn("WireEvent_LossyFloat")
+                .AddComponent<UnityEventWiringProbe>();
+
+            JObject result = new WireUnityEventTool().Execute(new JObject
+            {
+                ["instanceId"] = probe.gameObject.GetInstanceID(),
+                ["componentName"] = typeof(UnityEventWiringProbe).FullName,
+                ["eventFieldName"] = "noArgs",
+                ["listenerInstanceId"] = probe.gameObject.GetInstanceID(),
+                ["listenerComponentName"] = typeof(UnityEventWiringProbe).FullName,
+                ["methodName"] = "ReceiveFloat",
+                ["staticArgument"] = requestedValue
+            });
+
+            Assert.IsTrue(result["success"].ToObject<bool>(), result.ToString());
+            Assert.AreEqual("Float", result["mode"]["name"].ToString());
+            Assert.AreEqual(16777216f, result["staticArgument"].ToObject<float>());
+            var freshSerializedObject = new SerializedObject(probe);
+            float storedFloatArgument = freshSerializedObject.FindProperty("noArgs")
+                .FindPropertyRelative("m_PersistentCalls")
+                .FindPropertyRelative("m_Calls")
+                .GetArrayElementAtIndex(0)
+                .FindPropertyRelative("m_Arguments")
+                .FindPropertyRelative("m_FloatArgument")
+                .floatValue;
+            Assert.AreEqual(16777216f, storedFloatArgument);
+            Assert.IsNotNull(result["warnings"], result.ToString());
+            Assert.That(result["warnings"]?[0]?.ToString(), Does.Contain("16777217"));
+            Assert.That(result["warnings"]?[0]?.ToString(), Does.Contain("16777216"));
+        }
+
+        [Test]
+        public void EnumReaderShape_MetadataWarnsOnlyWhenItDisagreesWithValue()
+        {
+            UnityEventWiringProbe probe = Spawn("EnumReaderShape_Metadata")
+                .AddComponent<UnityEventWiringProbe>();
+            probe.payloads.Add(new UnityEventWiringPayload
+            {
+                label = "probe",
+                mode = PersistentListenerMode.Bool
+            });
+            var serializedObject = new SerializedObject(probe);
+            SerializedProperty modeProperty = serializedObject
+                .FindProperty("payloads")
+                .GetArrayElementAtIndex(0)
+                .FindPropertyRelative("mode");
+
+            var warnings = new List<string>();
+            bool consistentWritten = SerializedPropertyHelper.SetValue(
+                modeProperty,
+                new JObject
+                {
+                    ["value"] = (int)PersistentListenerMode.Bool,
+                    ["index"] = modeProperty.enumValueIndex,
+                    ["name"] = nameof(PersistentListenerMode.Bool).ToLowerInvariant()
+                },
+                warnings,
+                "payloads[0].mode");
+
+            Assert.IsTrue(consistentWritten);
+            Assert.IsEmpty(warnings);
+
+            int staleIndex = modeProperty.enumValueIndex;
+            bool changedWritten = SerializedPropertyHelper.SetValue(
+                modeProperty,
+                new JObject
+                {
+                    ["value"] = (int)PersistentListenerMode.String,
+                    ["index"] = staleIndex,
+                    ["name"] = nameof(PersistentListenerMode.Bool)
+                },
+                warnings,
+                "payloads[0].mode");
+            serializedObject.ApplyModifiedProperties();
+
+            Assert.IsTrue(changedWritten);
+            Assert.AreEqual(PersistentListenerMode.String, probe.payloads[0].mode);
+            Assert.AreEqual(2, warnings.Count);
+            Assert.That(warnings[0], Does.Contain("Bool").And.Contain("String"));
+            Assert.That(warnings[1], Does.Contain(staleIndex.ToString())
+                .And.Contain(modeProperty.enumValueIndex.ToString()));
+            Assert.That(warnings[0], Does.Contain("Used 'value'"));
+            Assert.That(warnings[1], Does.Contain("Used 'value'"));
+        }
+
+        [Test]
+        public void EnumReaderShape_DisplayNameDoesNotWarnWhenItMatchesValue()
+        {
+            UnityEventWiringProbe probe = Spawn("EnumReaderShape_DisplayName")
+                .AddComponent<UnityEventWiringProbe>();
+            probe.payloads.Add(new UnityEventWiringPayload
+            {
+                mode = PersistentListenerMode.Bool
+            });
+            var serializedObject = new SerializedObject(probe);
+            SerializedProperty modeProperty = serializedObject
+                .FindProperty("payloads")
+                .GetArrayElementAtIndex(0)
+                .FindPropertyRelative("mode");
+            modeProperty.intValue = (int)PersistentListenerMode.EventDefined;
+            string displayName = modeProperty.enumDisplayNames[modeProperty.enumValueIndex];
+            modeProperty.intValue = (int)PersistentListenerMode.Bool;
+
+            var warnings = new List<string>();
+            bool written = SerializedPropertyHelper.SetValue(
+                modeProperty,
+                new JObject
+                {
+                    ["value"] = (int)PersistentListenerMode.EventDefined,
+                    ["name"] = displayName
+                },
+                warnings,
+                "payloads[0].mode");
+            serializedObject.ApplyModifiedProperties();
+
+            Assert.IsTrue(written);
+            Assert.AreEqual(PersistentListenerMode.EventDefined, probe.payloads[0].mode);
+            Assert.IsEmpty(warnings);
+        }
+
+        [Test]
+        public void EnumReaderShape_DisplayNameCollisionMatchesResolvedValueIndex()
+        {
+            UnityEventWiringProbe probe = Spawn("EnumReaderShape_DisplayNameCollision")
+                .AddComponent<UnityEventWiringProbe>();
+            probe.payloads.Add(new UnityEventWiringPayload
+            {
+                inspectorNameCollision = UnityEventWiringInspectorNameCollision.Alpha
+            });
+            var serializedObject = new SerializedObject(probe);
+            SerializedProperty enumProperty = serializedObject
+                .FindProperty("payloads")
+                .GetArrayElementAtIndex(0)
+                .FindPropertyRelative("inspectorNameCollision");
+            Assert.IsNotNull(enumProperty);
+            Assert.AreEqual("Bar", enumProperty.enumDisplayNames[enumProperty.enumValueIndex]);
+
+            var warnings = new List<string>();
+            bool displayNameWritten = SerializedPropertyHelper.SetValue(
+                enumProperty,
+                new JObject
+                {
+                    ["value"] = (int)UnityEventWiringInspectorNameCollision.Alpha,
+                    ["name"] = "Bar"
+                },
+                warnings,
+                "payloads[0].inspectorNameCollision");
+
+            Assert.IsTrue(displayNameWritten);
+            Assert.IsEmpty(warnings);
+
+            bool mismatchWritten = SerializedPropertyHelper.SetValue(
+                enumProperty,
+                new JObject
+                {
+                    ["value"] = (int)UnityEventWiringInspectorNameCollision.Bar,
+                    ["name"] = "Alpha"
+                },
+                warnings,
+                "payloads[0].inspectorNameCollision");
+            serializedObject.ApplyModifiedProperties();
+
+            Assert.IsTrue(mismatchWritten);
+            Assert.AreEqual(
+                UnityEventWiringInspectorNameCollision.Bar,
+                probe.payloads[0].inspectorNameCollision);
+            Assert.AreEqual(1, warnings.Count);
+            Assert.That(warnings[0], Does.Contain("Alpha").And.Contain("Bar"));
+        }
+
+        [Test]
+        public void EnumReaderShape_FlagsCombinationNameDoesNotWarnWhenItMatchesValue()
+        {
+            UnityEventWiringProbe probe = Spawn("EnumReaderShape_Flags")
+                .AddComponent<UnityEventWiringProbe>();
+            probe.payloads.Add(new UnityEventWiringPayload());
+            var serializedObject = new SerializedObject(probe);
+            SerializedProperty flagsProperty = serializedObject
+                .FindProperty("payloads")
+                .GetArrayElementAtIndex(0)
+                .FindPropertyRelative("flags");
+
+            var warnings = new List<string>();
+            UnityEventWiringFlags combined =
+                UnityEventWiringFlags.First | UnityEventWiringFlags.Second;
+            bool written = SerializedPropertyHelper.SetValue(
+                flagsProperty,
+                new JObject
+                {
+                    ["value"] = (int)combined,
+                    ["name"] = "First, Second"
+                },
+                warnings,
+                "payloads[0].flags");
+            serializedObject.ApplyModifiedProperties();
+
+            Assert.IsTrue(written);
+            Assert.AreEqual(combined, probe.payloads[0].flags);
+            Assert.IsEmpty(warnings);
         }
 
         [Test]

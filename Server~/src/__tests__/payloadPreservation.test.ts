@@ -1,6 +1,12 @@
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
-import { registerReparentGameObjectTool } from '../tools/gameObjectTools.js';
-import { registerGetUIElementInfoTool } from '../tools/uguiTools.js';
+import {
+  registerDuplicateGameObjectTool,
+  registerReparentGameObjectTool,
+} from '../tools/gameObjectTools.js';
+import {
+  registerCreateCanvasTool,
+  registerGetUIElementInfoTool,
+} from '../tools/uguiTools.js';
 import { registerUIAutomationTools } from '../tools/uiAutomationTools.js';
 import { PAYLOAD_MAX_CHARS } from '../utils/toolPayload.js';
 
@@ -56,6 +62,54 @@ describe('payload preservation in MCP content', () => {
       message: 'Retrieved UI element info for PlayButton',
     });
     expect(result).not.toHaveProperty('data');
+  });
+
+  it('returns create_canvas camera disclosure and warnings in payload content', async () => {
+    mockSendRequest.mockResolvedValue({
+      success: true,
+      type: 'text',
+      message: 'Successfully created Canvas at WorldCanvas (worldCamera unbound)',
+      instanceId: 102,
+      path: 'WorldCanvas',
+      cameraSource: 'none',
+      cameraPath: null,
+      warnings: ['WorldSpace Canvas was created with worldCamera unbound.'],
+    });
+    registerCreateCanvasTool(mockServer, mockMcpUnity, mockLogger);
+
+    const result = await getRegisteredHandler('create_canvas')({
+      objectPath: 'WorldCanvas',
+      renderMode: 'WorldSpace',
+    });
+
+    expect(JSON.parse(result.content[1].text)).toEqual({
+      instanceId: 102,
+      path: 'WorldCanvas',
+      cameraSource: 'none',
+      cameraPath: null,
+      warnings: ['WorldSpace Canvas was created with worldCamera unbound.'],
+      message: 'Successfully created Canvas at WorldCanvas (worldCamera unbound)',
+    });
+  });
+
+  it('omits absent create_canvas camera metadata instead of synthesizing null keys', async () => {
+    mockSendRequest.mockResolvedValue({
+      success: true,
+      type: 'text',
+      message: 'Successfully created Canvas at OverlayCanvas',
+      instanceId: 103,
+      path: 'OverlayCanvas',
+    });
+    registerCreateCanvasTool(mockServer, mockMcpUnity, mockLogger);
+
+    const result = await getRegisteredHandler('create_canvas')({
+      objectPath: 'OverlayCanvas',
+    });
+    const payload = JSON.parse(result.content[1].text);
+
+    expect(payload).not.toHaveProperty('cameraSource');
+    expect(payload).not.toHaveProperty('cameraPath');
+    expect(payload).not.toHaveProperty('warnings');
   });
 
   it('returns get_ui_element_state payload in content', async () => {
@@ -183,5 +237,28 @@ describe('payload preservation in MCP content', () => {
       message: "Successfully reparented GameObject 'Child' to 'NewParent'.",
     });
     expect(result).not.toHaveProperty('data');
+  });
+
+  it('documents and forwards duplicate_gameobject local-preserve as the default', async () => {
+    mockSendRequest.mockResolvedValue({
+      success: true,
+      type: 'text',
+      message: "Successfully duplicated GameObject 'Source'.",
+    });
+    registerDuplicateGameObjectTool(mockServer, mockMcpUnity, mockLogger);
+    const registration = mockServerTool.mock.calls.find(
+      ([name]) => name === 'duplicate_gameobject',
+    );
+    const schema = registration?.[2];
+
+    expect(schema.worldPositionStays.parse(undefined)).toBe(false);
+    expect(schema.worldPositionStays.description).toContain('false (default)');
+
+    await getRegisteredHandler('duplicate_gameobject')({ objectPath: 'Source' });
+
+    expect(mockSendRequest).toHaveBeenCalledWith({
+      method: 'duplicate_gameobject',
+      params: expect.objectContaining({ worldPositionStays: false }),
+    });
   });
 });

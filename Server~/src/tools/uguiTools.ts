@@ -132,6 +132,9 @@ async function createCanvasHandler(
       payloadContent({
           instanceId: response.instanceId,
           path: response.path,
+          ...(response.cameraSource !== undefined && { cameraSource: response.cameraSource }),
+          ...(response.cameraPath !== undefined && { cameraPath: response.cameraPath }),
+          ...(response.warnings !== undefined && { warnings: response.warnings }),
           message: response.message,
         }),
     ],
@@ -151,7 +154,7 @@ const elementTypeEnum = z.enum([
 
 const createUIElementParamsSchema = z.object({
   objectPath: z.string().describe("Path for the UI element (e.g., 'Canvas/Panel/Button'). Same-name hierarchy segments return object_path_ambiguity_error; use canonical Name[n] syntax (0-based among same-name siblings or loaded roots)."),
-  elementType: elementTypeEnum.describe("Type of UI element to create"),
+  elementType: elementTypeEnum.describe("Type of UI element to create. 'Text' creates legacy UnityEngine.UI.Text; TMP projects should use 'TextMeshPro'."),
   requireCanvas: z.boolean().default(true).describe("If true (default), requires an existing Canvas in the parent hierarchy. During Prefab contents editing MCP Unity never auto-creates a Canvas or EventSystem; set false only for an intentional Canvas-free UI Prefab."),
   rectTransform: rectTransformSchema.optional().describe("RectTransform settings"),
   elementData: z.object({
