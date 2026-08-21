@@ -23,7 +23,7 @@ const moveToolName = 'move_gameobject';
 const moveToolDescription = 'Moves a GameObject to a new position. Supports world/local space and absolute/relative positioning.';
 const moveParamsSchema = z.object({
   instanceId: z.number().optional().describe('The instance ID of the GameObject to move'),
-  objectPath: z.string().optional().describe('The path of the GameObject in the hierarchy (alternative to instanceId)'),
+  objectPath: z.string().optional().describe('The path of the GameObject in the hierarchy (alternative to instanceId). Same-name hierarchy segments return object_path_ambiguity_error; use canonical Name[n] syntax (0-based among same-name siblings or loaded roots).'),
   position: createVector3Schema().describe('The target position'),
   space: z.enum(['world', 'local']).default('world').describe('Coordinate space: "world" or "local"'),
   relative: z.boolean().default(false).describe('If true, adds to current position instead of setting absolute position')
@@ -90,7 +90,7 @@ const rotateToolName = 'rotate_gameobject';
 const rotateToolDescription = 'Rotates a GameObject using Euler angles. Supports world/local space and absolute/relative rotation.';
 const rotateParamsSchema = z.object({
   instanceId: z.number().optional().describe('The instance ID of the GameObject to rotate'),
-  objectPath: z.string().optional().describe('The path of the GameObject in the hierarchy (alternative to instanceId)'),
+  objectPath: z.string().optional().describe('The path of the GameObject in the hierarchy (alternative to instanceId). Same-name hierarchy segments return object_path_ambiguity_error; use canonical Name[n] syntax (0-based among same-name siblings or loaded roots).'),
   rotation: createVector3Schema().describe('The rotation in Euler angles (degrees)'),
   space: z.enum(['world', 'local']).default('world').describe('Coordinate space: "world" or "local"'),
   relative: z.boolean().default(false).describe('If true, adds to current rotation instead of setting absolute rotation')
@@ -157,7 +157,7 @@ const scaleToolName = 'scale_gameobject';
 const scaleToolDescription = 'Scales a GameObject. Supports absolute and relative (multiplicative) scaling.';
 const scaleParamsSchema = z.object({
   instanceId: z.number().optional().describe('The instance ID of the GameObject to scale'),
-  objectPath: z.string().optional().describe('The path of the GameObject in the hierarchy (alternative to instanceId)'),
+  objectPath: z.string().optional().describe('The path of the GameObject in the hierarchy (alternative to instanceId). Same-name hierarchy segments return object_path_ambiguity_error; use canonical Name[n] syntax (0-based among same-name siblings or loaded roots).'),
   scale: createVector3Schema().describe('The scale values'),
   relative: z.boolean().default(false).describe('If true, multiplies current scale instead of setting absolute scale')
 });
@@ -223,7 +223,7 @@ const setTransformToolDescription = 'Sets a GameObject\'s transform (position, r
 function createSetTransformParamsShape() {
   return {
     instanceId: z.number().optional().describe('The instance ID of the GameObject'),
-    objectPath: z.string().optional().describe('The path of the GameObject in the hierarchy (alternative to instanceId)'),
+    objectPath: z.string().optional().describe('The path of the GameObject in the hierarchy (alternative to instanceId). Same-name hierarchy segments return object_path_ambiguity_error; use canonical Name[n] syntax (0-based among same-name siblings or loaded roots).'),
     position: createVector3Schema().optional().describe('The position to set'),
     rotation: createVector3Schema().optional().describe('The rotation in Euler angles (degrees)'),
     scale: createVector3Schema().optional().describe('The scale to set'),

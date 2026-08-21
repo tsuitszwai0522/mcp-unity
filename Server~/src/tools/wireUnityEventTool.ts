@@ -19,18 +19,18 @@ function createStaticObjectLocatorSchema() {
   return z.object({
     assetPath: z.string().optional().describe('Asset path for a static UnityEngine.Object argument.'),
     instanceId: z.number().int().optional().describe('GameObject instance ID for a static UnityEngine.Object argument.'),
-    objectPath: z.string().optional().describe('GameObject hierarchy path for a static UnityEngine.Object argument.'),
+    objectPath: z.string().optional().describe('GameObject hierarchy path for a static UnityEngine.Object argument. Same-name hierarchy segments return object_path_ambiguity_error; use canonical Name[n] syntax (0-based among same-name siblings or loaded roots).'),
     componentName: z.string().optional().describe('Optional component on the located GameObject. Not valid with assetPath.'),
   }).strict().describe('Structured UnityEngine.Object locator. Supply exactly one of assetPath, instanceId, or objectPath.');
 }
 
 const paramsSchema = z.object({
   instanceId: z.number().int().optional().describe('Source GameObject instance ID. Supply exactly one of instanceId or objectPath.'),
-  objectPath: z.string().optional().describe('Source GameObject hierarchy path. Supply exactly one of instanceId or objectPath.'),
+  objectPath: z.string().optional().describe('Source GameObject hierarchy path. Supply exactly one of instanceId or objectPath. Same-name hierarchy segments return object_path_ambiguity_error; use canonical Name[n] syntax (0-based among same-name siblings or loaded roots).'),
   componentName: z.string().describe('Source component containing the UnityEvent. Ambiguous names require a fully-qualified type name.'),
   eventFieldName: z.string().describe('Serialized UnityEvent field name, for example m_OnClick (property-style onClick is also accepted).'),
   listenerInstanceId: z.number().int().optional().describe('Listener GameObject instance ID. Supply exactly one of listenerInstanceId or listenerObjectPath.'),
-  listenerObjectPath: z.string().optional().describe('Listener GameObject hierarchy path. Supply exactly one of listenerInstanceId or listenerObjectPath.'),
+  listenerObjectPath: z.string().optional().describe('Listener GameObject hierarchy path. Supply exactly one of listenerInstanceId or listenerObjectPath. Same-name hierarchy segments return object_path_ambiguity_error; use canonical Name[n] syntax (0-based among same-name siblings or loaded roots).'),
   listenerComponentName: z.string().optional().describe('Component that owns methodName. Omit to target the listener GameObject itself.'),
   methodName: z.string().describe('Listener method name. The method must exist with a signature compatible with the event or staticArgument.'),
   staticArgument: z.union([

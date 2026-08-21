@@ -199,29 +199,76 @@ namespace McpUnity.Tools
             }
         }
 
-        internal static Canvas FindExistingCanvasInPrefabPath(GameObject prefabRoot, string objectPath)
+        internal static JObject TryFindExistingCanvasInPrefabPath(
+            GameObject prefabRoot,
+            string objectPath,
+            out Canvas canvas)
         {
+            canvas = null;
             if (prefabRoot == null || string.IsNullOrEmpty(objectPath))
                 return null;
 
-            string[] parts = objectPath.Trim('/').Split('/');
-            if (parts.Length == 0 || parts[0] != prefabRoot.name)
+            string[] parts = GameObjectPathUtils.SplitPath(objectPath);
+            if (parts.Length == 0)
                 return null;
 
-            GameObject current = prefabRoot;
-            Canvas canvas = current.GetComponent<Canvas>();
+            bool resolvedRoot = GameObjectPathUtils.TryResolveFromRoot(
+                prefabRoot,
+                parts[0],
+                out GameObject current,
+                out IReadOnlyList<GameObjectPathUtils.Candidate> rootCandidates,
+                out string rootResolutionError,
+                out string rootNotFoundHint);
+            if (rootCandidates.Count > 0)
+            {
+                canvas = null;
+                return PrefabSessionScope.CreateObjectPathAmbiguityError(
+                    objectPath, rootCandidates, rootResolutionError);
+            }
+            if (!resolvedRoot)
+            {
+                string rootNotFoundMessage = rootResolutionError ?? rootNotFoundHint;
+                return string.IsNullOrEmpty(rootNotFoundMessage)
+                    ? null
+                    : PrefabSessionScope.CreatePathContextMissError(
+                        objectPath, prefabRoot, rootNotFoundMessage);
+            }
+
+            canvas = current.GetComponent<Canvas>();
             for (int i = 1; i < parts.Length; i++)
             {
-                Transform child = current.transform.Find(parts[i]);
-                if (child == null)
+                bool resolvedChild = GameObjectPathUtils.TryResolveDirectChild(
+                    current,
+                    parts[i],
+                    out GameObject child,
+                    out IReadOnlyList<GameObjectPathUtils.Candidate> candidates,
+                    out string resolutionError,
+                    out string notFoundHint);
+                if (candidates.Count > 0)
+                {
+                    canvas = null;
+                    return PrefabSessionScope.CreateObjectPathAmbiguityError(
+                        objectPath, candidates, resolutionError);
+                }
+                if (!resolvedChild)
+                {
+                    string notFoundMessage = resolutionError ?? notFoundHint;
+                    if (!string.IsNullOrEmpty(notFoundMessage))
+                    {
+                        canvas = null;
+                        return PrefabSessionScope.CreatePathContextMissError(
+                            objectPath, prefabRoot, notFoundMessage);
+                    }
                     break;
-                current = child.gameObject;
+                }
+
+                current = child;
                 Canvas currentCanvas = current.GetComponent<Canvas>();
                 if (currentCanvas != null)
                     canvas = currentCanvas;
             }
 
-            return canvas;
+            return null;
         }
 
         /// <summary>
@@ -230,21 +277,6 @@ namespace McpUnity.Tools
         public static bool IsTMProAvailable()
         {
             return Type.GetType("TMPro.TMP_Text, Unity.TextMeshPro") != null;
-        }
-
-        /// <summary>
-        /// Get hierarchy path of a GameObject
-        /// </summary>
-        public static string GetGameObjectPath(GameObject obj)
-        {
-            if (obj == null) return null;
-            string path = obj.name;
-            while (obj.transform.parent != null)
-            {
-                obj = obj.transform.parent.gameObject;
-                path = obj.name + "/" + path;
-            }
-            return path;
         }
 
         /// <summary>
@@ -564,7 +596,7 @@ namespace McpUnity.Tools
                     ["type"] = "text",
                     ["message"] = $"Successfully created Canvas at '{objectPath}'",
                     ["instanceId"] = canvasGO.GetInstanceID(),
-                    ["path"] = UGUIToolUtils.GetGameObjectPath(canvasGO)
+                    ["path"] = GameObjectPathUtils.GetCanonicalPath(canvasGO)
                 };
             }
             catch (Exception ex)
@@ -623,15 +655,21 @@ namespace McpUnity.Tools
                 JObject prefabScopeError = PrefabSessionScope.TryGetPrefabRoot(
                     out GameObject activePrefabRoot);
                 if (prefabScopeError != null) return prefabScopeError;
-                if (activePrefabRoot != null && requireCanvas
-                    && UGUIToolUtils.FindExistingCanvasInPrefabPath(
-                        activePrefabRoot, objectPath) == null)
+                Canvas existingPrefabCanvas = null;
+                if (activePrefabRoot != null && requireCanvas)
                 {
-                    return McpUnitySocketHandler.CreateErrorResponse(
-                        "No Canvas exists in the requested Prefab parent hierarchy. MCP Unity will " +
-                        "not auto-create a Canvas or EventSystem in Prefab contents. Use " +
-                        "requireCanvas=false for an intentional Canvas-free UI Prefab.",
-                        "canvas_error");
+                    JObject canvasPathError = UGUIToolUtils.TryFindExistingCanvasInPrefabPath(
+                        activePrefabRoot, objectPath, out existingPrefabCanvas);
+                    if (canvasPathError != null)
+                        return canvasPathError;
+                    if (existingPrefabCanvas == null)
+                    {
+                        return McpUnitySocketHandler.CreateErrorResponse(
+                            "No Canvas exists in the requested Prefab parent hierarchy. MCP Unity will " +
+                            "not auto-create a Canvas or EventSystem in Prefab contents. Use " +
+                            "requireCanvas=false for an intentional Canvas-free UI Prefab.",
+                            "canvas_error");
+                    }
                 }
 
                 // Create or find the GameObject
@@ -646,7 +684,7 @@ namespace McpUnity.Tools
                     if (parentCanvas == null)
                     {
                         // Find or create a canvas as parent
-                        string[] pathParts = objectPath.Split('/');
+                        string[] pathParts = GameObjectPathUtils.SplitPath(objectPath);
                         if (pathParts.Length > 1)
                         {
                             // Check if first part is a canvas
@@ -823,7 +861,7 @@ namespace McpUnity.Tools
                     ["type"] = "text",
                     ["message"] = message,
                     ["instanceId"] = elementGO.GetInstanceID(),
-                    ["path"] = UGUIToolUtils.GetGameObjectPath(elementGO),
+                    ["path"] = GameObjectPathUtils.GetCanonicalPath(elementGO),
                     ["usedFallback"] = usedFallback
                 };
             }
@@ -2124,7 +2162,7 @@ namespace McpUnity.Tools
                     ["type"] = "text",
                     ["message"] = $"Successfully updated RectTransform on '{gameObject.name}'",
                     ["instanceId"] = gameObject.GetInstanceID(),
-                    ["path"] = UGUIToolUtils.GetGameObjectPath(gameObject),
+                    ["path"] = GameObjectPathUtils.GetCanonicalPath(gameObject),
                     ["rectTransform"] = UGUIToolUtils.GetRectTransformInfo(rect)
                 };
             }
@@ -2239,7 +2277,7 @@ namespace McpUnity.Tools
                     ["type"] = "text",
                     ["message"] = $"Successfully added {componentName} to '{gameObject.name}'",
                     ["instanceId"] = gameObject.GetInstanceID(),
-                    ["path"] = UGUIToolUtils.GetGameObjectPath(gameObject)
+                    ["path"] = GameObjectPathUtils.GetCanonicalPath(gameObject)
                 };
             }
             catch (Exception ex)
@@ -2572,7 +2610,7 @@ namespace McpUnity.Tools
             {
                 ["name"] = go.name,
                 ["instanceId"] = go.GetInstanceID(),
-                ["path"] = UGUIToolUtils.GetGameObjectPath(go),
+                ["path"] = GameObjectPathUtils.GetCanonicalPath(go),
                 ["activeSelf"] = go.activeSelf,
                 ["activeInHierarchy"] = go.activeInHierarchy
             };

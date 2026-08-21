@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEditor; // Required for Undo operations
 using McpUnity.Services;
@@ -18,85 +19,181 @@ namespace McpUnity.Utils
                 throw new ArgumentException("GameObject path cannot be null or empty.", nameof(path));
             }
 
-            path = path.Trim('/');
-            if (string.IsNullOrEmpty(path))
-            {
-                throw new ArgumentException("GameObject path cannot consist only of slashes.", nameof(path));
-            }
-
-            string[] parts = path.Split('/');
+            string[] parts = GameObjectPathUtils.SplitPath(path);
             JObject scopeError = PrefabSessionScope.TryGetPrefabRoot(out GameObject prefabRoot);
             if (scopeError != null)
                 return scopeError;
 
-            GameObject currentParent = prefabRoot;
-            int startIndex = 0;
-            if (prefabRoot != null)
+            var createdObjects = new List<GameObject>();
+            bool completed = false;
+            try
             {
-                if (parts[0] != prefabRoot.name)
-                    return PrefabSessionScope.CreatePathContextMissError(path, prefabRoot);
-
-                foundOrCreatedObject = prefabRoot;
-                startIndex = 1;
-            }
-
-            for (int i = startIndex; i < parts.Length; i++)
-            {
-                string name = parts[i];
-                if (string.IsNullOrEmpty(name))
+                GameObject currentParent = prefabRoot;
+                int startIndex = 0;
+                if (prefabRoot != null)
                 {
-                    throw new ArgumentException($"Invalid path: empty segment at part {i + 1} in path '{path}'. Ensure segments are not empty.");
-                }
-
-                Transform childTransform;
-                if (currentParent == null)
-                {
-                    JObject rootError = PrefabSessionScope.TryResolveGameObject(
-                        null, name, out GameObject rootObj);
-                    if (rootError != null)
-                        return rootError;
-                    childTransform = rootObj?.transform;
-                }
-                else
-                {
-                    childTransform = currentParent.transform.Find(name);
-                }
-
-                if (childTransform == null)
-                {
-                    GameObject newObj = new GameObject(name);
-                    if (!PrefabSessionScope.HasActiveSession)
-                        Undo.RegisterCreatedObjectUndo(newObj, $"Create {name}");
-                    if (currentParent != null)
+                    bool resolvedRoot = GameObjectPathUtils.TryResolveFromRoot(
+                        prefabRoot,
+                        parts[0],
+                        out GameObject resolvedPrefabRoot,
+                        out IReadOnlyList<GameObjectPathUtils.Candidate> rootCandidates,
+                        out string rootResolutionError,
+                        out string rootNotFoundHint);
+                    if (rootCandidates.Count > 0)
                     {
-                        newObj.transform.SetParent(currentParent.transform, false);
+                        return PrefabSessionScope.CreateObjectPathAmbiguityError(
+                            path, rootCandidates, rootResolutionError);
+                    }
+                    if (!resolvedRoot)
+                    {
+                        return PrefabSessionScope.CreatePathContextMissError(
+                            path,
+                            prefabRoot,
+                            rootResolutionError ?? rootNotFoundHint);
+                    }
 
-                        // Auto-add RectTransform for objects created under a Canvas hierarchy
-                        if (currentParent.GetComponentInParent<Canvas>() != null
-                            && newObj.GetComponent<RectTransform>() == null)
+                    foundOrCreatedObject = resolvedPrefabRoot;
+                    startIndex = 1;
+                }
+
+                for (int i = startIndex; i < parts.Length; i++)
+                {
+                    string name = parts[i];
+                    if (!GameObjectPathUtils.TryDecodeSegment(
+                            name,
+                            out string literalName,
+                            out _,
+                            out string decodeError))
+                    {
+                        return CreatePathResolutionError(path, prefabRoot, decodeError);
+                    }
+
+                    GameObject resolvedObject;
+                    IReadOnlyList<GameObjectPathUtils.Candidate> candidates;
+                    string resolutionError;
+                    string notFoundHint;
+                    bool resolved;
+                    if (currentParent == null)
+                    {
+                        resolved = GameObjectPathUtils.TryResolveInLoadedScenes(
+                            name,
+                            out resolvedObject,
+                            out candidates,
+                            out resolutionError,
+                            out notFoundHint);
+                    }
+                    else
+                    {
+                        resolved = GameObjectPathUtils.TryResolveDirectChild(
+                            currentParent,
+                            name,
+                            out resolvedObject,
+                            out candidates,
+                            out resolutionError,
+                            out notFoundHint);
+                    }
+
+                    if (candidates.Count > 0)
+                    {
+                        return PrefabSessionScope.CreateObjectPathAmbiguityError(
+                            path, candidates, resolutionError);
+                    }
+                    string notFoundMessage = resolutionError ?? notFoundHint;
+                    if (!resolved && !string.IsNullOrEmpty(notFoundMessage))
+                    {
+                        return CreatePathResolutionError(
+                            path, prefabRoot, notFoundMessage);
+                    }
+
+                    if (!resolved && currentParent == null && i == 0)
+                    {
+                        IReadOnlyList<GameObjectPathUtils.Candidate> nestedNameCandidates =
+                            GameObjectPathUtils.FindNestedByNameInLoadedScenes(literalName);
+                        if (nestedNameCandidates.Count > 0)
                         {
-                            if (PrefabSessionScope.HasActiveSession)
-                                newObj.AddComponent<RectTransform>();
-                            else
-                                Undo.AddComponent<RectTransform>(newObj);
+                            return PrefabSessionScope.CreateRootPathNotFoundError(
+                                path, literalName, nestedNameCandidates);
                         }
                     }
-                    foundOrCreatedObject = newObj;
-                    currentParent = newObj;
+
+                    if (!resolved)
+                    {
+                        GameObject newObj = new GameObject(literalName);
+                        createdObjects.Add(newObj);
+                        if (currentParent != null)
+                        {
+                            newObj.transform.SetParent(currentParent.transform, false);
+
+                            // Auto-add RectTransform for objects created under a Canvas hierarchy.
+                            // Undo registration is deferred until the whole path succeeds so a
+                            // later resolution failure can roll back without leaving Undo state.
+                            if (currentParent.GetComponentInParent<Canvas>() != null
+                                && newObj.GetComponent<RectTransform>() == null)
+                            {
+                                newObj.AddComponent<RectTransform>();
+                            }
+                        }
+                        foundOrCreatedObject = newObj;
+                        currentParent = newObj;
+                    }
+                    else
+                    {
+                        foundOrCreatedObject = resolvedObject;
+                        currentParent = foundOrCreatedObject;
+                    }
                 }
-                else
+
+                if (foundOrCreatedObject == null)
                 {
-                    foundOrCreatedObject = childTransform.gameObject;
-                    currentParent = foundOrCreatedObject;
+                    throw new InvalidOperationException(
+                        $"Failed to find or create GameObject for path '{path}'. " +
+                        "This indicates an unexpected state.");
+                }
+
+                if (!PrefabSessionScope.HasActiveSession)
+                {
+                    foreach (GameObject createdObject in createdObjects)
+                    {
+                        if (createdObject != null)
+                        {
+                            Undo.RegisterCreatedObjectUndo(
+                                createdObject, $"Create {createdObject.name}");
+                        }
+                    }
+                }
+
+                completed = true;
+                return null;
+            }
+            finally
+            {
+                if (!completed)
+                {
+                    for (int i = createdObjects.Count - 1; i >= 0; i--)
+                    {
+                        GameObject createdObject = createdObjects[i];
+                        if (createdObject != null)
+                            UnityEngine.Object.DestroyImmediate(createdObject);
+                    }
+                    foundOrCreatedObject = null;
                 }
             }
+        }
 
-            if (foundOrCreatedObject == null)
+        private static JObject CreatePathResolutionError(
+            string path,
+            GameObject prefabRoot,
+            string resolutionError)
+        {
+            if (prefabRoot != null)
             {
-                throw new InvalidOperationException($"Failed to find or create GameObject for path '{path}'. This indicates an unexpected state.");
+                return PrefabSessionScope.CreatePathContextMissError(
+                    path, prefabRoot, resolutionError);
             }
 
-            return null;
+            return McpUnity.Unity.McpUnitySocketHandler.CreateErrorResponse(
+                resolutionError,
+                "not_found_error");
         }
     }
 }

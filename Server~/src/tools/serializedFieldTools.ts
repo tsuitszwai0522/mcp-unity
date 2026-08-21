@@ -22,7 +22,7 @@ maxElements is one global returned-element budget across all visited arrays (def
 
 const readParamsSchema = z.object({
   instanceId: z.number().optional().describe('The instance ID of the GameObject'),
-  objectPath: z.string().optional().describe('The path of the GameObject in the hierarchy (alternative to instanceId)'),
+  objectPath: z.string().optional().describe('The path of the GameObject in the hierarchy (alternative to instanceId). Same-name hierarchy segments return object_path_ambiguity_error; use canonical Name[n] syntax (0-based among same-name siblings or loaded roots).'),
   componentName: z.string().describe('The component type to read. Ambiguous short/partial names require exactly one exact candidate type on the target; otherwise use a fully-qualified name.'),
   fieldNames: z.array(z.string()).optional().describe('Specific field names to read. Accepts both serialized names (m_Color) and property names (color). If omitted, reads all visible fields.'),
   maxDepth: z.number().int().min(0).max(8).optional().describe('Maximum recursive depth for Generic fields and arrays (0-8, default 8). Lower this to reduce payload size before the 20,000-character transport cap is applied.'),
@@ -130,7 +130,7 @@ For object references, use asset path string, instance ID number, or structured 
 
 const writeParamsSchema = z.object({
   instanceId: z.number().optional().describe('The instance ID of the GameObject'),
-  objectPath: z.string().optional().describe('The path of the GameObject in the hierarchy (alternative to instanceId)'),
+  objectPath: z.string().optional().describe('The path of the GameObject in the hierarchy (alternative to instanceId). Same-name hierarchy segments return object_path_ambiguity_error; use canonical Name[n] syntax (0-based among same-name siblings or loaded roots).'),
   componentName: z.string().describe('The component type to write. Ambiguous short/partial names require exactly one exact candidate type on the target; otherwise use a fully-qualified name.'),
   fieldData: z.record(z.string(), z.any()).describe('Object mapping field names to values. Accepts both serialized names (m_Color) and property names (color). For colors: {r, g, b, a}. For vectors: {x, y, z}. For object refs: asset path string or instance ID.'),
 });

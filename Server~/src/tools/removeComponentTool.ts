@@ -10,7 +10,7 @@ const toolName = 'remove_component';
 const toolDescription = 'Removes a component from a GameObject. Identifies the GameObject by instance ID or hierarchy path. Ambiguous short or partial component names require exactly one exact candidate type on the target; otherwise use a fully-qualified name.';
 const paramsSchema = z.object({
   instanceId: z.number().optional().describe('The instance ID of the GameObject'),
-  objectPath: z.string().optional().describe('The path of the GameObject in the hierarchy (alternative to instanceId)'),
+  objectPath: z.string().optional().describe('The path of the GameObject in the hierarchy (alternative to instanceId). Same-name hierarchy segments return object_path_ambiguity_error; use canonical Name[n] syntax (0-based among same-name siblings or loaded roots).'),
   componentName: z.string().describe('The component type name to remove. Ambiguous short/partial names require exactly one exact candidate type on the target; otherwise use a fully-qualified name.'),
 });
 

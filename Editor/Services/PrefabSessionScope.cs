@@ -1,4 +1,6 @@
+using System.Collections.Generic;
 using McpUnity.Unity;
+using McpUnity.Utils;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEditor.SceneManagement;
@@ -14,6 +16,7 @@ namespace McpUnity.Services
     {
         public const string ContextMissErrorType = "prefab_context_miss_error";
         public const string SessionLostErrorType = "prefab_session_lost_error";
+        public const string ObjectPathAmbiguityErrorType = "object_path_ambiguity_error";
 
         public static bool HasActiveSession =>
             PrefabEditingService.Status == PrefabEditingSessionStatus.Active;
@@ -94,18 +97,185 @@ namespace McpUnity.Services
                 return ValidateOperationTarget(instanceId.Value, gameObject, prefabRoot);
             }
 
-            if (string.IsNullOrEmpty(objectPath))
+            if (objectPath == null)
                 return null;
 
             if (prefabRoot != null)
             {
-                gameObject = FindByPath(prefabRoot, objectPath);
-                return gameObject != null
-                    ? null
-                    : CreatePathContextMissError(objectPath, prefabRoot);
+                bool resolved = GameObjectPathUtils.TryResolveFromRoot(
+                    prefabRoot,
+                    objectPath,
+                    out gameObject,
+                    out IReadOnlyList<GameObjectPathUtils.Candidate> candidates,
+                    out string resolutionError,
+                    out string notFoundHint);
+                if (candidates.Count > 0)
+                    return CreateObjectPathAmbiguityError(objectPath, candidates, resolutionError);
+                if (resolved)
+                    return null;
+
+                return CreatePathContextMissError(
+                    objectPath,
+                    prefabRoot,
+                    resolutionError ?? notFoundHint);
             }
 
-            gameObject = FindByPathInScenes(objectPath);
+            return TryResolvePathInScenes(objectPath, out gameObject);
+        }
+
+        /// <summary>
+        /// Resolve a dual-purpose ID/name/path text reference. Explicit canonical grammar is
+        /// always treated as a path. A plain token first addresses a root path, then retains the
+        /// legacy name lookup only when no root matched.
+        /// </summary>
+        public static JObject TryResolveGameObjectPathOrName(
+            string reference,
+            out GameObject gameObject)
+        {
+            gameObject = null;
+            if (reference == null)
+                return null;
+
+            if (GameObjectPathUtils.HasExplicitPathSyntax(reference))
+                return TryResolveGameObject(null, reference, out gameObject);
+
+            JObject sessionError = TryGetPrefabRoot(out GameObject prefabRoot);
+            if (sessionError != null)
+                return sessionError;
+
+            bool resolved;
+            IReadOnlyList<GameObjectPathUtils.Candidate> candidates;
+            string resolutionError;
+            string notFoundHint;
+            if (prefabRoot != null)
+            {
+                resolved = GameObjectPathUtils.TryResolveFromRoot(
+                    prefabRoot,
+                    reference,
+                    out gameObject,
+                    out candidates,
+                    out resolutionError,
+                    out notFoundHint);
+                if (candidates.Count > 0)
+                    return CreateObjectPathAmbiguityError(reference, candidates, resolutionError);
+                if (resolved)
+                    return null;
+                if (!string.IsNullOrEmpty(resolutionError)
+                    || !string.IsNullOrEmpty(notFoundHint))
+                {
+                    return CreatePathContextMissError(
+                        reference,
+                        prefabRoot,
+                        resolutionError ?? notFoundHint);
+                }
+
+                IReadOnlyList<GameObjectPathUtils.Candidate> nameCandidates =
+                    GameObjectPathUtils.FindAllByNameFromRoot(prefabRoot, reference);
+                JObject nameError = TrySelectUniqueNameCandidate(
+                    reference, nameCandidates, out gameObject);
+                if (nameError != null || gameObject != null)
+                    return nameError;
+
+                return CreatePathContextMissError(reference, prefabRoot);
+            }
+
+            resolved = GameObjectPathUtils.TryResolveInLoadedScenes(
+                reference,
+                out gameObject,
+                out candidates,
+                out resolutionError,
+                out notFoundHint);
+            if (candidates.Count > 0)
+                return CreateObjectPathAmbiguityError(reference, candidates, resolutionError);
+            if (!string.IsNullOrEmpty(resolutionError)
+                || !string.IsNullOrEmpty(notFoundHint))
+            {
+                return McpUnitySocketHandler.CreateErrorResponse(
+                    resolutionError ?? notFoundHint,
+                    "not_found_error");
+            }
+            if (resolved)
+                return null;
+
+            return TrySelectUniqueNameCandidate(
+                reference,
+                GameObjectPathUtils.FindAllByNameInLoadedScenes(reference),
+                out gameObject);
+        }
+
+        /// <summary>
+        /// Resolve a path for a polling condition. After the active Prefab root prefix matches,
+        /// a syntactically valid descendant miss is soft, including canonical indexed segments.
+        /// A root-prefix context miss, ambiguity, invalid syntax, or session failure is hard.
+        /// </summary>
+        public static JObject TryResolveGameObjectForPolling(
+            string objectPath,
+            out GameObject gameObject)
+        {
+            gameObject = null;
+            JObject sessionError = TryGetPrefabRoot(out GameObject prefabRoot);
+            if (sessionError != null)
+                return sessionError;
+            if (objectPath == null)
+                return null;
+
+            bool resolved;
+            IReadOnlyList<GameObjectPathUtils.Candidate> candidates;
+            string resolutionError;
+            if (prefabRoot != null)
+            {
+                string[] segments = GameObjectPathUtils.SplitPath(objectPath);
+                bool resolvedRoot = GameObjectPathUtils.TryResolveFromRoot(
+                    prefabRoot,
+                    segments[0],
+                    out _,
+                    out IReadOnlyList<GameObjectPathUtils.Candidate> rootCandidates,
+                    out string rootResolutionError,
+                    out string rootNotFoundHint);
+                if (rootCandidates.Count > 0)
+                {
+                    return CreateObjectPathAmbiguityError(
+                        objectPath, rootCandidates, rootResolutionError);
+                }
+                if (!resolvedRoot)
+                {
+                    return CreatePathContextMissError(
+                        objectPath,
+                        prefabRoot,
+                        rootResolutionError ?? rootNotFoundHint);
+                }
+
+                resolved = GameObjectPathUtils.TryResolveFromRoot(
+                    prefabRoot,
+                    objectPath,
+                    out gameObject,
+                    out candidates,
+                    out resolutionError,
+                    out _);
+                if (candidates.Count > 0)
+                    return CreateObjectPathAmbiguityError(objectPath, candidates, resolutionError);
+                if (!resolved && !string.IsNullOrEmpty(resolutionError))
+                {
+                    return CreatePathContextMissError(
+                        objectPath, prefabRoot, resolutionError);
+                }
+                return null;
+            }
+
+            resolved = GameObjectPathUtils.TryResolveInLoadedScenes(
+                objectPath,
+                out gameObject,
+                out candidates,
+                out resolutionError,
+                out _);
+            if (candidates.Count > 0)
+                return CreateObjectPathAmbiguityError(objectPath, candidates, resolutionError);
+            if (!resolved && !string.IsNullOrEmpty(resolutionError))
+            {
+                return McpUnitySocketHandler.CreateErrorResponse(
+                    resolutionError,
+                    "not_found_error");
+            }
             return null;
         }
 
@@ -123,13 +293,20 @@ namespace McpUnity.Services
 
             if (prefabRoot == null)
             {
-                gameObject = FindByPathInScenes(objectName);
+                IReadOnlyList<GameObjectPathUtils.Candidate> legacyNameCandidates =
+                    GameObjectPathUtils.FindAllByNameInLoadedScenes(objectName);
+                if (legacyNameCandidates.Count > 0)
+                    gameObject = legacyNameCandidates[0].GameObject;
                 return null;
             }
 
-            gameObject = FindByName(prefabRoot, objectName);
-            if (gameObject != null)
+            IReadOnlyList<GameObjectPathUtils.Candidate> prefabNameCandidates =
+                GameObjectPathUtils.FindAllByNameFromRoot(prefabRoot, objectName);
+            if (prefabNameCandidates.Count > 0)
+            {
+                gameObject = prefabNameCandidates[0].GameObject;
                 return null;
+            }
 
             return McpUnitySocketHandler.CreateErrorResponse(
                 $"Prefab editing session is scoped to '{PrefabEditingService.AssetPath}' " +
@@ -205,12 +382,18 @@ namespace McpUnity.Services
                 ContextMissErrorType);
         }
 
-        public static JObject CreatePathContextMissError(string objectPath, GameObject prefabRoot)
+        public static JObject CreatePathContextMissError(
+            string objectPath,
+            GameObject prefabRoot,
+            string resolutionError = null)
         {
+            string detail = string.IsNullOrEmpty(resolutionError)
+                ? string.Empty
+                : " " + resolutionError;
             return McpUnitySocketHandler.CreateErrorResponse(
                 $"Prefab editing session is scoped to '{PrefabEditingService.AssetPath}' " +
                 $"(root '{prefabRoot.name}'). Object path '{objectPath}' does not exist " +
-                "inside the Prefab contents.",
+                $"inside the Prefab contents.{detail}",
                 ContextMissErrorType);
         }
 
@@ -263,89 +446,107 @@ namespace McpUnity.Services
             return false;
         }
 
-        private static GameObject FindByPath(GameObject prefabRoot, string path)
+        private static JObject TrySelectUniqueNameCandidate(
+            string reference,
+            IReadOnlyList<GameObjectPathUtils.Candidate> candidates,
+            out GameObject gameObject)
         {
-            if (prefabRoot == null || string.IsNullOrEmpty(path))
+            gameObject = null;
+            if (candidates.Count == 0)
                 return null;
-
-            string trimmedPath = path.Trim('/');
-            if (string.IsNullOrEmpty(trimmedPath))
-                return null;
-
-            string[] parts = trimmedPath.Split('/');
-            if (parts.Length == 0 || parts[0] != prefabRoot.name)
-                return null;
-
-            GameObject current = prefabRoot;
-            for (int i = 1; i < parts.Length; i++)
+            if (candidates.Count > 1)
             {
-                Transform child = current.transform.Find(parts[i]);
-                if (child == null)
-                    return null;
-                current = child.gameObject;
-            }
-            return current;
-        }
-
-        private static GameObject FindByName(GameObject current, string objectName)
-        {
-            if (current.name == objectName)
-                return current;
-
-            foreach (Transform child in current.transform)
-            {
-                GameObject found = FindByName(child.gameObject, objectName);
-                if (found != null)
-                    return found;
-            }
-
-            return null;
-        }
-
-        private static GameObject FindByPathInScenes(string path)
-        {
-            if (string.IsNullOrEmpty(path))
-                return null;
-
-            GameObject found = GameObject.Find(path);
-            if (IsLoadedNonPreviewSceneObject(found))
-                return found;
-
-            string trimmedPath = path.Trim('/');
-            if (string.IsNullOrEmpty(trimmedPath))
-                return null;
-
-            string[] parts = trimmedPath.Split('/');
-            for (int sceneIndex = 0; sceneIndex < SceneManager.sceneCount; sceneIndex++)
-            {
-                Scene scene = SceneManager.GetSceneAt(sceneIndex);
-                if (!IsLoadedNonPreviewScene(scene))
-                    continue;
-
-                foreach (GameObject root in scene.GetRootGameObjects())
+                var candidateSummary = new List<string>(candidates.Count);
+                foreach (GameObjectPathUtils.Candidate candidate in candidates)
                 {
-                    if (root.name != parts[0])
-                        continue;
-
-                    GameObject current = root;
-                    bool foundFullPath = true;
-                    for (int i = 1; i < parts.Length; i++)
-                    {
-                        Transform child = current.transform.Find(parts[i]);
-                        if (child == null)
-                        {
-                            foundFullPath = false;
-                            break;
-                        }
-                        current = child.gameObject;
-                    }
-
-                    if (foundFullPath)
-                        return current;
+                    candidateSummary.Add(
+                        $"'{candidate.Path}' (instanceId={candidate.InstanceId}, " +
+                        $"scene='{candidate.SceneName}')");
                 }
+                string message =
+                    $"GameObject name '{reference}' is ambiguous: {candidates.Count} candidates " +
+                    $"were found: {string.Join(", ", candidateSummary)}. " +
+                    "Use instanceId or a canonical hierarchy path.";
+                return CreateObjectPathAmbiguityError(reference, candidates, message);
+            }
+
+            gameObject = candidates[0].GameObject;
+            return null;
+        }
+
+        private static JObject TryResolvePathInScenes(
+            string path,
+            out GameObject gameObject)
+        {
+            bool resolved = GameObjectPathUtils.TryResolveInLoadedScenes(
+                path,
+                out gameObject,
+                out IReadOnlyList<GameObjectPathUtils.Candidate> candidates,
+                out string resolutionError,
+                out string notFoundHint);
+            if (candidates.Count > 0)
+                return CreateObjectPathAmbiguityError(path, candidates, resolutionError);
+            string notFoundMessage = resolutionError ?? notFoundHint;
+            if (!resolved && !string.IsNullOrEmpty(notFoundMessage))
+            {
+                return McpUnitySocketHandler.CreateErrorResponse(
+                    notFoundMessage,
+                    "not_found_error");
             }
 
             return null;
+        }
+
+        internal static JObject CreateObjectPathAmbiguityError(
+            string objectPath,
+            IReadOnlyList<GameObjectPathUtils.Candidate> candidates,
+            string message)
+        {
+            JObject response = McpUnitySocketHandler.CreateErrorResponse(
+                message,
+                ObjectPathAmbiguityErrorType);
+            ((JObject)response["error"])["details"] = new JObject
+            {
+                ["objectPath"] = objectPath,
+                ["candidateCount"] = candidates.Count,
+                ["candidates"] = CreateCandidateDetails(candidates)
+            };
+            return response;
+        }
+
+        internal static JObject CreateRootPathNotFoundError(
+            string objectPath,
+            string literalRootName,
+            IReadOnlyList<GameObjectPathUtils.Candidate> nestedNameCandidates)
+        {
+            JObject response = McpUnitySocketHandler.CreateErrorResponse(
+                $"Root-qualified path '{objectPath}' does not exist: no loaded-scene root is " +
+                $"named '{literalRootName}'. {nestedNameCandidates.Count} nested GameObject(s) " +
+                "have that name; use one of their canonical paths instead of creating a new root.",
+                "not_found_error");
+            ((JObject)response["error"])["details"] = new JObject
+            {
+                ["objectPath"] = objectPath,
+                ["candidateCount"] = nestedNameCandidates.Count,
+                ["candidates"] = CreateCandidateDetails(nestedNameCandidates)
+            };
+            return response;
+        }
+
+        private static JArray CreateCandidateDetails(
+            IReadOnlyList<GameObjectPathUtils.Candidate> candidates)
+        {
+            var candidateDetails = new JArray();
+            foreach (GameObjectPathUtils.Candidate candidate in candidates)
+            {
+                candidateDetails.Add(new JObject
+                {
+                    ["instanceId"] = candidate.InstanceId,
+                    ["path"] = candidate.Path,
+                    ["scene"] = candidate.SceneName
+                });
+            }
+            return candidateDetails;
         }
 
         private static JObject ValidateOperationTarget(

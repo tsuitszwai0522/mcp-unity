@@ -10,6 +10,7 @@ using UnityEditor;
 using Newtonsoft.Json.Linq;
 using McpUnity.Unity;
 using McpUnity.Services;
+using McpUnity.Utils;
 using Unity.EditorCoroutines.Editor;
 
 namespace McpUnity.Tools
@@ -300,22 +301,6 @@ namespace McpUnity.Tools
         }
 
         /// <summary>
-        /// Get hierarchy path of a GameObject
-        /// </summary>
-        public static string GetGameObjectPath(GameObject obj)
-        {
-            if (obj == null) return null;
-            string path = obj.name;
-            Transform current = obj.transform.parent;
-            while (current != null)
-            {
-                path = current.name + "/" + path;
-                current = current.parent;
-            }
-            return path;
-        }
-
-        /// <summary>
         /// Get the screen-space center position of a UI GameObject
         /// </summary>
         public static Vector2 GetScreenCenter(GameObject go)
@@ -373,7 +358,7 @@ namespace McpUnity.Tools
 
                 var element = new JObject
                 {
-                    ["path"] = GetGameObjectPath(selectable.gameObject),
+                    ["path"] = GameObjectPathUtils.GetCanonicalPath(selectable.gameObject),
                     ["instanceId"] = selectable.gameObject.GetInstanceID(),
                     ["componentType"] = componentType,
                     ["interactable"] = selectable.interactable,
@@ -423,7 +408,7 @@ namespace McpUnity.Tools
 
                             var element = new JObject
                             {
-                                ["path"] = GetGameObjectPath(tmpInput.gameObject),
+                                ["path"] = GameObjectPathUtils.GetCanonicalPath(tmpInput.gameObject),
                                 ["instanceId"] = tmpInput.gameObject.GetInstanceID(),
                                 ["componentType"] = "TMP_InputField",
                                 ["interactable"] = interactable,
@@ -468,7 +453,7 @@ namespace McpUnity.Tools
 
                             var element = new JObject
                             {
-                                ["path"] = GetGameObjectPath(tmpDropdown.gameObject),
+                                ["path"] = GameObjectPathUtils.GetCanonicalPath(tmpDropdown.gameObject),
                                 ["instanceId"] = tmpDropdown.gameObject.GetInstanceID(),
                                 ["componentType"] = "TMP_Dropdown",
                                 ["interactable"] = interactable,
@@ -510,7 +495,7 @@ namespace McpUnity.Tools
 
                     var element = new JObject
                     {
-                        ["path"] = GetGameObjectPath(scrollRect.gameObject),
+                        ["path"] = GameObjectPathUtils.GetCanonicalPath(scrollRect.gameObject),
                         ["instanceId"] = scrollRect.gameObject.GetInstanceID(),
                         ["componentType"] = "ScrollRect",
                         ["interactable"] = true,
@@ -564,15 +549,16 @@ namespace McpUnity.Tools
             Transform root = null;
             if (!string.IsNullOrEmpty(rootPath))
             {
-                GameObject rootObj = GameObject.Find(rootPath);
-                if (rootObj == null)
+                JObject rootResolutionError = TryResolveRootTransform(rootPath, out root);
+                if (rootResolutionError != null)
+                    return rootResolutionError;
+                if (root == null)
                 {
                     return McpUnitySocketHandler.CreateErrorResponse(
                         $"Root GameObject not found at path '{rootPath}'.",
                         "not_found_error"
                     );
                 }
-                root = rootObj.transform;
             }
 
             // Scan
@@ -590,6 +576,14 @@ namespace McpUnity.Tools
                 ["elements"] = elementsArray,
                 ["count"] = elements.Count
             };
+        }
+
+        private static JObject TryResolveRootTransform(string rootPath, out Transform root)
+        {
+            JObject error = PrefabSessionScope.TryResolveGameObject(
+                null, rootPath, out GameObject rootObject);
+            root = rootObject?.transform;
+            return error;
         }
     }
 
@@ -703,8 +697,8 @@ namespace McpUnity.Tools
             {
                 ["success"] = true,
                 ["type"] = "text",
-                ["message"] = $"Successfully clicked {UIAutomationUtils.GetGameObjectPath(target)}",
-                ["targetPath"] = UIAutomationUtils.GetGameObjectPath(target),
+                ["message"] = $"Successfully clicked {GameObjectPathUtils.GetCanonicalPath(target)}",
+                ["targetPath"] = GameObjectPathUtils.GetCanonicalPath(target),
                 ["eventsDispatched"] = dispatchedArray
             };
 
@@ -785,8 +779,8 @@ namespace McpUnity.Tools
                 {
                     ["success"] = true,
                     ["type"] = "text",
-                    ["message"] = $"Successfully set text on InputField at {UIAutomationUtils.GetGameObjectPath(target)}",
-                    ["targetPath"] = UIAutomationUtils.GetGameObjectPath(target),
+                    ["message"] = $"Successfully set text on InputField at {GameObjectPathUtils.GetCanonicalPath(target)}",
+                    ["targetPath"] = GameObjectPathUtils.GetCanonicalPath(target),
                     ["inputFieldType"] = "InputField",
                     ["previousText"] = previousText,
                     ["currentText"] = newText,
@@ -863,8 +857,8 @@ namespace McpUnity.Tools
                             {
                                 ["success"] = true,
                                 ["type"] = "text",
-                                ["message"] = $"Successfully set text on TMP_InputField at {UIAutomationUtils.GetGameObjectPath(target)}",
-                                ["targetPath"] = UIAutomationUtils.GetGameObjectPath(target),
+                                ["message"] = $"Successfully set text on TMP_InputField at {GameObjectPathUtils.GetCanonicalPath(target)}",
+                                ["targetPath"] = GameObjectPathUtils.GetCanonicalPath(target),
                                 ["inputFieldType"] = "TMP_InputField",
                                 ["previousText"] = previousText,
                                 ["currentText"] = newText,
@@ -905,7 +899,7 @@ namespace McpUnity.Tools
             var findError = UIAutomationUtils.FindGameObject(instanceId, objectPath, out GameObject target, out string identifierInfo);
             if (findError != null) return findError;
 
-            string path = UIAutomationUtils.GetGameObjectPath(target);
+            string path = GameObjectPathUtils.GetCanonicalPath(target);
 
             var result = new JObject
             {
@@ -1128,7 +1122,13 @@ namespace McpUnity.Tools
                     yield break;
                 }
 
-                conditionMet = CheckCondition(objectPath, condition, value);
+                conditionMet = CheckCondition(
+                    objectPath, condition, value, out JObject conditionResolutionError);
+                if (conditionResolutionError != null)
+                {
+                    tcs.TrySetResult(conditionResolutionError);
+                    yield break;
+                }
                 if (conditionMet)
                     break;
 
@@ -1142,7 +1142,13 @@ namespace McpUnity.Tools
 
             // Build final state
             var finalState = new JObject();
-            GameObject obj = GameObject.Find(objectPath);
+            JObject finalResolutionError = TryResolveFinalStateTarget(
+                objectPath, out GameObject obj);
+            if (finalResolutionError != null)
+            {
+                tcs.TrySetResult(finalResolutionError);
+                yield break;
+            }
             if (obj != null)
             {
                 finalState["active"] = obj.activeSelf;
@@ -1187,9 +1193,15 @@ namespace McpUnity.Tools
             }
         }
 
-        private static bool CheckCondition(string objectPath, string condition, string value)
+        private static bool CheckCondition(
+            string objectPath,
+            string condition,
+            string value,
+            out JObject resolutionError)
         {
-            GameObject obj = GameObject.Find(objectPath);
+            resolutionError = TryResolveConditionTarget(objectPath, out GameObject obj);
+            if (resolutionError != null)
+                return false;
 
             switch (condition)
             {
@@ -1230,6 +1242,22 @@ namespace McpUnity.Tools
                 default:
                     return false;
             }
+        }
+
+        private static JObject TryResolveConditionTarget(
+            string objectPath,
+            out GameObject gameObject)
+        {
+            return PrefabSessionScope.TryResolveGameObjectForPolling(
+                objectPath, out gameObject);
+        }
+
+        private static JObject TryResolveFinalStateTarget(
+            string objectPath,
+            out GameObject gameObject)
+        {
+            return PrefabSessionScope.TryResolveGameObjectForPolling(
+                objectPath, out gameObject);
         }
     }
 
@@ -1306,7 +1334,13 @@ namespace McpUnity.Tools
             }
             else if (!string.IsNullOrEmpty(targetPath))
             {
-                GameObject targetObj = GameObject.Find(targetPath);
+                JObject targetResolutionError = TryResolveDragTarget(
+                    targetPath, out GameObject targetObj);
+                if (targetResolutionError != null)
+                {
+                    tcs.TrySetResult(targetResolutionError);
+                    yield break;
+                }
                 if (targetObj == null)
                 {
                     tcs.TrySetResult(McpUnitySocketHandler.CreateErrorResponse(
@@ -1380,12 +1414,18 @@ namespace McpUnity.Tools
             string dropReceiver = null;
             if (!string.IsNullOrEmpty(targetPath))
             {
-                GameObject dropTarget = GameObject.Find(targetPath);
+                JObject dropResolutionError = TryResolveDropTarget(
+                    targetPath, out GameObject dropTarget);
+                if (dropResolutionError != null)
+                {
+                    tcs.TrySetResult(dropResolutionError);
+                    yield break;
+                }
                 if (dropTarget != null)
                 {
                     pointerData.pointerDrag = source;
                     ExecuteEvents.ExecuteHierarchy(dropTarget, pointerData, ExecuteEvents.dropHandler);
-                    dropReceiver = UIAutomationUtils.GetGameObjectPath(dropTarget);
+                    dropReceiver = GameObjectPathUtils.GetCanonicalPath(dropTarget);
                 }
             }
 
@@ -1393,15 +1433,31 @@ namespace McpUnity.Tools
             {
                 ["success"] = true,
                 ["type"] = "text",
-                ["message"] = $"Successfully dragged {UIAutomationUtils.GetGameObjectPath(source)}" +
+                ["message"] = $"Successfully dragged {GameObjectPathUtils.GetCanonicalPath(source)}" +
                               (dropReceiver != null ? $" to {dropReceiver}" : $" by ({totalDelta.x}, {totalDelta.y})"),
-                ["sourcePath"] = UIAutomationUtils.GetGameObjectPath(source),
+                ["sourcePath"] = GameObjectPathUtils.GetCanonicalPath(source),
                 ["startPosition"] = new JObject { ["x"] = startPos.x, ["y"] = startPos.y },
                 ["endPosition"] = new JObject { ["x"] = endPosition.x, ["y"] = endPosition.y },
                 ["totalDelta"] = new JObject { ["x"] = totalDelta.x, ["y"] = totalDelta.y },
                 ["steps"] = steps,
                 ["dropReceiver"] = dropReceiver
             });
+        }
+
+        private static JObject TryResolveDragTarget(
+            string targetPath,
+            out GameObject gameObject)
+        {
+            return PrefabSessionScope.TryResolveGameObject(
+                null, targetPath, out gameObject);
+        }
+
+        private static JObject TryResolveDropTarget(
+            string targetPath,
+            out GameObject gameObject)
+        {
+            return PrefabSessionScope.TryResolveGameObject(
+                null, targetPath, out gameObject);
         }
     }
 

@@ -13,7 +13,7 @@ const toolDescription = 'Saves an existing GameObject as a Prefab inside this Un
 // Parameter schema for the tool
 const paramsSchema = z.object({
   instanceId: z.number().optional().describe('The instance ID of the source GameObject'),
-  objectPath: z.string().optional().describe('The path of the source GameObject in the hierarchy (alternative to instanceId)'),
+  objectPath: z.string().optional().describe('The path of the source GameObject in the hierarchy (alternative to instanceId). Same-name hierarchy segments return object_path_ambiguity_error; use canonical Name[n] syntax (0-based among same-name siblings or loaded roots).'),
   savePath: explicitAssetPathSchema('Explicit .prefab asset path inside this project\'s Assets directory (e.g., "Assets/Prefabs/MyPrefab.prefab"); bare relative, absolute, and Assets/../.. escape paths are rejected')
 });
 

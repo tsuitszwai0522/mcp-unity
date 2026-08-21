@@ -14,9 +14,9 @@ const duplicateToolName = 'duplicate_gameobject';
 const duplicateToolDescription = 'Duplicates a GameObject in the Unity scene. Can create multiple copies and optionally rename or reparent them.';
 const duplicateParamsSchema = z.object({
   instanceId: z.number().optional().describe('The instance ID of the GameObject to duplicate'),
-  objectPath: z.string().optional().describe('The path of the GameObject in the hierarchy to duplicate (alternative to instanceId)'),
+  objectPath: z.string().optional().describe('The path of the GameObject in the hierarchy to duplicate (alternative to instanceId). Same-name hierarchy segments return object_path_ambiguity_error; use canonical Name[n] syntax (0-based among same-name siblings or loaded roots).'),
   newName: z.string().optional().describe('New name for the duplicated GameObject(s). If count > 1, numbers will be appended.'),
-  newParent: z.string().optional().describe('Path to the new parent GameObject. If not specified, uses the same parent as the original.'),
+  newParent: z.string().optional().describe('Path to the new parent GameObject. If not specified, uses the same parent as the original. Same-name hierarchy segments return object_path_ambiguity_error; use canonical Name[n] syntax (0-based among same-name siblings or loaded roots).'),
   newParentId: z.number().optional().describe('Instance ID of the new parent GameObject (alternative to newParent path).'),
   count: z.number().int().min(1).max(100).default(1).describe('Number of copies to create. Default: 1, Max: 100'),
 });
@@ -90,7 +90,7 @@ const deleteToolName = 'delete_gameobject';
 const deleteToolDescription = 'Deletes a GameObject from the Unity scene. By default, also deletes all children.';
 const deleteParamsSchema = z.object({
   instanceId: z.number().optional().describe('The instance ID of the GameObject to delete'),
-  objectPath: z.string().optional().describe('The path of the GameObject in the hierarchy to delete (alternative to instanceId)'),
+  objectPath: z.string().optional().describe('The path of the GameObject in the hierarchy to delete (alternative to instanceId). Same-name hierarchy segments return object_path_ambiguity_error; use canonical Name[n] syntax (0-based among same-name siblings or loaded roots).'),
   includeChildren: z.boolean().default(true).describe('If true (default), deletes all children. If false, children are moved to the deleted object\'s parent.'),
 });
 
@@ -160,8 +160,8 @@ const reparentToolName = 'reparent_gameobject';
 const reparentToolDescription = 'Changes the parent of a GameObject. Can move to a new parent or to the root level (null parent).';
 const reparentParamsSchema = z.object({
   instanceId: z.number().optional().describe('The instance ID of the GameObject to reparent'),
-  objectPath: z.string().optional().describe('The path of the GameObject in the hierarchy to reparent (alternative to instanceId)'),
-  newParent: z.string().nullable().optional().describe('Path to the new parent GameObject. Use null to move to root level.'),
+  objectPath: z.string().optional().describe('The path of the GameObject in the hierarchy to reparent (alternative to instanceId). Same-name hierarchy segments return object_path_ambiguity_error; use canonical Name[n] syntax (0-based among same-name siblings or loaded roots).'),
+  newParent: z.string().nullable().optional().describe('Path to the new parent GameObject. Use null to move to root level. Same-name hierarchy segments return object_path_ambiguity_error; use canonical Name[n] syntax (0-based among same-name siblings or loaded roots).'),
   newParentId: z.number().nullable().optional().describe('Instance ID of the new parent GameObject. Use null to move to root level.'),
   worldPositionStays: z.boolean().default(true).describe('If true (default), the world position is preserved. If false, local position is reset to zero.'),
 });
@@ -198,7 +198,7 @@ const setSiblingIndexToolName = 'set_sibling_index';
 const setSiblingIndexToolDescription = 'Sets the sibling index of a GameObject, controlling its order among siblings. Affects UI rendering order (higher index = rendered on top).';
 const setSiblingIndexParamsSchema = z.object({
   instanceId: z.number().optional().describe('The instance ID of the GameObject'),
-  objectPath: z.string().optional().describe('The path of the GameObject in the hierarchy (alternative to instanceId)'),
+  objectPath: z.string().optional().describe('The path of the GameObject in the hierarchy (alternative to instanceId). Same-name hierarchy segments return object_path_ambiguity_error; use canonical Name[n] syntax (0-based among same-name siblings or loaded roots).'),
   siblingIndex: z.number().int().describe('The target sibling index. 0 = first, -1 or large value = last.'),
 });
 

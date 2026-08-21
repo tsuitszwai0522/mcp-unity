@@ -11,7 +11,7 @@ const toolName = 'update_gameobject';
 const toolDescription = 'Updates properties of a GameObject in the Unity scene by its instance ID or path. If the GameObject does not exist at the specified path, it will be created. Every supplied gameObjectData key is reported in updatedFields or failedFields; valid fields may still be applied when another field fails, and any field failure returns isError=true with the full payload.';
 const paramsSchema = z.object({
   instanceId: z.number().optional().describe('The instance ID of the GameObject to update'),
-  objectPath: z.string().optional().describe('The path of the GameObject in the hierarchy to update (alternative to instanceId)'),
+  objectPath: z.string().optional().describe('The path of the GameObject in the hierarchy to update (alternative to instanceId). Same-name hierarchy segments return object_path_ambiguity_error; use canonical Name[n] syntax (0-based among same-name siblings or loaded roots).'),
   gameObjectData: z.object({
     name: z.string().optional().describe('New name for the GameObject'),
     tag: z.string().optional().describe('New tag for the GameObject'),

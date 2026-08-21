@@ -8,12 +8,12 @@ import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 // Constants for the tool
 const toolName = "get_gameobject";
 const toolDescription =
-  "Retrieves detailed information about a specific GameObject by instance ID, name, or hierarchical path (e.g., 'Parent/Child/MyObject'). Returns all component properties including Transform position, rotation, scale, and more.";
+  "Retrieves detailed information about a specific GameObject by instance ID, plain name, or canonical hierarchical path (e.g., 'Parent/Child/MyObject'). A plain token checks roots in the current scope first; if no root matches, its hierarchy-wide name fallback must be unique. Ambiguous roots, fallback names, or same-name path segments return object_path_ambiguity_error with canonical candidate paths and instanceIds; use 0-based Name[n] segments to disambiguate. Returns all component properties including Transform position, rotation, scale, and more.";
 const paramsSchema = z.object({
   idOrName: z
     .string()
     .describe(
-      "The instance ID (integer), name, or hierarchical path of the GameObject to retrieve. Use hierarchical paths like 'Canvas/Panel/Button' for nested objects."
+      "The instance ID (integer), unique plain name, or canonical hierarchy path of the GameObject to retrieve. A plain token checks loaded roots first, then a hierarchy-wide name fallback; multiple matches return object_path_ambiguity_error. Use paths like 'Canvas/Panel/Button' and 0-based Name[n] segments for same-name siblings or roots."
     ),
   maxDepth: z
     .number()

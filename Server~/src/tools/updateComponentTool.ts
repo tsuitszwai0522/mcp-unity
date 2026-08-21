@@ -17,7 +17,7 @@ If a missing component cannot be added, the tool returns success=false without m
 For Unity built-in serialized fields (m_Color, m_Sprite, m_FontSize), prefer write_serialized_fields.`;
 const paramsSchema = z.object({
   instanceId: z.number().optional().describe('The instance ID of the GameObject to update'),
-  objectPath: z.string().optional().describe('The path of the GameObject in the hierarchy to update (alternative to instanceId)'),
+  objectPath: z.string().optional().describe('The path of the GameObject in the hierarchy to update (alternative to instanceId). Same-name hierarchy segments return object_path_ambiguity_error; use canonical Name[n] syntax (0-based among same-name siblings or loaded roots).'),
   componentName: z.string().describe('Short, partial, fully-qualified, or assembly-qualified component type name. Ambiguous short/partial names require exactly one exact candidate type already attached; otherwise use a fully-qualified name.'),
   componentData: z.record(z.string(), z.any()).optional().describe('An object containing the fields to update on the component (optional). For asset references (Sprite, Material, Font, AudioClip, etc.), use the asset path as a string value (e.g., {"sprite": "Assets/Sprites/icon.png"}). For scene object references (Transform, other MonoBehaviours, GameObject), use the instance ID as an integer value (e.g., {"target": 12345}) or a structured reference (e.g., {"target": {"instanceId": 12345}} or {"target": {"objectPath": "Path/To/Object"}})')
 });

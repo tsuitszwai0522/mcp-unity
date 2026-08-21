@@ -146,7 +146,7 @@ namespace McpUnity.Tools
                     {
                         ["name"] = go.name,
                         ["instanceId"] = go.GetInstanceID(),
-                        ["path"] = GetGameObjectPath(go)
+                        ["path"] = GameObjectPathUtils.GetCanonicalPath(go)
                     };
                 }
 
@@ -158,7 +158,7 @@ namespace McpUnity.Tools
                     {
                         ["name"] = go.name,
                         ["instanceId"] = go.GetInstanceID(),
-                        ["path"] = GetGameObjectPath(go)
+                        ["path"] = GameObjectPathUtils.GetCanonicalPath(go)
                     });
                 }
                 selectionData["gameObjects"] = gameObjects;
@@ -197,16 +197,5 @@ namespace McpUnity.Tools
             }
         }
 
-        private static string GetGameObjectPath(GameObject go)
-        {
-            string path = go.name;
-            Transform parent = go.transform.parent;
-            while (parent != null)
-            {
-                path = parent.name + "/" + path;
-                parent = parent.parent;
-            }
-            return path;
-        }
     }
 }

@@ -55,11 +55,11 @@ const createCanvasToolName = "create_canvas";
 const createCanvasToolDescription = "Creates a Canvas with CanvasScaler and GraphicRaycaster components, and optionally an EventSystem. Fails while Prefab contents are open to prevent implicit writes to the Prefab asset";
 
 const createCanvasParamsSchema = z.object({
-  objectPath: z.string().describe("Path for the Canvas GameObject (e.g., 'MainCanvas' or 'UI/GameCanvas')"),
+  objectPath: z.string().describe("Path for the Canvas GameObject (e.g., 'MainCanvas' or 'UI/GameCanvas'). Same-name hierarchy segments return object_path_ambiguity_error; use canonical Name[n] syntax (0-based among same-name siblings or loaded roots)."),
   renderMode: z.enum(["ScreenSpaceOverlay", "ScreenSpaceCamera", "WorldSpace"])
     .optional()
     .describe("Canvas render mode (default: ScreenSpaceOverlay)"),
-  cameraPath: z.string().optional().describe("Path to camera for ScreenSpaceCamera/WorldSpace modes"),
+  cameraPath: z.string().optional().describe("Path to camera for ScreenSpaceCamera/WorldSpace modes. Same-name hierarchy segments return object_path_ambiguity_error; use canonical Name[n] syntax (0-based among same-name siblings or loaded roots)."),
   sortingOrder: z.number().int().optional().describe("Sorting order for the canvas"),
   pixelPerfect: z.boolean().optional().describe("Enable pixel perfect rendering"),
   scaler: z.object({
@@ -150,7 +150,7 @@ const elementTypeEnum = z.enum([
 ]);
 
 const createUIElementParamsSchema = z.object({
-  objectPath: z.string().describe("Path for the UI element (e.g., 'Canvas/Panel/Button')"),
+  objectPath: z.string().describe("Path for the UI element (e.g., 'Canvas/Panel/Button'). Same-name hierarchy segments return object_path_ambiguity_error; use canonical Name[n] syntax (0-based among same-name siblings or loaded roots)."),
   elementType: elementTypeEnum.describe("Type of UI element to create"),
   requireCanvas: z.boolean().default(true).describe("If true (default), requires an existing Canvas in the parent hierarchy. During Prefab contents editing MCP Unity never auto-creates a Canvas or EventSystem; set false only for an intentional Canvas-free UI Prefab."),
   rectTransform: rectTransformSchema.optional().describe("RectTransform settings"),
@@ -253,7 +253,7 @@ const setRectTransformToolDescription = "Modifies RectTransform properties of a 
 
 const setRectTransformParamsSchema = z.object({
   instanceId: z.number().int().optional().describe("Instance ID of the GameObject"),
-  objectPath: z.string().optional().describe("Path to the GameObject in the hierarchy"),
+  objectPath: z.string().optional().describe("Path to the GameObject in the hierarchy. Same-name hierarchy segments return object_path_ambiguity_error; use canonical Name[n] syntax (0-based among same-name siblings or loaded roots)."),
   anchorPreset: anchorPresetEnum.optional(),
   anchorMin: vector2Schema.optional().describe("Minimum anchor point (0-1)"),
   anchorMax: vector2Schema.optional().describe("Maximum anchor point (0-1)"),
@@ -349,7 +349,7 @@ const layoutTypeEnum = z.enum([
 
 const addLayoutComponentParamsSchema = z.object({
   instanceId: z.number().int().optional().describe("Instance ID of the GameObject"),
-  objectPath: z.string().optional().describe("Path to the GameObject in the hierarchy"),
+  objectPath: z.string().optional().describe("Path to the GameObject in the hierarchy. Same-name hierarchy segments return object_path_ambiguity_error; use canonical Name[n] syntax (0-based among same-name siblings or loaded roots)."),
   layoutType: layoutTypeEnum.describe("Type of layout component to add"),
   layoutData: z.object({
     // Common LayoutGroup
@@ -475,7 +475,7 @@ const getUIElementInfoToolDescription = "Gets detailed information about a UI el
 
 const getUIElementInfoParamsSchema = z.object({
   instanceId: z.number().int().optional().describe("Instance ID of the GameObject"),
-  objectPath: z.string().optional().describe("Path to the GameObject in the hierarchy"),
+  objectPath: z.string().optional().describe("Path to the GameObject in the hierarchy. Same-name hierarchy segments return object_path_ambiguity_error; use canonical Name[n] syntax (0-based among same-name siblings or loaded roots)."),
   includeChildren: z.boolean().optional().describe("Include information about child elements (default: false)"),
 });
 

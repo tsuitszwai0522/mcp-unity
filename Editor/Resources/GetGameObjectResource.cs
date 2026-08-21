@@ -16,7 +16,7 @@ namespace McpUnity.Resources
         public GetGameObjectResource()
         {
             Name = "get_gameobject";
-            Description = "Retrieves detailed information about a specific GameObject by instance ID or object name or path";
+            Description = "Retrieves a GameObject by instance ID, plain name, or canonical hierarchy path. A plain token checks roots in the current scope first; if no root matches, its hierarchy-wide name fallback must be unique. Ambiguous roots, fallback names, or same-name path segments return object_path_ambiguity_error with canonical candidate paths and instanceIds; use 0-based Name[n] segments to disambiguate.";
             Uri = "unity://gameobject/{idOrName}";
         }
         
@@ -37,10 +37,10 @@ namespace McpUnity.Resources
 
             string idOrName = parameters["idOrName"]?.ToObject<string>();
             
-            if (string.IsNullOrEmpty(idOrName))
+            if (idOrName == null)
             {
                 return McpUnitySocketHandler.CreateErrorResponse(
-                    "Parameter 'objectPathId' cannot be null or empty",
+                    "Parameter 'idOrName' cannot be null",
                     "validation_error");
             }
 
@@ -53,10 +53,8 @@ namespace McpUnity.Resources
                 return BuildResponseOrNotFound(gameObjectById, idOrName);
             }
 
-            GameObject gameObjectByPath;
-            JObject pathScopeError = idOrName.Contains("/")
-                ? PrefabSessionScope.TryResolveGameObject(null, idOrName, out gameObjectByPath)
-                : PrefabSessionScope.TryResolveGameObjectByName(idOrName, out gameObjectByPath);
+            JObject pathScopeError = PrefabSessionScope.TryResolveGameObjectPathOrName(
+                idOrName, out GameObject gameObjectByPath);
             if (pathScopeError != null) return pathScopeError;
             return BuildResponseOrNotFound(gameObjectByPath, idOrName);
         }

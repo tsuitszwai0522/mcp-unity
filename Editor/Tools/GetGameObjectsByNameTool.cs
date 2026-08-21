@@ -4,6 +4,7 @@ using System.Text.RegularExpressions;
 using McpUnity.Resources;
 using McpUnity.Services;
 using McpUnity.Unity;
+using McpUnity.Utils;
 using Newtonsoft.Json.Linq;
 using UnityEngine;
 
@@ -12,7 +13,8 @@ namespace McpUnity.Tools
     /// <summary>
     /// Finds all GameObjects whose name matches a glob pattern (supports * and ?).
     /// Returns an array of matches, each with hierarchical path + full GameObject data.
-    /// Complements get_gameobject (which only returns the first match).
+    /// Complements get_gameobject by returning every matching name instead of resolving one
+    /// instance-ID, name, or hierarchy-path reference.
     /// </summary>
     public class GetGameObjectsByNameTool : McpToolBase
     {
@@ -121,7 +123,7 @@ namespace McpUnity.Tools
                     go, includeDetailed, maxDepth, 0, includeChildren, componentFilter);
                 if (data != null)
                 {
-                    data["path"] = GetHierarchicalPath(go);
+                    data["path"] = GameObjectPathUtils.GetCanonicalPath(go);
                     results.Add(data);
                 }
             }
@@ -164,19 +166,6 @@ namespace McpUnity.Tools
                     child.gameObject, regex, includeInactive, limit, matches);
 
             return total;
-        }
-
-        private static string GetHierarchicalPath(GameObject go)
-        {
-            var sb = new StringBuilder(go.name);
-            var t = go.transform.parent;
-            while (t != null)
-            {
-                sb.Insert(0, '/');
-                sb.Insert(0, t.name);
-                t = t.parent;
-            }
-            return sb.ToString();
         }
 
         private static string GlobToRegex(string glob)

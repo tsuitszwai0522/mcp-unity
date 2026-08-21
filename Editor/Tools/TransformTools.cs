@@ -2,6 +2,7 @@ using UnityEngine;
 using UnityEditor;
 using McpUnity.Unity;
 using McpUnity.Services;
+using McpUnity.Utils;
 using Newtonsoft.Json.Linq;
 
 namespace McpUnity.Tools
@@ -78,7 +79,7 @@ namespace McpUnity.Tools
                 ["message"] = $"GameObject '{gameObject.name}' moved successfully.",
                 ["instanceId"] = gameObject.GetInstanceID(),
                 ["name"] = gameObject.name,
-                ["path"] = TransformToolUtils.GetGameObjectPath(gameObject),
+                ["path"] = GameObjectPathUtils.GetCanonicalPath(gameObject),
                 ["position"] = new JObject
                 {
                     ["world"] = new JObject
@@ -170,7 +171,7 @@ namespace McpUnity.Tools
                 ["message"] = $"GameObject '{gameObject.name}' rotated successfully.",
                 ["instanceId"] = gameObject.GetInstanceID(),
                 ["name"] = gameObject.name,
-                ["path"] = TransformToolUtils.GetGameObjectPath(gameObject),
+                ["path"] = GameObjectPathUtils.GetCanonicalPath(gameObject),
                 ["rotation"] = new JObject
                 {
                     ["world"] = new JObject
@@ -257,7 +258,7 @@ namespace McpUnity.Tools
                 ["message"] = $"GameObject '{gameObject.name}' scaled successfully.",
                 ["instanceId"] = gameObject.GetInstanceID(),
                 ["name"] = gameObject.name,
-                ["path"] = TransformToolUtils.GetGameObjectPath(gameObject),
+                ["path"] = GameObjectPathUtils.GetCanonicalPath(gameObject),
                 ["scale"] = new JObject
                 {
                     ["x"] = transform.localScale.x,
@@ -362,7 +363,7 @@ namespace McpUnity.Tools
                 ["message"] = $"GameObject '{gameObject.name}' transform updated successfully.",
                 ["instanceId"] = gameObject.GetInstanceID(),
                 ["name"] = gameObject.name,
-                ["path"] = TransformToolUtils.GetGameObjectPath(gameObject),
+                ["path"] = GameObjectPathUtils.GetCanonicalPath(gameObject),
                 ["transform"] = new JObject
                 {
                     ["position"] = new JObject
@@ -468,19 +469,5 @@ namespace McpUnity.Tools
             return new FindResult { GameObject = gameObject };
         }
 
-        /// <summary>
-        /// Get the hierarchy path of a GameObject
-        /// </summary>
-        public static string GetGameObjectPath(GameObject obj)
-        {
-            if (obj == null) return null;
-            string path = "/" + obj.name;
-            while (obj.transform.parent != null)
-            {
-                obj = obj.transform.parent.gameObject;
-                path = "/" + obj.name + path;
-            }
-            return path;
-        }
     }
 }

@@ -16,7 +16,7 @@ namespace McpUnity.Tools
         public GetGameObjectTool()
         {
             Name = "get_gameobject";
-            Description = "Retrieves detailed information about a specific GameObject by instance ID, name, or hierarchical path (e.g., \"Parent/Child/MyObject\"). Returns all component properties including Transform position, rotation, scale, and more.";
+            Description = "Retrieves detailed information about a specific GameObject by instance ID, plain name, or canonical hierarchical path (e.g., \"Parent/Child/MyObject\"). A plain token checks roots in the current scope first; if no root matches, its hierarchy-wide name fallback must be unique. Ambiguous roots, fallback names, or same-name path segments return object_path_ambiguity_error with canonical candidate paths and instanceIds; use 0-based Name[n] segments to disambiguate. Returns all component properties including Transform position, rotation, scale, and more.";
         }
 
         /// <summary>
@@ -37,10 +37,10 @@ namespace McpUnity.Tools
 
             string idOrName = parameters["idOrName"]?.ToObject<string>();
 
-            if (string.IsNullOrEmpty(idOrName))
+            if (idOrName == null)
             {
                 return McpUnitySocketHandler.CreateErrorResponse(
-                    "Parameter 'idOrName' cannot be null or empty",
+                    "Parameter 'idOrName' cannot be null",
                     "validation_error"
                 );
             }
@@ -54,10 +54,8 @@ namespace McpUnity.Tools
                 return BuildResponseOrNotFound(gameObjectById, idOrName, parameters);
             }
 
-            GameObject gameObjectByPath;
-            JObject pathScopeError = idOrName.Contains("/")
-                ? PrefabSessionScope.TryResolveGameObject(null, idOrName, out gameObjectByPath)
-                : PrefabSessionScope.TryResolveGameObjectByName(idOrName, out gameObjectByPath);
+            JObject pathScopeError = PrefabSessionScope.TryResolveGameObjectPathOrName(
+                idOrName, out GameObject gameObjectByPath);
             if (pathScopeError != null) return pathScopeError;
             return BuildResponseOrNotFound(gameObjectByPath, idOrName, parameters);
         }

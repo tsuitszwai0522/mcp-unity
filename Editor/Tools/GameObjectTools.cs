@@ -3,6 +3,7 @@ using UnityEngine;
 using UnityEditor;
 using McpUnity.Unity;
 using McpUnity.Services;
+using McpUnity.Utils;
 using Newtonsoft.Json.Linq;
 
 namespace McpUnity.Tools
@@ -55,21 +56,6 @@ namespace McpUnity.Tools
             }
 
             return null; // Success
-        }
-
-        /// <summary>
-        /// Get the full hierarchy path of a GameObject
-        /// </summary>
-        public static string GetGameObjectPath(GameObject obj)
-        {
-            if (obj == null) return null;
-            string path = "/" + obj.name;
-            while (obj.transform.parent != null)
-            {
-                obj = obj.transform.parent.gameObject;
-                path = "/" + obj.name + path;
-            }
-            return path;
         }
 
         internal static JObject AddResolutionRole(JObject error, string role)
@@ -157,7 +143,7 @@ namespace McpUnity.Tools
                 {
                     ["instanceId"] = duplicate.GetInstanceID(),
                     ["name"] = duplicate.name,
-                    ["path"] = GameObjectToolUtils.GetGameObjectPath(duplicate)
+                    ["path"] = GameObjectPathUtils.GetCanonicalPath(duplicate)
                 });
             }
 
@@ -214,7 +200,7 @@ namespace McpUnity.Tools
             }
 
             string deletedName = targetObject.name;
-            string deletedPath = GameObjectToolUtils.GetGameObjectPath(targetObject);
+            string deletedPath = GameObjectPathUtils.GetCanonicalPath(targetObject);
             int childCount = targetObject.transform.childCount;
 
             if (!includeChildren && childCount > 0)
@@ -294,7 +280,7 @@ namespace McpUnity.Tools
                 }
             }
 
-            string oldPath = GameObjectToolUtils.GetGameObjectPath(targetObject);
+            string oldPath = GameObjectPathUtils.GetCanonicalPath(targetObject);
             Transform oldParent = targetObject.transform.parent;
 
             // Find new parent (null means root level)
@@ -415,7 +401,7 @@ namespace McpUnity.Tools
                 }
             }
 
-            string newPath = GameObjectToolUtils.GetGameObjectPath(targetObject);
+            string newPath = GameObjectPathUtils.GetCanonicalPath(targetObject);
             string parentDescription = newParentTransform != null
                 ? $"'{newParentTransform.gameObject.name}'"
                 : "root level";
@@ -484,7 +470,7 @@ namespace McpUnity.Tools
                 ["message"] = $"Successfully set sibling index of '{targetObject.name}' from {oldIndex} to {newIndex} (of {siblingCount} siblings).",
                 ["instanceId"] = targetObject.GetInstanceID(),
                 ["name"] = targetObject.name,
-                ["path"] = GameObjectToolUtils.GetGameObjectPath(targetObject),
+                ["path"] = GameObjectPathUtils.GetCanonicalPath(targetObject),
                 ["oldSiblingIndex"] = oldIndex,
                 ["newSiblingIndex"] = newIndex,
                 ["siblingCount"] = siblingCount

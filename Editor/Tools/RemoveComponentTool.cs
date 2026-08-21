@@ -77,7 +77,7 @@ namespace McpUnity.Tools
             }
 
             string goName = gameObject.name;
-            string goPath = GameObjectToolUtils.GetGameObjectPath(gameObject);
+            string goPath = GameObjectPathUtils.GetCanonicalPath(gameObject);
             int goInstanceId = gameObject.GetInstanceID();
 
             // Remove the component with undo support

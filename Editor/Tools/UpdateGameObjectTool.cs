@@ -259,7 +259,7 @@ namespace McpUnity.Tools
                 ["message"] = message,
                 ["instanceId"] = targetGameObject.GetInstanceID(),
                 ["name"] = targetGameObject.name,
-                ["path"] = GetGameObjectPath(targetGameObject),
+                ["path"] = GameObjectPathUtils.GetCanonicalPath(targetGameObject),
                 ["updatedFields"] = new JArray(updatedFields.ToArray()),
                 ["failedFields"] = new JArray(failedFields.ToArray()),
                 ["warnings"] = new JArray(warnings.ToArray())
@@ -303,21 +303,5 @@ namespace McpUnity.Tools
             return changed;
         }
 
-        /// <summary>
-        /// Utility to get the hierarchy path of a GameObject (root/child/.../target)
-        /// </summary>
-        /// <param name="obj">The GameObject to get the path for</param>
-        /// <returns>Hierarchy path as string</returns>
-        private static string GetGameObjectPath(GameObject obj)
-        {
-            if (obj == null) return null;
-            string path = "/" + obj.name;
-            while (obj.transform.parent != null)
-            {
-                obj = obj.transform.parent.gameObject;
-                path = "/" + obj.name + path;
-            }
-            return path;
-        }
     }
 }

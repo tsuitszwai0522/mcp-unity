@@ -4,6 +4,54 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Breaking
+
+- **Ambiguous `objectPath` values now fail instead of selecting the first GameObject.** Responses use
+  `object_path_ambiguity_error` and include every candidate's `instanceId`, canonical hierarchy path,
+  and scene name. Canonical paths have no leading slash and disambiguate same-name siblings or loaded
+  roots with a 0-based `Name[n]` suffix. Literal names ending in a numeric bracket escape that bracket
+  as `Name\[n]`, and `/` inside a literal name is encoded as `\/`; one leading slash remains accepted
+  on input. Unescaped separators are significant: `Root/Panel/` addresses an empty-name child under
+  `Panel`, and `//Player` addresses `Player` under an empty-name root (only the first leading slash is
+  ignored). Callers that previously normalized trailing or repeated slashes must now preserve and use
+  the returned canonical path exactly.
+- **Ambiguous `get_gameobject` plain-name lookup now fails instead of using depth-first first-wins
+  fallback.** The tool and resource check a matching loaded root first for compatibility; if no root
+  matches, the hierarchy-wide name fallback succeeds only for one candidate and otherwise returns
+  `object_path_ambiguity_error` with canonical paths and instance IDs.
+- All hierarchy-path responses now use the shared canonical path generator, so a returned path can be
+  passed back to an `objectPath` resolver without tool-specific formatting differences.
+- Removed the public static `GetGameObjectPath` helpers from `GameObjectToolUtils`,
+  `TransformToolUtils`, `UGUIToolUtils`, and `UIAutomationUtils`. Consumers should use
+  `GameObjectPathUtils.GetCanonicalPath(GameObject)` or
+  `GameObjectPathUtils.GetCanonicalPath(Transform)` instead.
+
+### Fixed
+
+- Hierarchy creation no longer creates a new scene root when its initial root lookup misses but
+  nested GameObjects share that segment name. It returns `not_found_error` with their canonical
+  candidate paths; genuinely absent root-qualified paths retain the existing create-on-miss behaviour.
+- Prefab polling treats a missing Prefab-root prefix as `prefab_context_miss_error`; only a missing
+  descendant after the active Prefab root has matched remains a soft polling miss.
+- Hierarchy creation accepts canonical empty-name segments, so paths returned for empty-name objects
+  round-trip through `update_gameobject` and `create_ui_element` with the same structured contract.
+- `PrefabEditingService.FindByPath` retains its nullable public contract for every resolution failure,
+  including ambiguity. Callers that need `object_path_ambiguity_error` candidate details should use
+  `PrefabSessionScope.TryResolveGameObject`.
+
+### Tests
+
+- Cross-scene ambiguity coverage saves copies of the runner scene (`saveAsCopy:true`, runner scene
+  untouched) into a constant folder `Assets/McpUnityObjectPathSceneTests`, opens them additively, and
+  empties the copies immediately. SetUp self-heals residue from a previous interrupted run (constant
+  folder path makes leftovers claimable); TearDown deletes the folder only after every scene under it
+  closed successfully, leaving no consumer-project asset behind on the normal path.
+- Supplemental IL wiring guards now include the polling resolver hop and the hierarchy creator used by
+  `create_ui_element`, recognize both `call` and `callvirt`, and explicitly avoid claiming reachability
+  proof.
+
 ## [fork-1.7.0] - 2026-08-21
 
 Asset write honesty. Every tool that writes an asset now proves where it writes, refuses to touch a

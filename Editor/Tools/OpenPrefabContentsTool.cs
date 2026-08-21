@@ -3,6 +3,7 @@ using UnityEngine;
 using UnityEditor;
 using McpUnity.Unity;
 using McpUnity.Services;
+using McpUnity.Utils;
 using Newtonsoft.Json.Linq;
 
 namespace McpUnity.Tools
@@ -60,7 +61,7 @@ namespace McpUnity.Tools
                 GameObject root = PrefabEditingService.Open(prefabPath);
 
                 // Build hierarchy info with paths
-                JArray children = BuildChildrenArray(root.transform, root.name);
+                JArray children = BuildChildrenArray(root.transform);
 
                 return new JObject
                 {
@@ -85,13 +86,13 @@ namespace McpUnity.Tools
             }
         }
 
-        private JArray BuildChildrenArray(Transform parent, string parentPath)
+        private JArray BuildChildrenArray(Transform parent)
         {
             var children = new JArray();
             for (int i = 0; i < parent.childCount; i++)
             {
                 Transform child = parent.GetChild(i);
-                string childPath = $"{parentPath}/{child.gameObject.name}";
+                string childPath = GameObjectPathUtils.GetCanonicalPath(child);
                 var childObj = new JObject
                 {
                     ["instanceId"] = child.gameObject.GetInstanceID(),
@@ -102,7 +103,7 @@ namespace McpUnity.Tools
 
                 if (child.childCount > 0)
                 {
-                    childObj["children"] = BuildChildrenArray(child, childPath);
+                    childObj["children"] = BuildChildrenArray(child);
                 }
 
                 children.Add(childObj);

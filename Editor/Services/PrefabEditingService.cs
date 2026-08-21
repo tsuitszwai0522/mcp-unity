@@ -317,7 +317,11 @@ namespace McpUnity.Services
         /// Supports paths like "PrefabRoot/Child/SubChild".
         /// </summary>
         /// <param name="path">Hierarchy path to search for</param>
-        /// <returns>The found GameObject, or null if not found</returns>
+        /// <returns>
+        /// The found GameObject, or null when the path is absent, ambiguous, or otherwise cannot
+        /// be resolved. Use PrefabSessionScope.TryResolveGameObject when structured error details
+        /// are required.
+        /// </returns>
         public static GameObject FindByPath(string path)
         {
             if (!IsEditing)

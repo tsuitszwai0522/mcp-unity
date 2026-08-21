@@ -29,7 +29,7 @@ const getInteractableElementsParamsSchema = z.object({
     .string()
     .optional()
     .describe(
-      "Limit scan scope to children of this GameObject path (null = entire scene)"
+      "Limit scan scope to children of this GameObject path (null = entire scene). Same-name hierarchy segments return object_path_ambiguity_error; use canonical Name[n] syntax (0-based among same-name siblings or loaded roots)."
     ),
   filter: z
     .array(componentTypeFilter)
@@ -132,7 +132,7 @@ const simulatePointerClickParamsSchema = z.object({
   objectPath: z
     .string()
     .optional()
-    .describe("Hierarchy path of the target GameObject"),
+    .describe("Hierarchy path of the target GameObject. Same-name hierarchy segments return object_path_ambiguity_error; use canonical Name[n] syntax (0-based among same-name siblings or loaded roots)."),
 });
 
 function registerSimulatePointerClickTool(
@@ -224,7 +224,7 @@ const simulateInputFieldParamsSchema = z.object({
   objectPath: z
     .string()
     .optional()
-    .describe("Hierarchy path of the target GameObject"),
+    .describe("Hierarchy path of the target GameObject. Same-name hierarchy segments return object_path_ambiguity_error; use canonical Name[n] syntax (0-based among same-name siblings or loaded roots)."),
   text: z.string().describe("Text to fill into the input field"),
   mode: z
     .enum(["replace", "append"])
@@ -329,7 +329,7 @@ const getUIElementStateParamsSchema = z.object({
   objectPath: z
     .string()
     .optional()
-    .describe("Hierarchy path of the target GameObject"),
+    .describe("Hierarchy path of the target GameObject. Same-name hierarchy segments return object_path_ambiguity_error; use canonical Name[n] syntax (0-based among same-name siblings or loaded roots)."),
 });
 
 function registerGetUIElementStateTool(
@@ -430,7 +430,7 @@ const conditionEnum = z.enum([
 const waitForConditionParamsSchema = z.object({
   objectPath: z
     .string()
-    .describe("Hierarchy path of the target GameObject"),
+    .describe("Hierarchy path of the target GameObject. Same-name hierarchy segments return object_path_ambiguity_error; use canonical Name[n] syntax (0-based among same-name siblings or loaded roots)."),
   condition: conditionEnum.describe("Condition type to wait for"),
   value: z
     .string()
@@ -555,7 +555,7 @@ const simulateDragParamsSchema = z.object({
   objectPath: z
     .string()
     .optional()
-    .describe("Hierarchy path of the source GameObject to drag"),
+    .describe("Hierarchy path of the source GameObject to drag. Same-name hierarchy segments return object_path_ambiguity_error; use canonical Name[n] syntax (0-based among same-name siblings or loaded roots)."),
   delta: vector2Schema
     .optional()
     .describe(
@@ -565,7 +565,7 @@ const simulateDragParamsSchema = z.object({
     .string()
     .optional()
     .describe(
-      "Hierarchy path of the target GameObject to drag to (alternative to delta)"
+      "Hierarchy path of the target GameObject to drag to (alternative to delta). Same-name hierarchy segments return object_path_ambiguity_error; use canonical Name[n] syntax (0-based among same-name siblings or loaded roots)."
     ),
   steps: z
     .number()
