@@ -2,6 +2,7 @@ using System;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
+using McpUnity.Utils;
 
 namespace McpUnity.Services
 {
@@ -16,6 +17,14 @@ namespace McpUnity.Services
             : base(message, innerException)
         {
             SessionStatus = sessionStatus;
+        }
+    }
+
+    internal sealed class PrefabEditingAssetWriteException : InvalidOperationException
+    {
+        public PrefabEditingAssetWriteException(string message)
+            : base(message)
+        {
         }
     }
 
@@ -48,6 +57,17 @@ namespace McpUnity.Services
         private static Func<GameObject, string, bool> _savePrefabContents =
             (root, path) =>
             {
+                if (!AssetPathUtils.TryNormalizeAssetPath(
+                        path, out _, out string fullPath, out string pathError))
+                {
+                    throw new PrefabEditingAssetWriteException(
+                        $"Cannot save Prefab '{path}': {pathError}");
+                }
+                if (AssetPathUtils.IsExistingFileReadOnly(fullPath))
+                {
+                    throw new PrefabEditingAssetWriteException(
+                        $"Cannot save Prefab '{path}' because the target file is read-only.");
+                }
                 PrefabUtility.SaveAsPrefabAsset(root, path, out bool success);
                 return success;
             };

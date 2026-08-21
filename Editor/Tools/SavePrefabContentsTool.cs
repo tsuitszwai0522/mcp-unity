@@ -16,7 +16,8 @@ namespace McpUnity.Tools
             Name = "save_prefab_contents";
             Description = "Saves or discards changes to a Prefab that was opened with open_prefab_contents. " +
                           "By default saves changes back to the .prefab asset. Set discard=true to abandon " +
-                          "an active session or acknowledge and clear a lost session.";
+                          "an active session or acknowledge and clear a lost session. A read-only target " +
+                          "fails without changing the asset or closing the editing session.";
             IsAsync = false;
         }
 
@@ -106,6 +107,13 @@ namespace McpUnity.Tools
                         }
                     }
                 };
+            }
+            catch (InvalidOperationException ex)
+                when (ex.InnerException is PrefabEditingAssetWriteException)
+            {
+                return McpUnitySocketHandler.CreateErrorResponse(
+                    $"Failed to save Prefab contents: {ex.Message}",
+                    "tool_execution_error");
             }
             catch (Exception ex)
             {

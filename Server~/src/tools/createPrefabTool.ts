@@ -5,15 +5,16 @@ import * as z from 'zod';
 import { Logger } from '../utils/logger.js';
 import { payloadContent } from '../utils/toolPayload.js';
 import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+import { explicitAssetPathSchema } from '../utils/assetPathSchema.js';
 
 // Constants for the tool
 const toolName = 'create_prefab';
-const toolDescription = 'Creates a prefab with optional MonoBehaviour script and serialized field values. Supports creating Prefab Variants by specifying a basePrefabPath.';
+const toolDescription = 'Creates a prefab under this Unity project\'s Assets directory with optional MonoBehaviour script and serialized field values. prefabName is an explicit Assets/... asset-path stem; absolute paths, bare relative paths, and paths that resolve outside Assets are rejected. Existing imported assets keep the current collision behavior and produce an _1, _2, ... sibling. Supports creating Prefab Variants by specifying a basePrefabPath.';
 
 // Parameter schema for the tool
 const paramsSchema = z.object({
   componentName: z.string().optional().describe('The name of the MonoBehaviour Component to add to the prefab (optional)'),
-  prefabName: z.string().describe('The name of the prefab to create'),
+  prefabName: explicitAssetPathSchema('Explicit asset-path stem under this project\'s Assets directory, without the .prefab suffix (for example, "Assets/Prefabs/MyPrefab"). Bare relative, absolute, and Assets/../.. escape paths are rejected; imported-asset collisions receive an _1, _2, ... suffix.'),
   fieldValues: z.record(z.string(), z.any()).optional().describe('Optional JSON object of serialized field values to apply to the prefab'),
   basePrefabPath: z.string().optional().describe('Asset path to a base prefab to create a Prefab Variant from (e.g., "Assets/Prefabs/Base.prefab"). When provided, the new prefab will be a Variant of the base prefab.')
 });

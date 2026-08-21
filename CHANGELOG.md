@@ -4,6 +4,68 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [fork-1.7.0] - 2026-08-21
+
+Asset write honesty. Every tool that writes an asset now proves where it writes, refuses to touch a
+read-only target, leaves nothing behind when it fails, and reports values it read back rather than
+values it was asked for.
+
+### Breaking
+
+- **Asset paths are validated by containment, not by prefix, and invalid paths are rejected instead of
+  rewritten.** `create_prefab.prefabName`, `save_as_prefab.savePath`,
+  `import_texture_as_sprite.assetPath` and `create_sprite_atlas.savePath` / `folderPath` must resolve —
+  after `Path.GetFullPath` normalization — inside this project's `Assets/` directory. Bare relative
+  paths (previously written to the project root, or silently prefixed with `Assets/`), absolute paths,
+  and `Assets/../..` escapes now return `validation_error` and create nothing. A prefix test alone did
+  not stop escapes: `Assets/../../x.prefab` passes `StartsWith("Assets/")` and was measured writing a
+  full asset outside the Unity project.
+- **`import_texture_as_sprite` rejects unrecognised `spriteMode` / `meshType` / `compression` values**
+  with `validation_error` listing the valid names, before touching the importer. They previously fell
+  through to a silent default while the response echoed the request. Node's enum schema already blocked
+  direct calls; `batch_execute` does not validate per-tool params, so the path was reachable.
+- **`update_component` reports failure when the component could not be added.** `Undo.AddComponent`
+  returning `null` previously produced `success: true` with an empty field list while still marking the
+  GameObject dirty. It now returns `success: false` with a `failedFields` entry and does not call
+  `EditorUtility.SetDirty`.
+- **`create_sprite_atlas` returns `folderPath` read back from the saved atlas's packables** rather than
+  the requested value.
+
+### Fixed
+
+- **Prefab saves no longer overwrite read-only targets.** All three save call sites — `create_prefab`,
+  `save_as_prefab` and `save_prefab_contents` — refuse an existing read-only target before calling Unity.
+  Measured previous behaviour: the file was replaced *and* its read-only permission bit cleared, and the
+  tool reported success. No source-control checkout or attribute clearing is performed; the contract is
+  failure with zero mutation.
+- **Failure paths no longer leave artifacts behind.** `create_prefab` destroys its temporary GameObject
+  in a `finally` (a save throw previously left an orphan in the open scene); `save_as_prefab` and
+  `create_sprite_atlas` remove only the directories and assets this call created.
+- **Cleanup can no longer delete an unrelated asset's `.meta`.** A path segment that is an existing
+  *file* is no longer mistaken for a directory this call is about to create. Directory ownership is
+  recorded only after `Directory.CreateDirectory` succeeds, so a failed write never passes a foreign
+  path to recursive cleanup. Previously `savePath: "Assets/Images/tomato.png/Foo.prefab"` deleted
+  `tomato.png.meta`, destroying that asset's GUID and importer settings, while the tool reported failure.
+- **`import_texture_as_sprite` restores the importer when its post-write readback fails**, reimporting
+  with `ForceUpdate | ForceSynchronousImport` so the restore is not skipped as up-to-date. Rollback
+  failure is reported in the response rather than only logged.
+- **`save_as_prefab` no longer walks off the project.** Containment is checked before
+  `Directory.CreateDirectory`, which previously ran on the raw path.
+
+### Changed
+
+- `import_texture_as_sprite` reports `assetPath`, `spriteMode`, `meshType` and `compression` read back
+  from the persisted importer after reimport.
+- `create_prefab` reports the saved asset's path from `AssetDatabase.GetAssetPath`. Name collisions
+  inside `Assets/` keep the existing `_1`, `_2`, … behaviour and are still reported in `prefabPath`.
+- Unity-side and Node-side tool descriptions state the read-only, containment and failure contracts.
+
+### Added
+
+- `Editor/Utils/AssetPathUtils.cs` — shared containment normalization, read-only inspection, and
+  owned-directory create/delete used by every call site above.
+- `McpUnity.Tests.AssetWriteHonestyTests` — 21 EditMode tests. Node gains 4 tests (227 total).
+
 ## [fork-1.6.1] - 2026-08-20
 
 Patch release. `fork-1.6.0` shipped a broken EditMode test class; no production tool behaviour changed.

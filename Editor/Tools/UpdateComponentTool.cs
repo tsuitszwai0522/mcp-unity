@@ -17,6 +17,10 @@ namespace McpUnity.Tools
     /// </summary>
     public class UpdateComponentTool : McpToolBase
     {
+        private static Func<GameObject, Type, Component> _addComponent =
+            (gameObject, componentType) => Undo.AddComponent(gameObject, componentType);
+        private static Action<UnityEngine.Object> _setDirty = EditorUtility.SetDirty;
+
         public UpdateComponentTool()
         {
             Name = "update_component";
@@ -25,7 +29,8 @@ namespace McpUnity.Tools
                 "the valid names listed. Partial struct writes (for example, {\"r\":1}) preserve " +
                 "unmentioned components of the current value; on freshly-created objects, unmentioned " +
                 "components are the type's default. Prefer passing componentData in the same call to avoid " +
-                "duplicate additions. Ambiguous short or partial component names are accepted only when " +
+                "duplicate additions. If Unity cannot add the component, the tool returns success=false " +
+                "without marking the GameObject dirty. Ambiguous short or partial component names are accepted only when " +
                 "exactly one candidate type is already attached; otherwise use a fully-qualified name.";
         }
         
@@ -114,10 +119,28 @@ namespace McpUnity.Tools
                 }
                 else
                 {
-                    component = Undo.AddComponent(gameObject, componentType);
+                    component = _addComponent(gameObject, componentType);
+
+                    if (component == null)
+                    {
+                        string reason =
+                            $"Component '{componentName}' could not be added to GameObject '{gameObject.name}'.";
+                        return new JObject
+                        {
+                            ["success"] = false,
+                            ["type"] = "text",
+                            ["message"] = reason,
+                            ["updatedFields"] = new JArray(),
+                            ["failedFields"] = new JArray(new JObject
+                            {
+                                ["field"] = "componentName",
+                                ["reason"] = reason
+                            })
+                        };
+                    }
 
                     // Ensure changes are saved
-                    EditorUtility.SetDirty(gameObject);
+                    _setDirty(gameObject);
                     if (PrefabUtility.IsPartOfAnyPrefab(gameObject))
                     {
                         PrefabUtility.RecordPrefabInstancePropertyModifications(component);
@@ -153,7 +176,7 @@ namespace McpUnity.Tools
                 // Persist only when at least one requested field was actually written.
                 if (updatedFields.Count > 0)
                 {
-                    EditorUtility.SetDirty(gameObject);
+                    _setDirty(gameObject);
                     if (PrefabUtility.IsPartOfAnyPrefab(gameObject))
                     {
                         PrefabUtility.RecordPrefabInstancePropertyModifications(component);

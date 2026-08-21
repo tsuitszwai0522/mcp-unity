@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using UnityEngine;
 using UnityEditor;
 using Newtonsoft.Json.Linq;
@@ -8,15 +9,27 @@ using McpUnity.Utils;
 
 namespace McpUnity.Tools
 {
+    internal delegate bool AssetPathNormalizer(
+        string assetPath,
+        out string normalizedAssetPath,
+        out string fullPath,
+        out string errorMessage);
+
     /// <summary>
     /// Tool for creating prefabs with optional MonoBehaviour scripts
     /// </summary>
     public class CreatePrefabTool : McpToolBase
     {
+        private static AssetPathNormalizer _normalizeUniquePrefabPath =
+            AssetPathUtils.TryNormalizeAssetPath;
+
         public CreatePrefabTool()
         {
             Name = "create_prefab";
-            Description = "Creates a prefab with optional MonoBehaviour script and serialized field values. Supports creating Prefab Variants by specifying a basePrefabPath.";
+            Description = "Creates a prefab at an explicit path inside this project's Assets directory, " +
+                          "with optional MonoBehaviour script and serialized field values. Existing asset " +
+                          "names are changed to _1, _2, and so on; read-only targets fail without being changed. " +
+                          "Supports Prefab Variants through basePrefabPath.";
         }
         
         /// <summary>
@@ -40,6 +53,16 @@ namespace McpUnity.Tools
                 );
             }
 
+            string requestedPrefabPath = $"{prefabName}.prefab";
+            if (!AssetPathUtils.TryNormalizeAssetPath(
+                    requestedPrefabPath,
+                    out string normalizedPrefabPath,
+                    out _,
+                    out string pathError))
+            {
+                return McpUnitySocketHandler.CreateErrorResponse(pathError, "validation_error");
+            }
+
             // Validate basePrefabPath if provided
             if (!string.IsNullOrEmpty(basePrefabPath))
             {
@@ -60,147 +83,224 @@ namespace McpUnity.Tools
                 }
             }
 
-            GameObject tempObject;
-
-            if (!string.IsNullOrEmpty(basePrefabPath))
+            GameObject tempObject = null;
+            try
             {
-                // Create Prefab Variant: instantiate base prefab (preserving prefab link)
-                var basePrefab = AssetDatabase.LoadAssetAtPath<GameObject>(basePrefabPath);
-                tempObject = (GameObject)PrefabUtility.InstantiatePrefab(basePrefab);
-                tempObject.name = prefabName;
-            }
-            else
-            {
-                // Create a new empty GameObject
-                tempObject = new GameObject(prefabName);
-            }
-
-            var updatedFields = new List<string>();
-            var failedFields = new List<JObject>();
-            var warnings = new List<string>();
-
-            // Add component if provided
-            if (!string.IsNullOrEmpty(componentName))
-            {
-                try
+                if (!string.IsNullOrEmpty(basePrefabPath))
                 {
-                    // Add component
-                    Component component = AddComponent(tempObject, componentName);
+                    // Create Prefab Variant: instantiate base prefab (preserving prefab link)
+                    var basePrefab = AssetDatabase.LoadAssetAtPath<GameObject>(basePrefabPath);
+                    tempObject = (GameObject)PrefabUtility.InstantiatePrefab(basePrefab);
+                    tempObject.name = prefabName;
+                }
+                else
+                {
+                    // Create a new empty GameObject
+                    tempObject = new GameObject(prefabName);
+                }
 
-                    if (component == null)
+                var updatedFields = new List<string>();
+                var failedFields = new List<JObject>();
+                var warnings = new List<string>();
+
+                // Add component if provided
+                if (!string.IsNullOrEmpty(componentName))
+                {
+                    try
                     {
-                        Undo.DestroyObjectImmediate(tempObject);
+                        // Add component
+                        Component component = AddComponent(tempObject, componentName);
+
+                        if (component == null)
+                        {
+                            return McpUnitySocketHandler.CreateErrorResponse(
+                                $"Component '{componentName}' could not be added: type not found or not a MonoBehaviour",
+                                "component_error"
+                            );
+                        }
+
+                        // Apply field values if provided and component exists
+                        ApplyFieldValues(fieldValues, component, updatedFields, failedFields, warnings);
+                    }
+                    catch (Exception)
+                    {
                         return McpUnitySocketHandler.CreateErrorResponse(
-                            $"Component '{componentName}' could not be added: type not found or not a MonoBehaviour",
+                            $"Failed to add component '{componentName}' to GameObject",
                             "component_error"
                         );
                     }
-
-                    // Apply field values if provided and component exists
-                    ApplyFieldValues(fieldValues, component, updatedFields, failedFields, warnings);
                 }
-                catch (Exception)
+                else if (fieldValues != null && fieldValues.Count > 0)
                 {
-                    Undo.DestroyObjectImmediate(tempObject);
+                    foreach (JProperty property in fieldValues.Properties())
+                    {
+                        failedFields.Add(CreateFieldFailure(
+                            property.Name,
+                            "Cannot apply field values because no componentName was provided"));
+                    }
+                }
+
+                if (failedFields.Count > 0)
+                {
+                    bool failedVariant = !string.IsNullOrEmpty(basePrefabPath);
+                    var failedResponse = new JObject
+                    {
+                        ["success"] = false,
+                        ["type"] = "text",
+                        ["message"] =
+                            $"Prefab '{prefabName}' was not created because " +
+                            $"{failedFields.Count} field(s) failed; nothing was created.",
+                        ["isVariant"] = failedVariant,
+                        ["updatedFields"] = new JArray(updatedFields.ToArray()),
+                        ["failedFields"] = new JArray(failedFields.ToArray())
+                    };
+                    if (warnings.Count > 0)
+                    {
+                        failedResponse["warnings"] = new JArray(warnings.ToArray());
+                    }
+                    return failedResponse;
+                }
+
+                // For safety, create a unique name if an imported asset already exists.
+                int counter = 1;
+                string prefabPath = normalizedPrefabPath;
+                string prefabPathStem = normalizedPrefabPath.Substring(
+                    0, normalizedPrefabPath.Length - ".prefab".Length);
+                while (AssetDatabase.AssetPathToGUID(
+                    prefabPath, AssetPathToGUIDOptions.OnlyExistingAssets) != "")
+                {
+                    prefabPath = $"{prefabPathStem}_{counter}.prefab";
+                    counter++;
+                }
+
+                if (!_normalizeUniquePrefabPath(
+                        prefabPath,
+                        out string normalizedUniquePath,
+                        out string fullPrefabPath,
+                        out string uniquePathError))
+                {
                     return McpUnitySocketHandler.CreateErrorResponse(
-                        $"Failed to add component '{componentName}' to GameObject",
-                        "component_error"
+                        uniquePathError, "validation_error");
+                }
+                prefabPath = normalizedUniquePath;
+                if (AssetPathUtils.IsExistingFileReadOnly(fullPrefabPath))
+                {
+                    return McpUnitySocketHandler.CreateErrorResponse(
+                        $"Cannot create prefab at '{prefabPath}' because the target file is read-only.",
+                        "tool_execution_error");
+                }
+
+                // SaveAsPrefabAsset automatically creates a Variant when the source has a prefab link.
+                bool targetExistedBefore = File.Exists(fullPrefabPath);
+                bool metaExistedBefore = File.Exists(fullPrefabPath + ".meta");
+                bool success = false;
+                GameObject savedPrefab;
+                try
+                {
+                    savedPrefab = PrefabUtility.SaveAsPrefabAsset(
+                        tempObject, prefabPath, out success);
+                }
+                catch
+                {
+                    CleanupFailedNewAsset(
+                        prefabPath,
+                        fullPrefabPath,
+                        targetExistedBefore,
+                        metaExistedBefore);
+                    throw;
+                }
+
+                if (!success || savedPrefab == null)
+                {
+                    CleanupFailedNewAsset(
+                        prefabPath,
+                        fullPrefabPath,
+                        targetExistedBefore,
+                        metaExistedBefore);
+                    return McpUnitySocketHandler.CreateErrorResponse(
+                        $"Failed to create prefab '{prefabName}' at path '{prefabPath}'",
+                        "tool_execution_error"
                     );
                 }
-            }
-            else if (fieldValues != null && fieldValues.Count > 0)
-            {
-                foreach (JProperty property in fieldValues.Properties())
-                {
-                    failedFields.Add(CreateFieldFailure(
-                        property.Name,
-                        "Cannot apply field values because no componentName was provided"));
-                }
-            }
 
-            if (failedFields.Count > 0)
-            {
-                Undo.DestroyObjectImmediate(tempObject);
-                bool failedVariant = !string.IsNullOrEmpty(basePrefabPath);
-                var failedResponse = new JObject
+                string actualPrefabPath = AssetDatabase.GetAssetPath(savedPrefab);
+                if (string.IsNullOrEmpty(actualPrefabPath))
                 {
-                    ["success"] = false,
+                    CleanupFailedNewAsset(
+                        prefabPath,
+                        fullPrefabPath,
+                        targetExistedBefore,
+                        metaExistedBefore);
+                    return McpUnitySocketHandler.CreateErrorResponse(
+                        $"Prefab '{prefabName}' was saved but its asset path could not be read back.",
+                        "tool_execution_error");
+                }
+
+                bool isVariant = !string.IsNullOrEmpty(basePrefabPath);
+                string variantLabel = isVariant ? "Prefab Variant" : "prefab";
+
+                McpLogger.LogInfo($"Created {variantLabel} '{prefabName}' at path '{actualPrefabPath}'" +
+                    (isVariant ? $" based on '{basePrefabPath}'" : $" from script '{componentName}'"));
+
+                string message = $"Created {variantLabel} '{prefabName}' at path '{actualPrefabPath}'" +
+                    (isVariant ? $" based on '{basePrefabPath}'" : "") +
+                    $": {updatedFields.Count} field(s) succeeded, {failedFields.Count} field(s) failed";
+                if (warnings.Count > 0)
+                {
+                    message += $" (with {warnings.Count} warning(s))";
+                }
+
+                var response = new JObject
+                {
+                    ["success"] = failedFields.Count == 0,
                     ["type"] = "text",
-                    ["message"] =
-                        $"Prefab '{prefabName}' was not created because " +
-                        $"{failedFields.Count} field(s) failed; nothing was created.",
-                    ["isVariant"] = failedVariant,
+                    ["message"] = message,
+                    ["prefabPath"] = actualPrefabPath,
+                    ["isVariant"] = isVariant,
                     ["updatedFields"] = new JArray(updatedFields.ToArray()),
                     ["failedFields"] = new JArray(failedFields.ToArray())
                 };
+
                 if (warnings.Count > 0)
                 {
-                    failedResponse["warnings"] = new JArray(warnings.ToArray());
+                    response["warnings"] = new JArray(warnings.ToArray());
                 }
-                return failedResponse;
+
+                return response;
+            }
+            finally
+            {
+                if (tempObject != null)
+                {
+                    Undo.DestroyObjectImmediate(tempObject);
+                }
+            }
+        }
+
+        private static void CleanupFailedNewAsset(
+            string assetPath,
+            string fullPath,
+            bool targetExistedBefore,
+            bool metaExistedBefore)
+        {
+            bool pathWasEntirelyNew = !targetExistedBefore && !metaExistedBefore;
+            if (pathWasEntirelyNew)
+            {
+                AssetDatabase.DeleteAsset(assetPath);
             }
 
-            // For safety, we'll create a unique name if prefab already exists
-            int counter = 1;
-            string prefabPath = $"{prefabName}.prefab";
-            while (AssetDatabase.AssetPathToGUID(
-                prefabPath, AssetPathToGUIDOptions.OnlyExistingAssets) != "")
+            if (!targetExistedBefore && File.Exists(fullPath))
             {
-                prefabPath = $"{prefabName}_{counter}.prefab";
-                counter++;
+                File.Delete(fullPath);
             }
-
-            // Create the prefab (SaveAsPrefabAsset automatically creates a Variant when the source has a prefab link)
-            bool success = false;
-            PrefabUtility.SaveAsPrefabAsset(tempObject, prefabPath, out success);
-
-            // Clean up temporary object
-            Undo.DestroyObjectImmediate(tempObject);
-
-            // Refresh the asset database
-            AssetDatabase.Refresh();
-
-            if (!success)
+            if (!metaExistedBefore && File.Exists(fullPath + ".meta"))
             {
-                return McpUnitySocketHandler.CreateErrorResponse(
-                    $"Failed to create prefab '{prefabName}' at path '{prefabPath}'",
-                    "tool_execution_error"
-                );
+                File.Delete(fullPath + ".meta");
             }
-
-            bool isVariant = !string.IsNullOrEmpty(basePrefabPath);
-            string variantLabel = isVariant ? "Prefab Variant" : "prefab";
-
-            // Log the action
-            McpLogger.LogInfo($"Created {variantLabel} '{prefabName}' at path '{prefabPath}'" +
-                (isVariant ? $" based on '{basePrefabPath}'" : $" from script '{componentName}'"));
-
-            string message = $"Created {variantLabel} '{prefabName}' at path '{prefabPath}'" +
-                (isVariant ? $" based on '{basePrefabPath}'" : "") +
-                $": {updatedFields.Count} field(s) succeeded, {failedFields.Count} field(s) failed";
-            if (warnings.Count > 0)
+            if (pathWasEntirelyNew)
             {
-                message += $" (with {warnings.Count} warning(s))";
+                AssetDatabase.Refresh();
             }
-
-            // Create the response
-            var response = new JObject
-            {
-                ["success"] = failedFields.Count == 0,
-                ["type"] = "text",
-                ["message"] = message,
-                ["prefabPath"] = prefabPath,
-                ["isVariant"] = isVariant,
-                ["updatedFields"] = new JArray(updatedFields.ToArray()),
-                ["failedFields"] = new JArray(failedFields.ToArray())
-            };
-
-            if (warnings.Count > 0)
-            {
-                response["warnings"] = new JArray(warnings.ToArray());
-            }
-
-            return response;
         }
 
         private Component AddComponent(GameObject gameObject, string componentName)

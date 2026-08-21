@@ -40,6 +40,36 @@ This file accumulates pitfalls, undocumented behaviours, and confirmed-working a
 - **Issue**: `AssetDatabase.AssetPathToGUID(path)` returns the cached GUID even after `AssetDatabase.DeleteAsset(path)` has run successfully. Asserting `== string.Empty` fails for genuinely-deleted assets.
 - **Fix**: Use `AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(path) == null` to verify deletion. This actually probes the on-disk state and returns `null` once the asset is gone.
 
+### [Pitfall] `AssetPathToGUID` cannot detect filesystem collisions outside `Assets/`
+- **Date**: 2026-08-21
+- **Context**: Hardening `create_prefab` path handling and its existing `_1` collision loop.
+- **Issue**: `AssetDatabase.AssetPathToGUID(path, OnlyExistingAssets)` returns an empty string for paths outside the project asset database. A loop that relies on this result treats an existing external file as available, so a Prefab save can silently overwrite it.
+- **Fix**: Prove the target is contained by the current project's `Assets/` directory before using AssetDatabase collision checks. Use `Path.GetFullPath` plus an `Assets` directory-boundary comparison; a raw `StartsWith("Assets/")` check does not stop `Assets/../../...` escapes.
+
+### [Undocumented] Prefab save APIs do not reliably fail on read-only targets
+- **Date**: 2026-08-21
+- **Context**: Testing `SaveAsPrefabAsset`, `SaveAsPrefabAssetAndConnect`, and Prefab contents save on Unity 2022.3.62f3.
+- **Issue**: Unity may report a successful Prefab save after replacing a read-only file, changing both its contents and its read-only permission state. The API result cannot be used as a read-only guard.
+- **Fix**: Before calling any Prefab save API, inspect the existing target's read-only attribute and fail without calling Unity. Do not use `AssetDatabase.MakeEditable` when the contract requires failure and zero mutation.
+
+### [Pitfall] Validate embedded binary fixtures before blaming AssetDatabase import timing
+- **Date**: 2026-08-21
+- **Context**: Creating an embedded-base64 PNG inside an EditMode test and immediately loading it as `Texture2D` on Unity 2022.3.62f3. Updated after a true-Editor investigation corrected the original diagnosis.
+- **Issue**: The original 1×1 PNG constant had an invalid IDAT CRC and an unreadable zlib stream. Both `AssetDatabase.Refresh()` and `ImportAsset(..., ForceSynchronousImport)` correctly failed to import it. A generic typed-load assertion made fixture corruption look like an import-scheduling problem; the earlier claim that `Refresh()` timing caused this failure was unsupported.
+- **Fix**: Before writing an embedded binary fixture, validate its encoding and format invariants—in this case Base64, PNG signature, chunk bounds/order and CRCs, plus concatenated IDAT zlib inflate and Adler-32—and fail with a message that names the constant. Outer PNG CRCs alone do not prove that the compressed image stream is readable. Keep the subsequent Unity import assertion separate and state that byte validation already passed. `ForceSynchronousImport` can still make a per-asset fixture deterministic, but it cannot repair corrupt source bytes.
+
+### [Pitfall] A missing directory path may actually be an existing asset file
+- **Date**: 2026-08-21
+- **Context**: Rolling back directories created by `save_as_prefab` and `create_sprite_atlas` after a failed asset write.
+- **Issue**: `Directory.Exists(path) == false` does not mean the path is absent; it is also false when `path` is an existing file. Treating that path as an owned missing directory and deleting `path + ".meta"` during cleanup can destroy an unrelated asset GUID and importer settings.
+- **Fix**: Walk the directory tree before creation and reject any segment where `File.Exists` is true. Record ownership only after each `Directory.CreateDirectory` call succeeds, and pass only that recorded root to recursive directory/meta cleanup.
+
+### [Pitfall] Synchronous AssetDatabase import is not necessarily a forced reimport
+- **Date**: 2026-08-21
+- **Context**: Restoring a texture `.meta` snapshot after a post-write importer readback failure.
+- **Issue**: Restoring the old `.meta` mtime before `ImportAsset(..., ForceSynchronousImport)` can make the asset pipeline consider the file up-to-date. The disk bytes may be old while `AssetImporter.GetAtPath` still exposes the failed request's cached settings. Exact mtime assertions are also flaky across APFS/Mono timestamp precision.
+- **Fix**: Restore old contents while leaving a fresh change signal, reimport with `ForceUpdate | ForceSynchronousImport`, then restore mtime/attributes. Verify rollback through an independent `AssetImporter.GetAtPath` read of every relevant setting before checking file bytes/attributes; do not use exact mtime equality as the cache-correctness oracle.
+
 ### [Pitfall] Use `AssetDatabase.CreateFolder`, not `Directory.CreateDirectory`
 - **Date**: 2026-04-13
 - **Context**: Auto-creating asset directories in `loc_create_table` / `loc_add_locale`.

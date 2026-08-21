@@ -4,16 +4,17 @@ import { McpUnityError, ErrorType } from '../utils/errors.js';
 import * as z from 'zod';
 import { Logger } from '../utils/logger.js';
 import { payloadContent } from '../utils/toolPayload.js';
+import { explicitAssetPathSchema } from '../utils/assetPathSchema.js';
 
 // Constants for the tool
 const toolName = 'save_as_prefab';
-const toolDescription = 'Saves an existing GameObject from the scene as a Prefab asset using PrefabUtility.SaveAsPrefabAssetAndConnect';
+const toolDescription = 'Saves an existing GameObject as a Prefab inside this Unity project\'s Assets directory. Absolute paths, bare relative paths, and paths that resolve outside Assets are rejected before directories are created; an existing read-only target fails without changing its contents or permissions.';
 
 // Parameter schema for the tool
 const paramsSchema = z.object({
   instanceId: z.number().optional().describe('The instance ID of the source GameObject'),
   objectPath: z.string().optional().describe('The path of the source GameObject in the hierarchy (alternative to instanceId)'),
-  savePath: z.string().describe('The asset path to save the prefab (e.g., "Assets/Prefabs/MyPrefab.prefab")')
+  savePath: explicitAssetPathSchema('Explicit .prefab asset path inside this project\'s Assets directory (e.g., "Assets/Prefabs/MyPrefab.prefab"); bare relative, absolute, and Assets/../.. escape paths are rejected')
 });
 
 /**

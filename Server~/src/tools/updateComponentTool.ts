@@ -13,6 +13,7 @@ Best for: adding new components, setting fields by C# property/field name.
 Ambiguous short or partial component names work only when exactly one exact candidate type is already attached; otherwise use a fully-qualified name.
 Integer enum input is treated as the underlying enum value (not an index); invalid values are rejected with the valid names listed.
 Partial struct writes (for example, {"r":1}) preserve unmentioned components of the current value; on freshly-created objects, unmentioned components are the type's default.
+If a missing component cannot be added, the tool returns success=false without marking the GameObject dirty.
 For Unity built-in serialized fields (m_Color, m_Sprite, m_FontSize), prefer write_serialized_fields.`;
 const paramsSchema = z.object({
   instanceId: z.number().optional().describe('The instance ID of the GameObject to update'),

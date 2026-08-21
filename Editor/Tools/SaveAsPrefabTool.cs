@@ -15,7 +15,9 @@ namespace McpUnity.Tools
         public SaveAsPrefabTool()
         {
             Name = "save_as_prefab";
-            Description = "Saves an existing GameObject from the scene as a Prefab asset using PrefabUtility.SaveAsPrefabAssetAndConnect";
+            Description = "Saves and connects an existing scene GameObject at an explicit .prefab path " +
+                          "inside this project's Assets directory. Path validation happens before directory " +
+                          "creation, and a read-only target fails without being changed.";
         }
 
         /// <summary>
@@ -46,53 +48,128 @@ namespace McpUnity.Tools
                 );
             }
 
+            if (!AssetPathUtils.TryNormalizeAssetPath(
+                    savePath,
+                    out string normalizedSavePath,
+                    out string fullSavePath,
+                    out string pathError))
+            {
+                return McpUnitySocketHandler.CreateErrorResponse(pathError, "validation_error");
+            }
+            savePath = normalizedSavePath;
+
+            if (AssetPathUtils.IsExistingFileReadOnly(fullSavePath))
+            {
+                return McpUnitySocketHandler.CreateErrorResponse(
+                    $"Cannot save prefab at '{savePath}' because the target file is read-only.",
+                    "tool_execution_error");
+            }
+
             // Find source GameObject
             JObject error = GameObjectToolUtils.FindGameObject(instanceId, objectPath, out GameObject sourceObject, out string identifierInfo);
             if (error != null) return error;
 
             // Ensure the directory exists
-            string directory = Path.GetDirectoryName(savePath);
-            if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
+            string directory = Path.GetDirectoryName(fullSavePath);
+            bool targetExistedBefore = File.Exists(fullSavePath);
+            bool metaExistedBefore = File.Exists(fullSavePath + ".meta");
+            if (!AssetPathUtils.TryCreateOwnedDirectoryTree(
+                    directory,
+                    out string createdDirectoryRoot,
+                    out string directoryError))
             {
-                Directory.CreateDirectory(directory);
+                return McpUnitySocketHandler.CreateErrorResponse(
+                    directoryError,
+                    "tool_execution_error");
             }
-
-            // Save as prefab and connect the scene instance
-            GameObject prefab = PrefabUtility.SaveAsPrefabAssetAndConnect(
-                sourceObject,
-                savePath,
-                InteractionMode.AutomatedAction
-            );
-
-            bool success = prefab != null;
-
-            // Refresh the asset database
-            AssetDatabase.Refresh();
-
-            string message = success
-                ? $"Successfully saved GameObject '{sourceObject.name}' as prefab at '{savePath}'"
-                : $"Failed to save GameObject '{sourceObject.name}' as prefab at '{savePath}'";
-
-            McpLogger.LogInfo(message);
-
-            var result = new JObject
+            try
             {
-                ["success"] = success,
-                ["type"] = "text",
-                ["message"] = message,
-                ["prefabPath"] = savePath
-            };
+                // Save as prefab and connect the scene instance
+                GameObject prefab = PrefabUtility.SaveAsPrefabAssetAndConnect(
+                    sourceObject,
+                    savePath,
+                    InteractionMode.AutomatedAction
+                );
 
-            if (success)
-            {
-                string guid = AssetDatabase.AssetPathToGUID(savePath);
-                if (!string.IsNullOrEmpty(guid))
+                bool success = prefab != null;
+                string actualSavePath = success ? AssetDatabase.GetAssetPath(prefab) : null;
+                success = success && !string.IsNullOrEmpty(actualSavePath);
+
+                if (!success)
                 {
-                    result["guid"] = guid;
+                    CleanupFailedNewAsset(
+                        savePath,
+                        fullSavePath,
+                        targetExistedBefore,
+                        metaExistedBefore,
+                        createdDirectoryRoot);
                 }
+
+                string responsePath = success ? actualSavePath : savePath;
+                string message = success
+                    ? $"Successfully saved GameObject '{sourceObject.name}' as prefab at '{responsePath}'"
+                    : $"Failed to save GameObject '{sourceObject.name}' as prefab at '{savePath}'";
+
+                McpLogger.LogInfo(message);
+
+                var result = new JObject
+                {
+                    ["success"] = success,
+                    ["type"] = "text",
+                    ["message"] = message,
+                    ["prefabPath"] = responsePath
+                };
+
+                if (success)
+                {
+                    string guid = AssetDatabase.AssetPathToGUID(actualSavePath);
+                    if (!string.IsNullOrEmpty(guid))
+                    {
+                        result["guid"] = guid;
+                    }
+                }
+
+                return result;
+            }
+            catch
+            {
+                CleanupFailedNewAsset(
+                    savePath,
+                    fullSavePath,
+                    targetExistedBefore,
+                    metaExistedBefore,
+                    createdDirectoryRoot);
+                throw;
+            }
+        }
+
+        private static void CleanupFailedNewAsset(
+            string assetPath,
+            string fullPath,
+            bool targetExistedBefore,
+            bool metaExistedBefore,
+            string createdDirectoryRoot)
+        {
+            bool pathWasEntirelyNew = !targetExistedBefore && !metaExistedBefore;
+            if (pathWasEntirelyNew)
+            {
+                AssetDatabase.DeleteAsset(assetPath);
             }
 
-            return result;
+            if (!targetExistedBefore && File.Exists(fullPath))
+            {
+                File.Delete(fullPath);
+            }
+            if (!metaExistedBefore && File.Exists(fullPath + ".meta"))
+            {
+                File.Delete(fullPath + ".meta");
+            }
+
+            AssetPathUtils.DeleteOwnedDirectoryTree(createdDirectoryRoot);
+            if (pathWasEntirelyNew)
+            {
+                AssetDatabase.Refresh();
+            }
         }
     }
 }

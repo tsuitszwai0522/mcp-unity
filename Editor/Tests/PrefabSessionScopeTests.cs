@@ -39,6 +39,8 @@ namespace McpUnity.Tests
         private const string SessionAssetPathKey = "McpUnity.PrefabEditingService.AssetPath";
         private const string SessionAssetGuidKey = "McpUnity.PrefabEditingService.AssetGuid";
         private const string SessionRootInstanceIdKey = "McpUnity.PrefabEditingService.RootInstanceId";
+        private static readonly System.Func<GameObject, string, bool> OriginalSavePrefabContents =
+            (System.Func<GameObject, string, bool>)GetServiceField("_savePrefabContents");
 
         private GameObject _sceneObject;
         private Scene _additiveTestScene;
@@ -1313,11 +1315,7 @@ namespace McpUnity.Tests
         {
             SetServiceField(
                 "_savePrefabContents",
-                (System.Func<GameObject, string, bool>)((root, path) =>
-                {
-                    PrefabUtility.SaveAsPrefabAsset(root, path, out bool success);
-                    return success;
-                }));
+                OriginalSavePrefabContents);
         }
 
         private static void RestoreAddAssetPingObject()
@@ -1343,6 +1341,16 @@ namespace McpUnity.Tests
             if (field == null)
                 Assert.Fail($"PrefabEditingService private field '{name}' was not found");
             field.SetValue(null, value);
+        }
+
+        private static object GetServiceField(string name)
+        {
+            FieldInfo field = typeof(PrefabEditingService).GetField(
+                name, BindingFlags.NonPublic | BindingFlags.Static);
+            if (field == null)
+                throw new System.MissingFieldException(
+                    typeof(PrefabEditingService).FullName, name);
+            return field.GetValue(null);
         }
     }
 }

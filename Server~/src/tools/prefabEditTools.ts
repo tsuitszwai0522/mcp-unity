@@ -120,6 +120,7 @@ const savePrefabContentsToolDescription =
   'Saves or discards changes to a Prefab that was opened with open_prefab_contents. ' +
   'By default saves changes back to the .prefab asset. Set discard=true to abandon changes. ' +
   'A failed save keeps the editing session and unsaved changes open so the operation can be retried. ' +
+  'An existing read-only target fails without changing the asset or closing the editing session. ' +
   'If a session is lost, discard=true explicitly acknowledges and clears its persisted recovery record.';
 
 const savePrefabContentsParamsSchema = z.object({
