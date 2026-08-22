@@ -12,7 +12,9 @@ const toolDescription = `Updates component fields on a GameObject, or adds the c
 Best for: adding new components, setting fields by C# property/field name.
 Ambiguous short or partial component names work only when exactly one exact candidate type is already attached; otherwise use a fully-qualified name.
 Integer enum input is treated as the underlying enum value (not an index); invalid values are rejected with the valid names listed.
+Enum fields also accept reader-shape {value,index,name}; value is authoritative and mismatched name or index metadata produces a warning.
 Partial struct writes (for example, {"r":1}) preserve unmentioned components of the current value; on freshly-created objects, unmentioned components are the type's default.
+Field resolution checks reflection fields/properties before SerializedProperty fallback. Both paths replace arrays and partial-merge nested objects, but growth differs: the reflection converter rejects a partial struct in a newly grown slot, while SerializedProperty fallback starts grown elements from type defaults. SerializedProperty array shrink discards removed elements with a warning.
 If a missing component cannot be added, the tool returns success=false without marking the GameObject dirty.
 For Unity built-in serialized fields (m_Color, m_Sprite, m_FontSize), prefer write_serialized_fields.`;
 const paramsSchema = z.object({

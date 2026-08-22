@@ -146,7 +146,7 @@ namespace McpUnity.Utils
 
             if (targetType.IsEnum)
             {
-                return ConvertEnum(token, targetType, failures);
+                return ConvertEnum(token, targetType, failures, warnings);
             }
 
             // --- Array (T[]) ---
@@ -757,10 +757,31 @@ namespace McpUnity.Utils
                 return null;
             }
 
+            var descriptiveKeys = new List<string>();
+            foreach (JProperty suppliedProperty in refObj.Properties())
+            {
+                if (suppliedProperty.Name == "name" || suppliedProperty.Name == "type")
+                {
+                    descriptiveKeys.Add(suppliedProperty.Name);
+                }
+            }
+            if (descriptiveKeys.Count > 0)
+            {
+                warnings?.Add(
+                    $"Ignored descriptive keys: {string.Join(", ", descriptiveKeys)} " +
+                    $"for object reference '{targetType.Name}'");
+            }
+
             var attemptFailures = new List<string>();
             foreach (string locatorKey in locatorKeys)
             {
                 if (!refObj.TryGetValue(locatorKey, out JToken locatorToken))
+                {
+                    continue;
+                }
+                if (locatorToken.Type == JTokenType.Null
+                    || (locatorToken.Type == JTokenType.String
+                        && ((JValue)locatorToken).Value == null))
                 {
                     continue;
                 }
@@ -1025,11 +1046,54 @@ namespace McpUnity.Utils
             }
         }
 
-        private static object ConvertEnum(JToken token, Type targetType, List<string> failures)
+        private static object ConvertEnum(
+            JToken token,
+            Type targetType,
+            List<string> failures,
+            List<string> warnings)
         {
             string validValues = GetValidEnumValues(targetType);
             try
             {
+                JObject enumReaderShape = token as JObject;
+                if (enumReaderShape != null)
+                {
+                    string[] allowedEnumKeys = { "value", "index", "name" };
+                    foreach (JProperty suppliedKey in enumReaderShape.Properties())
+                    {
+                        if (Array.IndexOf(allowedEnumKeys, suppliedKey.Name) < 0)
+                        {
+                            failures.Add(
+                                $"Unknown enum key '{suppliedKey.Name}' for '{targetType.Name}'. " +
+                                $"Valid reader-shape keys: {string.Join(", ", allowedEnumKeys)}");
+                            return null;
+                        }
+                    }
+                    if (!enumReaderShape.TryGetValue("value", out JToken underlyingValue))
+                    {
+                        failures.Add(
+                            $"Reader-shaped enum object for '{targetType.Name}' must include 'value'");
+                        return null;
+                    }
+                    if (underlyingValue.Type == JTokenType.Object)
+                    {
+                        failures.Add(
+                            $"Expected an enum name or integer for {targetType.Name}. " +
+                            $"Valid values: {validValues}");
+                        return null;
+                    }
+
+                    int failureCount = failures.Count;
+                    object readerShapeValue = ConvertEnum(
+                        underlyingValue, targetType, failures, warnings);
+                    if (failures.Count == failureCount)
+                    {
+                        AddEnumReaderShapeMismatchWarnings(
+                            targetType, readerShapeValue, enumReaderShape, warnings);
+                    }
+                    return readerShapeValue;
+                }
+
                 object converted;
                 Type underlyingType = Enum.GetUnderlyingType(targetType);
                 bool unsignedUnderlying = IsUnsignedIntegerType(underlyingType);
@@ -1133,6 +1197,108 @@ namespace McpUnity.Utils
                     $"Valid values: {validValues}");
                 return null;
             }
+        }
+
+        private static void AddEnumReaderShapeMismatchWarnings(
+            Type targetType,
+            object resolvedValue,
+            JObject readerShape,
+            List<string> warnings)
+        {
+            if (readerShape == null || resolvedValue == null || warnings == null)
+            {
+                return;
+            }
+
+            string resolvedName = resolvedValue.ToString();
+            if (readerShape.TryGetValue("name", out JToken suppliedNameToken))
+            {
+                string suppliedName = suppliedNameToken.Type == JTokenType.Null
+                    ? null
+                    : suppliedNameToken.ToString();
+                bool suppliedNameMatches = suppliedName != null
+                    && Enum.TryParse(targetType, suppliedName, true, out object suppliedValue)
+                    && suppliedValue.Equals(resolvedValue);
+                suppliedNameMatches = suppliedNameMatches
+                    || InspectorDisplayNameMatchesResolvedValue(
+                        targetType, suppliedName, resolvedValue);
+                if (!suppliedNameMatches)
+                {
+                    warnings.Add(
+                        $"Reader-shaped enum metadata mismatch for '{targetType.Name}': supplied name " +
+                        $"'{suppliedName ?? "null"}', but 'value' resolved to name '{resolvedName}'. Used 'value'.");
+                }
+            }
+
+            if (readerShape.TryGetValue("index", out JToken suppliedIndexToken))
+            {
+                string suppliedIndex = suppliedIndexToken.Type == JTokenType.Null
+                    ? "null"
+                    : suppliedIndexToken.ToString();
+                bool hasIntegerIndex = int.TryParse(
+                    suppliedIndex,
+                    NumberStyles.Integer,
+                    CultureInfo.InvariantCulture,
+                    out int suppliedIndexValue);
+                int resolvedIndex = GetSerializedEnumIndex(targetType, resolvedValue);
+                if (!hasIntegerIndex || suppliedIndexValue != resolvedIndex)
+                {
+                    warnings.Add(
+                        $"Reader-shaped enum metadata mismatch for '{targetType.Name}': supplied index " +
+                        $"'{suppliedIndex}', but 'value' resolved to index {resolvedIndex}. Used 'value'.");
+                }
+            }
+        }
+
+        private static bool InspectorDisplayNameMatchesResolvedValue(
+            Type enumType,
+            string suppliedName,
+            object resolvedValue)
+        {
+            if (string.IsNullOrEmpty(suppliedName))
+            {
+                return false;
+            }
+
+            foreach (FieldInfo member in enumType.GetFields(
+                BindingFlags.Public | BindingFlags.Static))
+            {
+                object memberValue = member.GetValue(null);
+                if (!memberValue.Equals(resolvedValue))
+                {
+                    continue;
+                }
+
+                object[] attributes = member.GetCustomAttributes(
+                    typeof(InspectorNameAttribute), false);
+                if (attributes.Length == 0)
+                {
+                    continue;
+                }
+
+                Type attributeType = attributes[0].GetType();
+                FieldInfo displayNameField = attributeType.GetField(
+                    "displayName", BindingFlags.Public | BindingFlags.Instance);
+                PropertyInfo displayNameProperty = attributeType.GetProperty(
+                    "displayName", BindingFlags.Public | BindingFlags.Instance);
+                string displayName = displayNameField != null
+                    ? displayNameField.GetValue(attributes[0]) as string
+                    : displayNameProperty?.GetValue(attributes[0], null) as string;
+                if (string.Equals(
+                    suppliedName, displayName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private static int GetSerializedEnumIndex(Type enumType, object resolvedValue)
+        {
+            // Unity SerializedProperty.enumValueIndex follows Enum.GetNames value ordering,
+            // verified in Unity staging on 2026-08-22 with an out-of-order enum declaration.
+            string resolvedName = resolvedValue.ToString();
+            return Array.IndexOf(Enum.GetNames(enumType), resolvedName);
         }
 
         private static string GetValidEnumValues(Type enumType)

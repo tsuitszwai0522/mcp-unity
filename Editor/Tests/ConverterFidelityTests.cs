@@ -1224,56 +1224,6 @@ namespace McpUnity.Tests
         }
 
         [Test]
-        public void VerifyObjectReferenceWrite_WhenUnityPreservedPreviousValue_DoesNotRewriteSerializedData()
-        {
-            string holderPath = TestAssetDirectory + "/Holder.asset";
-            string referencedPath = TestAssetDirectory + "/Referenced.asset";
-            var holder = ScriptableObject.CreateInstance<ConverterFidelityScriptableObject>();
-            var referenced = ScriptableObject.CreateInstance<ConverterFidelityScriptableObject>();
-            AssetDatabase.CreateAsset(referenced, referencedPath);
-            string referencedGuid = AssetDatabase.AssetPathToGUID(referencedPath);
-            holder.reference = referenced;
-            AssetDatabase.CreateAsset(holder, holderPath);
-            AssetDatabase.SaveAssets();
-
-            Assert.IsTrue(AssetDatabase.DeleteAsset(referencedPath));
-            AssetDatabase.Refresh();
-            holder = AssetDatabase.LoadAssetAtPath<ConverterFidelityScriptableObject>(holderPath);
-            var serializedObject = new SerializedObject(holder);
-            SerializedProperty property = serializedObject.FindProperty("reference");
-            Assert.IsNotNull(property);
-            Assert.IsTrue(property.objectReferenceValue == null);
-            string absoluteHolderPath = Path.GetFullPath(holderPath);
-            string before = File.ReadAllText(absoluteHolderPath);
-            Assert.That(before, Does.Contain(referencedGuid), "Test setup must retain a Missing reference GUID");
-
-            var attempted = ScriptableObject.CreateInstance<ConverterFidelityScriptableObject>();
-            try
-            {
-                var write = new SerializedPropertyHelper.ObjectReferenceWrite(
-                    property.objectReferenceValue, attempted, false);
-
-                bool verified = SerializedPropertyHelper.VerifyObjectReferenceWrite(
-                    holder,
-                    serializedObject,
-                    property,
-                    property.propertyPath,
-                    write,
-                    out string failureReason);
-
-                AssetDatabase.SaveAssets();
-                string after = File.ReadAllText(absoluteHolderPath);
-                Assert.IsFalse(verified);
-                Assert.That(failureReason, Does.Contain("did not retain"));
-                Assert.AreEqual(before, after, "Verification must not clear the Missing reference fileID/GUID");
-            }
-            finally
-            {
-                UnityEngine.Object.DestroyImmediate(attempted);
-            }
-        }
-
-        [Test]
         public void Converter_StructuredReference_StaleLocatorFallsBackWithDisclosure()
         {
             GameObject fallback = Spawn("ConverterFidelity_FallbackObject");
@@ -1391,7 +1341,7 @@ namespace McpUnity.Tests
         }
 
         [Test]
-        public void StructuredReference_ReaderDescriptiveKeysRoundTripWithWarnings()
+        public void StructuredReference_ReaderDescriptiveKeysRoundTripSkipsNullLocatorWarning()
         {
             GameObject referenced = Spawn("ConverterFidelity_DescriptiveReference");
             JObject readerShape = new JObject
@@ -1422,13 +1372,13 @@ namespace McpUnity.Tests
 
                 Assert.AreSame(referenced, converted);
                 Assert.That(converterFailures, Is.Empty);
-                Assert.That(converterWarnings, Has.Some.Contains("Locator 'assetPath'"));
-                Assert.That(converterWarnings, Has.Some.Contains("via locator 'instanceId'"));
+                Assert.That(converterWarnings, Has.None.Contains("Locator 'assetPath'"));
+                Assert.That(converterWarnings, Has.None.Contains("via locator"));
                 Assert.IsTrue(written);
                 Assert.AreSame(referenced, property.objectReferenceValue);
                 Assert.That(warnings, Has.Some.Contains("Ignored descriptive keys"));
-                Assert.That(warnings, Has.Some.Contains("Locator 'assetPath'"));
-                Assert.That(warnings, Has.Some.Contains("via locator 'instanceId'"));
+                Assert.That(warnings, Has.None.Contains("Locator 'assetPath'"));
+                Assert.That(warnings, Has.None.Contains("via locator"));
             }
             finally
             {

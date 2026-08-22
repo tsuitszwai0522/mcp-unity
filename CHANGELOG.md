@@ -6,6 +6,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [fork-1.11.0] - 2026-08-22
+
+### Added
+
+- Added SerializedProperty writes for whole-array replacement, nested Generic partial merges, and
+  bounded direct `Array.size` updates. Grown JArray elements are cleared to type defaults before
+  partial merge; direct `Array.size` growth and all JArray shrink operations emit warnings.
+- Added nested object-reference read-back verification with no-undo rollback, rollback read-back,
+  missing-reference GUID protection, and explicit disclosure of restored, skipped, and failed paths.
+- Added warnings for direct `m_PersistentCalls` edits.
+- Reflection-backed enum conversion now accepts the reader-emitted `{value,index,name}` shape, uses
+  `value` as authoritative, and warns when the supplied name or index disagrees.
+
+### Breaking
+
+- Removed the public `SerializedPropertyHelper.VerifyObjectReferenceWrite` single-write API. Callers
+  must collect and verify the complete nested object-reference write set instead.
+
+### Fixed
+
+- Fixed M-45 so non-truncated Generic and array values returned by `read_serialized_fields` can
+  round-trip through SerializedProperty-backed write paths, including `update_component` fallback
+  handling. Element-budget-truncated reads are outside this guarantee; callers must inspect
+  `arrayMetadata`, and the writer warns before a shrink discards omitted elements.
+- Fixed M-54 so reader-shaped enums no longer fail converter-backed component, Prefab, and
+  ScriptableObject field writes.
+- Grown Quaternion array slots now clear to `Quaternion.identity`, Unity's semantic "no rotation"
+  default, instead of the invalid C# default value `(0, 0, 0, 0)`.
+
 ## [fork-1.10.0] - 2026-08-22
 
 ### Breaking

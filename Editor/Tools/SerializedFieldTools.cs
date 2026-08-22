@@ -436,10 +436,23 @@ namespace McpUnity.Tools
             Name = "write_serialized_fields";
             Description = "Writes serialized fields on a component using Unity's SerializedProperty API. " +
                 "Accepts both serialized names (m_Color, m_Sprite) and property names (color, sprite). " +
-                "Integer enum input is treated as the underlying enum value (not an index); invalid values " +
-                "are rejected with the valid names listed. Partial struct writes (for example, {\"r\":1}) " +
+                "Enums accept a name, underlying integer, or reader shape {value,index,name}; value is " +
+                "authoritative and inconsistent metadata warns. Invalid values are rejected with legal " +
+                "names listed. Partial struct writes (for example, {\"r\":1}) " +
                 "preserve unmentioned components of the current value; on freshly-created objects, " +
-                "unmentioned components are the type's default. More reliable than update_component for " +
+                "unmentioned components are the type's default. Arrays require a JArray and replace the " +
+                "whole collection; shrink discards removed elements with a warning, grown elements start " +
+                "from type defaults, and nested objects are partial merges. Read output can be truncated " +
+                "by the element budget: check arrayMetadata before writing it back; shrink warns. Direct " +
+                $"Array.size writes accept 0-{SerializedPropertyHelper.MaxDirectArraySize}; growth warns " +
+                "and follows Unity's direct resize behavior. If object-reference read-back verification " +
+                "fails, collected reference writes are restored where safe; non-reference children and " +
+                "array-size changes remain applied, and missing-reference previous values are not written " +
+                "as null. Direct writes do not support Character, AnimationCurve, Gradient, " +
+                "ExposedReference, FixedBufferSize, Vector2Int, Vector3Int, RectInt, BoundsInt, " +
+                "ManagedReference, or Hash128. Direct " +
+                "m_PersistentCalls writes warn that mode derivation is not validated and recommend " +
+                "wire_unity_event. More reliable than update_component for " +
                 "Unity built-in component fields. Ambiguous short or partial component names require " +
                 "exactly one exact candidate type on the target; otherwise use a fully-qualified name.";
         }
@@ -528,7 +541,7 @@ namespace McpUnity.Tools
                         fieldValue,
                         fieldWarnings,
                         fieldName,
-                        out SerializedPropertyHelper.ObjectReferenceWrite objectReferenceWrite))
+                        out List<SerializedPropertyHelper.ObjectReferenceWriteRecord> objectReferenceWrites))
                     {
                         string reason = fieldWarnings.Count > 0
                             ? string.Join("; ", fieldWarnings.ToArray())
@@ -537,21 +550,21 @@ namespace McpUnity.Tools
                         continue;
                     }
 
-                    warnings.AddRange(fieldWarnings);
-
                     serializedObject.ApplyModifiedProperties();
-                    if (!SerializedPropertyHelper.VerifyObjectReferenceWrite(
+                    if (!SerializedPropertyHelper.VerifyObjectReferenceWrites(
                         component,
-                        serializedObject,
-                        prop,
-                        serializedFieldName,
-                        objectReferenceWrite,
+                        objectReferenceWrites,
                         out string verificationFailure))
                     {
-                        failedFields.Add(CreateFieldFailure(fieldName, verificationFailure));
+                        string reason = fieldWarnings.Count > 0
+                            ? verificationFailure + "; warnings: " +
+                                string.Join("; ", fieldWarnings.ToArray())
+                            : verificationFailure;
+                        failedFields.Add(CreateFieldFailure(fieldName, reason));
                         continue;
                     }
 
+                    warnings.AddRange(fieldWarnings);
                     updatedFields.Add(serializedFieldName);
                 }
                 catch (Exception ex)

@@ -26,9 +26,16 @@ namespace McpUnity.Tools
             Name = "update_component";
             Description = "Updates component fields on a GameObject or adds it if missing. Integer enum input " +
                 "is treated as the underlying enum value (not an index); invalid values are rejected with " +
-                "the valid names listed. Partial struct writes (for example, {\"r\":1}) preserve " +
+                "the valid names listed. Enum fields also accept reader-shape {value,index,name}; value is " +
+                "authoritative and mismatched name or index metadata produces a warning. Partial struct " +
+                "writes (for example, {\"r\":1}) preserve " +
                 "unmentioned components of the current value; on freshly-created objects, unmentioned " +
-                "components are the type's default. Prefer passing componentData in the same call to avoid " +
+                "components are the type's default. Field resolution checks reflection fields and properties " +
+                "before SerializedProperty fallback. Both paths replace arrays and partial-merge nested " +
+                "objects, but growth differs: the reflection converter rejects a partial struct in a newly " +
+                "grown slot, while SerializedProperty fallback starts grown elements from type defaults. " +
+                "SerializedProperty array shrink discards removed elements with a warning. Prefer passing " +
+                "componentData in the same call to avoid " +
                 "duplicate additions. If Unity cannot add the component, the tool returns success=false " +
                 "without marking the GameObject dirty. Ambiguous short or partial component names are accepted only when " +
                 "exactly one candidate type is already attached; otherwise use a fully-qualified name.";
@@ -378,7 +385,7 @@ namespace McpUnity.Tools
                 fieldValue,
                 propertyWarnings,
                 fieldName,
-                out SerializedPropertyHelper.ObjectReferenceWrite objectReferenceWrite))
+                out List<SerializedPropertyHelper.ObjectReferenceWriteRecord> objectReferenceWrites))
             {
                 failureReason = propertyWarnings.Count > 0
                     ? string.Join("; ", propertyWarnings.ToArray())
@@ -387,13 +394,16 @@ namespace McpUnity.Tools
             }
 
             serializedObject.ApplyModifiedProperties();
-            return SerializedPropertyHelper.VerifyObjectReferenceWrite(
+            bool verified = SerializedPropertyHelper.VerifyObjectReferenceWrites(
                 component,
-                serializedObject,
-                prop,
-                serializedFieldName,
-                objectReferenceWrite,
+                objectReferenceWrites,
                 out failureReason);
+            if (!verified && propertyWarnings.Count > 0)
+            {
+                failureReason += "; warnings: " +
+                    string.Join("; ", propertyWarnings.ToArray());
+            }
+            return verified;
         }
 
         private static string GetConversionFailureReason(Type targetType, List<string> conversionFailures)

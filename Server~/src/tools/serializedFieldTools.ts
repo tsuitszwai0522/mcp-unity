@@ -126,6 +126,13 @@ Accepts both serialized names (m_Color) and property names (color).
 Ambiguous short or partial component names require exactly one exact candidate type on the target; otherwise use a fully-qualified name.
 Integer enum input is treated as the underlying enum value (not an index); invalid values are rejected with the valid names listed.
 Partial struct writes (for example, {"r":1}) preserve unmentioned components of the current value; on freshly-created objects, unmentioned components are the type's default.
+Enums also accept reader shape {value,index,name}; value is authoritative and inconsistent name/index metadata warns.
+Arrays require a JArray and replace the whole collection; shrink discards removed elements with a warning, grown elements start from type defaults, and nested JObject values are partial merges that preserve omitted children.
+Read output may be truncated by the global element budget; check arrayMetadata before writing it back, and note that shrink emits a warning.
+Direct Array.size writes accept integers from 0 through 10000; growth warns and follows Unity's direct resize behavior.
+If object-reference read-back verification fails, collected reference writes are restored where safe; non-reference children and array-size changes remain applied, and a missing-reference previous value is never restored by writing null.
+Direct writes do not support Character, AnimationCurve, Gradient, ExposedReference, FixedBufferSize, Vector2Int, Vector3Int, RectInt, BoundsInt, ManagedReference, or Hash128.
+Direct m_PersistentCalls writes are allowed with a warning because UnityEvent mode derivation is not validated; prefer wire_unity_event.
 For object references, use asset path string, instance ID number, or structured {instanceId: N} / {assetPath: "..."} / {objectPath: "Path/To/Object"}.`;
 
 const writeParamsSchema = z.object({

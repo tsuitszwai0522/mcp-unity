@@ -42,6 +42,25 @@ describe('update_component field write results', () => {
     expect(description).toContain("unmentioned components are the type's default");
   });
 
+  it('discloses reader-shaped enum conversion semantics', () => {
+    registerUpdateComponentTool(mockServer, mockMcpUnity, mockLogger);
+
+    const description = (mockServerTool.mock.calls[0] as any)[1] as string;
+    expect(description).toContain('reader-shape {value,index,name}');
+    expect(description).toContain('value is authoritative');
+    expect(description).toContain('mismatched name or index metadata produces a warning');
+  });
+
+  it('discloses resolution order and path-specific array growth semantics', () => {
+    registerUpdateComponentTool(mockServer, mockMcpUnity, mockLogger);
+
+    const description = (mockServerTool.mock.calls[0] as any)[1] as string;
+    expect(description).toContain('reflection fields/properties before SerializedProperty fallback');
+    expect(description).toContain('reflection converter rejects a partial struct in a newly grown slot');
+    expect(description).toContain('SerializedProperty fallback starts grown elements from type defaults');
+    expect(description).toContain('array shrink discards removed elements with a warning');
+  });
+
   it('returns isError with failedFields preserved in payload for field-level failure', async () => {
     const failedFields = [{
       field: 'enabled',
