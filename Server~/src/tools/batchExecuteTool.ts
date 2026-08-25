@@ -40,6 +40,7 @@ interface OperationResult {
   success: boolean;
   result?: any;
   error?: string;
+  errorCode?: string;
 }
 
 /**
@@ -150,6 +151,23 @@ async function batchExecuteHandler(
 
   // Build structured results with full tool data for each operation
   const structuredResults = response.results?.map((res: OperationResult) => {
+    if (res.result?.type === 'image') {
+      const genericError =
+        'Image results are not supported in batch_execute; call the image-producing tool directly.';
+      const unitySideEffect = typeof res.error === 'string'
+        && res.error.includes('gameViewWindowCreated=true')
+        ? res.error
+        : res.result.gameViewWindowCreated === true
+          ? 'Side effect: gameViewWindowCreated=true; Unity Undo cannot close this editor window.'
+          : undefined;
+      return {
+        id: res.id,
+        status: 'Error',
+        errorCode: 'IMAGE_RESULT_NOT_SUPPORTED_IN_BATCH',
+        error: unitySideEffect ? `${genericError} ${unitySideEffect}` : genericError
+      };
+    }
+
     const entry: Record<string, any> = {
       id: res.id,
       status: res.success ? 'OK' : 'Error'
@@ -160,8 +178,16 @@ async function batchExecuteHandler(
     if (!res.success && res.error) {
       entry.error = res.error;
     }
+    if (!res.success && res.errorCode) {
+      entry.errorCode = res.errorCode;
+    }
     return entry;
   }) ?? [];
+
+  if (structuredResults.some((result) =>
+    result.errorCode === 'IMAGE_RESULT_NOT_SUPPORTED_IN_BATCH')) {
+    resultText += '\n\nIMAGE_RESULT_NOT_SUPPORTED_IN_BATCH: Call the image-producing tool directly.';
+  }
 
   // Include full results JSON so AI clients can access each tool's return data
   const structuredPayload = {

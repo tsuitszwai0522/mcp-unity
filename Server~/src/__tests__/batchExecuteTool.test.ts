@@ -257,6 +257,80 @@ describe('Batch Execute Tool', () => {
       });
     });
 
+    it('preserves Unity image-batch error codes without image payload data', async () => {
+      mockSendRequest.mockResolvedValue({
+        success: false,
+        type: 'text',
+        message: 'Batch execution stopped on error.',
+        results: [
+          {
+            index: 0,
+            id: 'capture',
+            success: false,
+            errorCode: 'IMAGE_RESULT_NOT_SUPPORTED_IN_BATCH',
+            error: 'Call screenshot_camera directly.'
+          }
+        ],
+        summary: { total: 1, succeeded: 0, failed: 1, executed: 1 }
+      });
+
+      const result = await toolHandler({
+        operations: [{ tool: 'screenshot_camera', params: {}, id: 'capture' }]
+      });
+
+      const payloadText = result.content[1].text;
+      const payload = JSON.parse(payloadText);
+      expect(result.isError).toBe(true);
+      expect(payload.results[0]).toMatchObject({
+        id: 'capture',
+        status: 'Error',
+        errorCode: 'IMAGE_RESULT_NOT_SUPPORTED_IN_BATCH'
+      });
+      expect(payloadText).not.toContain('data:image');
+      expect(payloadText).not.toContain('iVBOR');
+    });
+
+    it('defensively strips unexpected image-shaped Unity batch results', async () => {
+      mockSendRequest.mockResolvedValue({
+        success: true,
+        type: 'text',
+        message: 'Successfully executed 1/1 operations.',
+        results: [
+          {
+            index: 0,
+            id: 'legacy-capture',
+            success: true,
+            error: 'Side effect: gameViewWindowCreated=true; Unity Undo cannot close this editor window.',
+            result: {
+              success: true,
+              type: 'image',
+              mimeType: 'image/png',
+              data: 'iVBORw0KGgo=',
+              gameViewWindowCreated: true
+            }
+          }
+        ],
+        summary: { total: 1, succeeded: 1, failed: 0, executed: 1 }
+      });
+
+      const result = await toolHandler({
+        operations: [{ tool: 'screenshot_game_view', params: {}, id: 'legacy-capture' }]
+      });
+
+      const payloadText = result.content[1].text;
+      const payload = JSON.parse(payloadText);
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain('IMAGE_RESULT_NOT_SUPPORTED_IN_BATCH');
+      expect(payload.results[0]).toMatchObject({
+        id: 'legacy-capture',
+        status: 'Error',
+        errorCode: 'IMAGE_RESULT_NOT_SUPPORTED_IN_BATCH',
+        error: expect.stringContaining('gameViewWindowCreated=true')
+      });
+      expect(payload.results[0].error).toContain('Unity Undo');
+      expect(payloadText).not.toContain('iVBORw0KGgo=');
+    });
+
     it('should preserve operation ids in request', async () => {
       mockSendRequest.mockResolvedValue({
         success: true,

@@ -10,9 +10,14 @@ import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 const gameViewToolName = 'screenshot_game_view';
 const gameViewToolDescription = 'Captures a screenshot from the Game View, reflecting what the player sees. Set force_focus=true to force-focus the Game View tab before capture. While Prefab contents are open, failed Game View capture never falls back to a loaded scene Main Camera.';
 
+function screenshotDimension(name: 'width' | 'height') {
+  const message = `Screenshot ${name} must be between 1 and 4096 pixels (maximum 4096)`;
+  return z.number().int().min(1, message).max(4096, message);
+}
+
 const gameViewParamsSchema = z.object({
-  width: z.number().int().optional().default(960).describe('Screenshot width in pixels'),
-  height: z.number().int().optional().default(540).describe('Screenshot height in pixels'),
+  width: screenshotDimension('width').optional().default(960).describe('Screenshot width in pixels (1-4096)'),
+  height: screenshotDimension('height').optional().default(540).describe('Screenshot height in pixels (1-4096)'),
   force_focus: z
     .boolean()
     .optional()
@@ -25,8 +30,8 @@ const sceneViewToolName = 'screenshot_scene_view';
 const sceneViewToolDescription = 'Captures a screenshot from the Scene View, reflecting the editor camera perspective';
 
 const sceneViewParamsSchema = z.object({
-  width: z.number().int().optional().default(960).describe('Screenshot width in pixels'),
-  height: z.number().int().optional().default(540).describe('Screenshot height in pixels')
+  width: screenshotDimension('width').optional().default(960).describe('Screenshot width in pixels (1-4096)'),
+  height: screenshotDimension('height').optional().default(540).describe('Screenshot height in pixels (1-4096)')
 });
 
 // --- screenshot_camera ---
@@ -37,8 +42,8 @@ const cameraToolDescription = 'Captures a screenshot from a specific Camera in t
 const cameraParamsSchema = z.object({
   cameraPath: z.string().optional().describe('Camera GameObject path in the active scene or Prefab context; omitted uses the context-specific default Camera described by the tool'),
   cameraInstanceId: z.number().int().optional().describe('Camera GameObject instance ID'),
-  width: z.number().int().optional().default(960).describe('Screenshot width in pixels'),
-  height: z.number().int().optional().default(540).describe('Screenshot height in pixels')
+  width: screenshotDimension('width').optional().default(960).describe('Screenshot width in pixels (1-4096)'),
+  height: screenshotDimension('height').optional().default(540).describe('Screenshot height in pixels (1-4096)')
 });
 
 /**
@@ -57,12 +62,64 @@ async function screenshotHandler(mcpUnity: McpUnity, toolName: string, params: a
     );
   }
 
+  if (typeof response.data !== 'string') {
+    throw new McpUnityError(
+      ErrorType.TOOL_EXECUTION,
+      `Invalid screenshot response from ${toolName}: expected image data to be a string`
+    );
+  }
+
+  const message = response.message || `Screenshot captured via ${toolName}`;
+  const hasRequiredUnityMetadata = typeof response.capturePath === 'string'
+    && typeof response.degraded === 'boolean';
+  const messageHasCapturePath = message.includes('capturePath=');
+  const messageHasDegraded = message.includes('degraded=');
+  let text = message;
+
+  if (!messageHasCapturePath || !messageHasDegraded) {
+    const diagnostics: string[] = [];
+    let unityMetadataAbsent = false;
+    if (!messageHasCapturePath) {
+      if (typeof response.capturePath === 'string') {
+        diagnostics.push(`capturePath=${response.capturePath}`);
+      } else {
+        diagnostics.push('capturePath=unknown');
+        unityMetadataAbsent = true;
+      }
+    }
+    if (!messageHasDegraded) {
+      if (typeof response.degraded === 'boolean') {
+        diagnostics.push(`degraded=${response.degraded}`);
+      } else {
+        diagnostics.push('degraded=unknown');
+        unityMetadataAbsent = true;
+      }
+    }
+    if (hasRequiredUnityMetadata
+      && typeof response.degradedReason === 'string'
+      && !message.includes('degradedReason=')) {
+      diagnostics.push(`degradedReason=${response.degradedReason}`);
+    }
+    if (hasRequiredUnityMetadata
+      && typeof response.gameViewWindowCreated === 'boolean'
+      && !message.includes('gameViewWindowCreated=')) {
+      diagnostics.push(`gameViewWindowCreated=${response.gameViewWindowCreated}`);
+    }
+    if (unityMetadataAbsent) {
+      diagnostics.push('(unity-side metadata absent)');
+    }
+    text += `\n${diagnostics.join(' ')}`;
+  }
+
   return {
-    content: [{
-      type: 'image',
-      mimeType: response.mimeType || 'image/png',
-      data: response.data
-    }]
+    content: [
+      { type: 'text' as const, text },
+      {
+        type: 'image' as const,
+        mimeType: response.mimeType || 'image/png',
+        data: response.data
+      }
+    ]
   };
 }
 

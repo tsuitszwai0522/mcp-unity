@@ -14,6 +14,35 @@ namespace McpUnity.Tools
     /// </summary>
     public class ScreenshotGameViewTool : McpToolBase
     {
+        private static Func<Type> _resolveGameViewType =
+            () => typeof(Editor).Assembly.GetType("UnityEditor.GameView");
+        private static Func<Type, System.Reflection.MethodInfo> _resolveRenderViewMethod =
+            type => type.BaseType?.GetMethod(
+                "RenderView",
+                System.Reflection.BindingFlags.NonPublic
+                    | System.Reflection.BindingFlags.Instance);
+        private static Func<System.Reflection.MethodInfo, EditorWindow, RenderTexture>
+            _invokeRenderView = (method, window) =>
+                method.Invoke(window, new object[] { Vector2.zero, false }) as RenderTexture;
+        private static Func<Texture2D> _captureScreenshotAsTexture =
+            ScreenCapture.CaptureScreenshotAsTexture;
+        private static Func<Camera> _findMainCamera = () => Camera.main;
+        private static Func<Tuple<JObject, GameObject>> _resolvePrefabRoot = () =>
+        {
+            JObject error = PrefabSessionScope.TryGetPrefabRoot(out GameObject root);
+            return Tuple.Create(error, root);
+        };
+        private static Func<Type, bool> _hasExistingEditorWindow =
+            type => UnityEngine.Resources.FindObjectsOfTypeAll(type).Length > 0;
+        private static Func<Type, bool, EditorWindow> _getGameViewWindow =
+            (type, focus) => EditorWindow.GetWindow(type, false, null, focus);
+
+        private sealed class CaptureDiagnosticsState
+        {
+            public string DegradedReason;
+            public bool GameViewWindowCreated;
+        }
+
         public ScreenshotGameViewTool()
         {
             Name = "screenshot_game_view";
@@ -31,12 +60,21 @@ namespace McpUnity.Tools
                 int width = parameters?["width"]?.ToObject<int>() ?? 960;
                 int height = parameters?["height"]?.ToObject<int>() ?? 540;
                 bool forceFocus = parameters?["force_focus"]?.ToObject<bool?>() ?? false;
+                JObject dimensionError = ScreenshotHelper.ValidateDimensions(width, height);
+                if (dimensionError != null)
+                {
+                    tcs.TrySetResult(dimensionError);
+                    return;
+                }
 
-                var gameViewType = typeof(Editor).Assembly.GetType("UnityEditor.GameView");
+                bool gameViewWindowCreated = false;
+                var gameViewType = _resolveGameViewType();
                 if (gameViewType != null)
                 {
+                    bool hadExistingWindow = _hasExistingEditorWindow(gameViewType);
                     // focus flag on GetWindow controls whether the window is brought to front + focused
-                    var gameView = EditorWindow.GetWindow(gameViewType, false, null, forceFocus);
+                    var gameView = _getGameViewWindow(gameViewType, forceFocus);
+                    gameViewWindowCreated = !hadExistingWindow && gameView != null;
                     if (forceFocus && gameView != null)
                     {
                         gameView.Focus();
@@ -59,7 +97,8 @@ namespace McpUnity.Tools
                         EditorApplication.update -= handler;
                         try
                         {
-                            tcs.TrySetResult(CaptureGameView(width, height));
+                            tcs.TrySetResult(CaptureGameView(
+                                width, height, gameViewWindowCreated));
                         }
                         catch (Exception ex)
                         {
@@ -73,7 +112,7 @@ namespace McpUnity.Tools
                 }
                 else
                 {
-                    tcs.TrySetResult(CaptureGameView(width, height));
+                    tcs.TrySetResult(CaptureGameView(width, height, gameViewWindowCreated));
                 }
             }
             catch (Exception ex)
@@ -85,19 +124,58 @@ namespace McpUnity.Tools
             }
         }
 
-        private static JObject CaptureGameView(int width, int height)
+        private static JObject CaptureGameView(
+            int width,
+            int height,
+            bool gameViewWindowCreated)
+        {
+            var diagnostics = new CaptureDiagnosticsState
+            {
+                GameViewWindowCreated = gameViewWindowCreated
+            };
+
+            try
+            {
+                return CaptureGameViewCore(width, height, diagnostics);
+            }
+            catch (Exception ex)
+            {
+                return AddFailureDiagnostics(
+                    McpUnitySocketHandler.CreateErrorResponse(
+                        $"Error capturing Game View screenshot: {ex.Message}",
+                        "tool_execution_error"),
+                    diagnostics.DegradedReason,
+                    diagnostics.GameViewWindowCreated);
+            }
+        }
+
+        private static JObject CaptureGameViewCore(
+            int width,
+            int height,
+            CaptureDiagnosticsState diagnostics)
         {
             // Primary: capture the real composited Game View via the editor's own render path
             // (PlayModeView.RenderView). This is focus-independent (no need to bring the Game View tab to
             // front) and DOES include screen-space-camera overlay UI — unlike camera.Render() / a Standard
             // render request, which skip the URP overlay stack, and unlike ScreenCapture which samples
             // whichever editor view currently has focus (often the Scene View).
-            var viaRenderView = TryCaptureViaRenderView(width, height);
-            if (viaRenderView != null)
-                return viaRenderView;
+            Tuple<JObject, string, bool> renderViewAttempt =
+                TryCaptureViaRenderView(width, height);
+            diagnostics.GameViewWindowCreated |= renderViewAttempt.Item3;
+            if (renderViewAttempt.Item1 != null)
+            {
+                return ScreenshotHelper.AddCaptureMetadata(
+                    renderViewAttempt.Item1,
+                    "render_view",
+                    false,
+                    null,
+                    diagnostics.GameViewWindowCreated);
+            }
+
+            diagnostics.DegradedReason = renderViewAttempt.Item2;
 
             // Fallback: ScreenCapture (works best during Play Mode; samples the focused view's backbuffer)
-            var screenshot = ScreenCapture.CaptureScreenshotAsTexture();
+            var screenshot = _captureScreenshotAsTexture();
             if (screenshot != null)
             {
                 try
@@ -111,14 +189,18 @@ namespace McpUnity.Tools
 
                     McpLogger.LogInfo($"Game View screenshot captured ({width}x{height})");
 
-                    return new JObject
+                    return ScreenshotHelper.AddCaptureMetadata(new JObject
                     {
                         ["success"] = true,
                         ["type"] = "image",
                         ["mimeType"] = "image/png",
                         ["data"] = base64,
                         ["message"] = $"Game View screenshot captured ({width}x{height})"
-                    };
+                    },
+                    "screen_capture",
+                    true,
+                    diagnostics.DegradedReason,
+                    diagnostics.GameViewWindowCreated);
                 }
                 finally
                 {
@@ -126,31 +208,55 @@ namespace McpUnity.Tools
                 }
             }
 
-            JObject scopeError = PrefabSessionScope.TryGetPrefabRoot(out GameObject prefabRoot);
+            diagnostics.DegradedReason = string.IsNullOrEmpty(diagnostics.DegradedReason)
+                ? "screen_capture_returned_null"
+                : diagnostics.DegradedReason + ";screen_capture_returned_null";
+
+            Tuple<JObject, GameObject> prefabScope = _resolvePrefabRoot();
+            JObject scopeError = prefabScope.Item1;
+            GameObject prefabRoot = prefabScope.Item2;
             if (scopeError != null)
-                return scopeError;
+            {
+                return AddFailureDiagnostics(
+                    scopeError,
+                    diagnostics.DegradedReason,
+                    diagnostics.GameViewWindowCreated);
+            }
             if (prefabRoot != null)
             {
-                return McpUnitySocketHandler.CreateErrorResponse(
-                    $"Failed to capture the Game View while Prefab contents " +
-                    $"'{PrefabEditingService.AssetPath}' (root '{prefabRoot.name}') are open. " +
-                    "screenshot_game_view does not fall back to a loaded scene Main Camera " +
-                    "during a Prefab editing session.",
-                    "tool_execution_error");
+                return AddFailureDiagnostics(
+                    McpUnitySocketHandler.CreateErrorResponse(
+                        $"Failed to capture the Game View while Prefab contents " +
+                        $"'{PrefabEditingService.AssetPath}' (root '{prefabRoot.name}') are open. " +
+                        "screenshot_game_view does not fall back to a loaded scene Main Camera " +
+                        "during a Prefab editing session.",
+                        "tool_execution_error"),
+                    diagnostics.DegradedReason,
+                    diagnostics.GameViewWindowCreated);
             }
 
             // Fallback: render from Main Camera (Edit Mode when Game View isn't actively rendering)
-            Camera cam = Camera.main;
+            Camera cam = _findMainCamera();
             if (cam == null)
             {
-                return McpUnitySocketHandler.CreateErrorResponse(
-                    "Failed to capture Game View screenshot. ScreenCapture returned null and no Main Camera found as fallback.",
-                    "tool_execution_error"
-                );
+                return AddFailureDiagnostics(
+                    McpUnitySocketHandler.CreateErrorResponse(
+                        "Failed to capture Game View screenshot. ScreenCapture returned null and no Main Camera found as fallback.",
+                        "tool_execution_error"),
+                    diagnostics.DegradedReason,
+                    diagnostics.GameViewWindowCreated);
             }
 
             McpLogger.LogInfo("ScreenCapture unavailable, falling back to Main Camera render");
-            return ScreenshotHelper.CaptureFromCamera(cam, width, height, "Game View (via Main Camera)");
+            return ScreenshotHelper.CaptureFromCamera(
+                cam,
+                width,
+                height,
+                "Game View (via Main Camera)",
+                "main_camera_fallback",
+                true,
+                diagnostics.DegradedReason,
+                diagnostics.GameViewWindowCreated);
         }
 
         /// <summary>
@@ -159,33 +265,54 @@ namespace McpUnity.Tools
         /// ScreenSpace-Camera canvases) — something no off-screen camera render can do, because URP overlay
         /// cameras only composite into the live Game View swapchain. Focus-independent (RenderView renders on
         /// demand regardless of which editor tab is active). Reflection because RenderView is protected editor
-        /// API. Returns null (caller falls back) when the Game View / method can't be resolved.
+        /// API. Returns the image result, an unavailable reason, and whether it created a Game View window.
         /// </summary>
-        private static JObject TryCaptureViaRenderView(int width, int height)
+        private static Tuple<JObject, string, bool> TryCaptureViaRenderView(int width, int height)
         {
             var previousActiveRT = RenderTexture.active;
             RenderTexture dst = null;
             Texture2D tex = null;
+            bool gameViewWindowCreated = false;
             try
             {
-                var gameViewType = typeof(Editor).Assembly.GetType("UnityEditor.GameView");
+                var gameViewType = _resolveGameViewType();
                 if (gameViewType == null)
-                    return null;
+                {
+                    return Tuple.Create<JObject, string, bool>(
+                        null,
+                        "render_view_unavailable:gameview_type_missing",
+                        false);
+                }
 
-                var gameView = EditorWindow.GetWindow(gameViewType, false, null, false);
+                bool hadExistingWindow = _hasExistingEditorWindow(gameViewType);
+                var gameView = _getGameViewWindow(gameViewType, false);
+                gameViewWindowCreated = !hadExistingWindow && gameView != null;
                 if (gameView == null)
-                    return null;
+                {
+                    return Tuple.Create<JObject, string, bool>(
+                        null,
+                        "render_view_unavailable:window_null",
+                        false);
+                }
 
                 // UnityEditor.PlayModeView.RenderView(Vector2 mousePosition, bool clearTexture) → RenderTexture
-                var playModeViewType = gameViewType.BaseType;
-                var renderViewMethod = playModeViewType?.GetMethod("RenderView",
-                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                var renderViewMethod = _resolveRenderViewMethod(gameViewType);
                 if (renderViewMethod == null)
-                    return null;
+                {
+                    return Tuple.Create<JObject, string, bool>(
+                        null,
+                        "render_view_unavailable:method_missing",
+                        gameViewWindowCreated);
+                }
 
-                var srcRt = renderViewMethod.Invoke(gameView, new object[] { Vector2.zero, false }) as RenderTexture;
+                var srcRt = _invokeRenderView(renderViewMethod, gameView);
                 if (srcRt == null)
-                    return null;
+                {
+                    return Tuple.Create<JObject, string, bool>(
+                        null,
+                        "render_view_unavailable:rendertexture_null",
+                        gameViewWindowCreated);
+                }
 
                 dst = RenderTexture.GetTemporary(width, height, 0, RenderTextureFormat.ARGB32);
                 // RenderView's RenderTexture has a flipped Y origin vs Texture2D.ReadPixels → blit with a
@@ -202,19 +329,27 @@ namespace McpUnity.Tools
 
                 McpLogger.LogInfo($"Game View screenshot via PlayModeView.RenderView ({width}x{height})");
 
-                return new JObject
-                {
-                    ["success"] = true,
-                    ["type"] = "image",
-                    ["mimeType"] = "image/png",
-                    ["data"] = base64,
-                    ["message"] = $"Game View screenshot captured via RenderView ({width}x{height})"
-                };
+                return Tuple.Create<JObject, string, bool>(
+                    new JObject
+                    {
+                        ["success"] = true,
+                        ["type"] = "image",
+                        ["mimeType"] = "image/png",
+                        ["data"] = base64,
+                        ["message"] = $"Game View screenshot captured via RenderView ({width}x{height})"
+                    },
+                    null,
+                    gameViewWindowCreated);
             }
             catch (Exception ex)
             {
-                McpLogger.LogWarning($"GameView RenderView capture failed, falling back: {ex.Message}");
-                return null;
+                Exception cause = GetRenderViewFailureCause(ex);
+                McpLogger.LogWarning(
+                    $"GameView RenderView capture failed, falling back: {cause.Message}");
+                return Tuple.Create<JObject, string, bool>(
+                    null,
+                    $"render_view_unavailable:exception:{cause.GetType().Name}",
+                    gameViewWindowCreated);
             }
             finally
             {
@@ -225,6 +360,37 @@ namespace McpUnity.Tools
                     RenderTexture.ReleaseTemporary(dst);
             }
         }
+
+        private static Exception GetRenderViewFailureCause(Exception exception)
+        {
+            if (!(exception is System.Reflection.TargetInvocationException))
+                return exception;
+
+            Exception cause = exception;
+            while (cause.InnerException != null)
+                cause = cause.InnerException;
+            return cause;
+        }
+
+        private static JObject AddFailureDiagnostics(
+            JObject errorResponse,
+            string degradedReason,
+            bool gameViewWindowCreated)
+        {
+            if (!(errorResponse?["error"] is JObject error))
+                return errorResponse;
+
+            string diagnostics =
+                $"degraded=true degradedReason={degradedReason}";
+            if (gameViewWindowCreated)
+                diagnostics += " gameViewWindowCreated=true";
+
+            string message = error["message"]?.ToString();
+            error["message"] = string.IsNullOrEmpty(message)
+                ? diagnostics
+                : $"{message} [{diagnostics}]";
+            return errorResponse;
+        }
     }
 
     /// <summary>
@@ -232,6 +398,17 @@ namespace McpUnity.Tools
     /// </summary>
     public class ScreenshotSceneViewTool : McpToolBase
     {
+        private static Func<SceneView> _getLastActiveSceneView =
+            () => SceneView.lastActiveSceneView;
+        private static Func<SceneView, Camera> _getSceneViewCamera =
+            sceneView => sceneView.camera;
+        private static Action<SceneView> _frameSelected = sceneView => sceneView.FrameSelected();
+        private static Action<SceneView> _repaintSceneView = sceneView => sceneView.Repaint();
+        private static Action<EditorApplication.CallbackFunction> _subscribeToEditorUpdate =
+            handler => EditorApplication.update += handler;
+        private static Action<EditorApplication.CallbackFunction> _unsubscribeFromEditorUpdate =
+            handler => EditorApplication.update -= handler;
+
         public ScreenshotSceneViewTool()
         {
             Name = "screenshot_scene_view";
@@ -245,8 +422,14 @@ namespace McpUnity.Tools
             {
                 int width = parameters?["width"]?.ToObject<int>() ?? 960;
                 int height = parameters?["height"]?.ToObject<int>() ?? 540;
+                JObject dimensionError = ScreenshotHelper.ValidateDimensions(width, height);
+                if (dimensionError != null)
+                {
+                    tcs.TrySetResult(dimensionError);
+                    return;
+                }
 
-                SceneView sceneView = SceneView.lastActiveSceneView;
+                SceneView sceneView = _getLastActiveSceneView();
                 if (sceneView == null)
                 {
                     tcs.TrySetResult(McpUnitySocketHandler.CreateErrorResponse(
@@ -263,19 +446,19 @@ namespace McpUnity.Tools
                     && PrefabEditingService.PrefabRoot != null)
                 {
                     Selection.activeGameObject = PrefabEditingService.PrefabRoot;
-                    sceneView.FrameSelected();
-                    sceneView.Repaint();
+                    _frameSelected(sceneView);
+                    _repaintSceneView(sceneView);
                     needsDelayedCapture = true;
                 }
 
                 if (needsDelayedCapture)
                 {
                     // Delay one frame to allow Repaint to complete before capturing
-                    EditorApplication.delayCall += () =>
+                    ScheduleAfterEditorFrames(1, () =>
                     {
                         try
                         {
-                            Camera sceneCamera = sceneView.camera;
+                            Camera sceneCamera = _getSceneViewCamera(sceneView);
                             if (sceneCamera == null)
                             {
                                 tcs.TrySetResult(McpUnitySocketHandler.CreateErrorResponse(
@@ -284,7 +467,13 @@ namespace McpUnity.Tools
                                 ));
                                 return;
                             }
-                            tcs.TrySetResult(ScreenshotHelper.CaptureFromCamera(sceneCamera, width, height, "Scene View"));
+                            tcs.TrySetResult(ScreenshotHelper.CaptureFromCamera(
+                                sceneCamera,
+                                width,
+                                height,
+                                "Scene View",
+                                "scene_view_camera",
+                                false));
                         }
                         catch (Exception ex)
                         {
@@ -293,11 +482,11 @@ namespace McpUnity.Tools
                                 "tool_execution_error"
                             ));
                         }
-                    };
+                    });
                 }
                 else
                 {
-                    Camera sceneCamera = sceneView.camera;
+                    Camera sceneCamera = _getSceneViewCamera(sceneView);
                     if (sceneCamera == null)
                     {
                         tcs.TrySetResult(McpUnitySocketHandler.CreateErrorResponse(
@@ -306,7 +495,13 @@ namespace McpUnity.Tools
                         ));
                         return;
                     }
-                    tcs.TrySetResult(ScreenshotHelper.CaptureFromCamera(sceneCamera, width, height, "Scene View"));
+                    tcs.TrySetResult(ScreenshotHelper.CaptureFromCamera(
+                        sceneCamera,
+                        width,
+                        height,
+                        "Scene View",
+                        "scene_view_camera",
+                        false));
                 }
             }
             catch (Exception ex)
@@ -316,6 +511,20 @@ namespace McpUnity.Tools
                     "tool_execution_error"
                 ));
             }
+        }
+
+        private static void ScheduleAfterEditorFrames(int framesToWait, Action action)
+        {
+            EditorApplication.CallbackFunction handler = null;
+            handler = () =>
+            {
+                if (--framesToWait > 0)
+                    return;
+
+                _unsubscribeFromEditorUpdate(handler);
+                action();
+            };
+            _subscribeToEditorUpdate(handler);
         }
     }
 
@@ -340,12 +549,17 @@ namespace McpUnity.Tools
                 int height = parameters?["height"]?.ToObject<int>() ?? 540;
                 string cameraPath = parameters?["cameraPath"]?.ToObject<string>();
                 int? cameraInstanceId = parameters?["cameraInstanceId"]?.ToObject<int?>();
+                JObject dimensionError = ScreenshotHelper.ValidateDimensions(width, height);
+                if (dimensionError != null)
+                    return dimensionError;
 
                 Camera cam = null;
                 JObject scopeError;
+                string capturePath;
 
                 if (cameraInstanceId.HasValue)
                 {
+                    capturePath = "explicit_camera";
                     scopeError = PrefabSessionScope.TryResolveGameObject(
                         cameraInstanceId, null, out GameObject obj);
                     if (scopeError != null) return scopeError;
@@ -354,6 +568,7 @@ namespace McpUnity.Tools
                 }
                 else if (!string.IsNullOrEmpty(cameraPath))
                 {
+                    capturePath = "explicit_camera";
                     scopeError = PrefabSessionScope.TryResolveGameObject(
                         null, cameraPath, out GameObject obj);
                     if (scopeError != null) return scopeError;
@@ -367,10 +582,12 @@ namespace McpUnity.Tools
 
                     if (prefabRoot == null)
                     {
+                        capturePath = "camera_main";
                         cam = Camera.main;
                     }
                     else
                     {
+                        capturePath = "prefab_main_camera";
                         cam = FindMainCameraInPrefab(prefabRoot);
                         if (cam == null)
                         {
@@ -394,7 +611,13 @@ namespace McpUnity.Tools
                     );
                 }
 
-                return ScreenshotHelper.CaptureFromCamera(cam, width, height, cam.gameObject.name);
+                return ScreenshotHelper.CaptureFromCamera(
+                    cam,
+                    width,
+                    height,
+                    cam.gameObject.name,
+                    capturePath,
+                    false);
             }
             catch (Exception ex)
             {
@@ -436,10 +659,63 @@ namespace McpUnity.Tools
     /// </summary>
     internal static class ScreenshotHelper
     {
+        private const int MaxDimension = 4096;
+
+        public static JObject ValidateDimensions(int width, int height)
+        {
+            if (width >= 1 && width <= MaxDimension && height >= 1 && height <= MaxDimension)
+                return null;
+
+            return McpUnitySocketHandler.CreateErrorResponse(
+                $"Screenshot width and height must each be between 1 and {MaxDimension} pixels " +
+                $"(maximum {MaxDimension}). Received width={width}, height={height}.",
+                "validation_error");
+        }
+
+        public static JObject AddCaptureMetadata(
+            JObject response,
+            string capturePath,
+            bool degraded,
+            string degradedReason = null,
+            bool gameViewWindowCreated = false)
+        {
+            response["capturePath"] = capturePath;
+            response["degraded"] = degraded;
+            if (degraded && !string.IsNullOrEmpty(degradedReason))
+                response["degradedReason"] = degradedReason;
+            else
+                response.Remove("degradedReason");
+
+            string diagnostics =
+                $"capturePath={capturePath} degraded={degraded.ToString().ToLowerInvariant()}";
+            if (degraded && !string.IsNullOrEmpty(degradedReason))
+                diagnostics += $" degradedReason={degradedReason}";
+
+            if (gameViewWindowCreated)
+            {
+                response["gameViewWindowCreated"] = true;
+                diagnostics += " gameViewWindowCreated=true";
+            }
+
+            string message = response["message"]?.ToString();
+            response["message"] = string.IsNullOrEmpty(message)
+                ? diagnostics
+                : $"{message} [{diagnostics}]";
+            return response;
+        }
+
         /// <summary>
         /// Captures a screenshot from a given camera using RenderTexture
         /// </summary>
-        public static JObject CaptureFromCamera(Camera camera, int width, int height, string cameraName)
+        public static JObject CaptureFromCamera(
+            Camera camera,
+            int width,
+            int height,
+            string cameraName,
+            string capturePath,
+            bool degraded,
+            string degradedReason = null,
+            bool gameViewWindowCreated = false)
         {
             var previousTargetTexture = camera.targetTexture;
             var previousActiveRT = RenderTexture.active;
@@ -462,14 +738,14 @@ namespace McpUnity.Tools
 
                 McpLogger.LogInfo($"{cameraName} screenshot captured ({width}x{height})");
 
-                return new JObject
+                return AddCaptureMetadata(new JObject
                 {
                     ["success"] = true,
                     ["type"] = "image",
                     ["mimeType"] = "image/png",
                     ["data"] = base64,
                     ["message"] = $"{cameraName} screenshot captured ({width}x{height})"
-                };
+                }, capturePath, degraded, degradedReason, gameViewWindowCreated);
             }
             finally
             {

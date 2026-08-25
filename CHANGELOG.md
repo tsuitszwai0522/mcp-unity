@@ -4,7 +4,27 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [fork-1.12.0] - 2026-08-25
+
+### Added
+
+- Screenshot image responses now disclose their `capturePath`, degradation state and reason, and
+  whether the request created a Game View window; the Node tools emit these diagnostics as text
+  before the MCP image content block and explicitly identify older Unity packages that omit them.
+
+### Fixed
+
+- Bounded screenshot dimensions to 1–4096 on both Node and Unity, rejected malformed non-string
+  image data, and made image-producing operations fail loudly in `batch_execute` without embedding
+  base64 payloads.
+- Scene View capture after Prefab framing now completes through an editor-update frame counter
+  instead of a delay callback that can starve in headless MCP contexts.
+- Total Game View capture failures now retain RenderView and ScreenCapture diagnostics inside the
+  wire-visible error message, and batch image failures disclose created Game View windows before
+  discarding the unsupported image payload.
+- Game View exceptions now retain accumulated fallback diagnostics and unwrap reflected RenderView
+  failures to their root exception type; Node preserves message metadata precedence and batch window
+  side-effect disclosures across mixed-version defensive paths.
 
 ## [fork-1.11.0] - 2026-08-22
 

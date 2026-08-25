@@ -236,6 +236,36 @@ namespace McpUnity.Tools
                 }
                 else if (toolResult != null)
                 {
+                    if (toolResult["type"]?.ToString() == "image")
+                    {
+                        const string imageErrorCode = "IMAGE_RESULT_NOT_SUPPORTED_IN_BATCH";
+                        string imageError =
+                            $"{imageErrorCode}: Tool '{toolName}' returned image content, which " +
+                            $"batch_execute cannot transport. Call '{toolName}' directly.";
+                        if (toolResult["gameViewWindowCreated"]?.ToObject<bool?>() == true)
+                        {
+                            imageError += " Side effect: gameViewWindowCreated=true; Unity Undo " +
+                                "cannot close this editor window.";
+                        }
+                        results.Add(CreateOperationResult(
+                            i,
+                            operationId,
+                            false,
+                            null,
+                            imageError,
+                            imageErrorCode));
+                        failed++;
+
+                        if (stopOnError)
+                        {
+                            RevertIfAtomic(atomic, undoGroup);
+                            break;
+                        }
+
+                        yield return null;
+                        continue;
+                    }
+
                     // Check if the result indicates an error
                     bool isError = toolResult["error"] != null;
                     bool isSuccess = toolResult["success"]?.ToObject<bool?>() ?? !isError;
@@ -325,7 +355,13 @@ namespace McpUnity.Tools
             }
         }
 
-        private JObject CreateOperationResult(int index, string id, bool success, JObject result, string error)
+        private JObject CreateOperationResult(
+            int index,
+            string id,
+            bool success,
+            JObject result,
+            string error,
+            string errorCode = null)
         {
             var operationResult = new JObject
             {
@@ -342,6 +378,8 @@ namespace McpUnity.Tools
             if (!success)
             {
                 operationResult["error"] = error ?? "Unknown error";
+                if (!string.IsNullOrEmpty(errorCode))
+                    operationResult["errorCode"] = errorCode;
             }
 
             return operationResult;

@@ -18,6 +18,10 @@ namespace McpUnity.Tests
         private BatchExecuteTool _batchTool;
         private GameObject _testObject;
 
+        private sealed class BatchTestEditorWindow : EditorWindow
+        {
+        }
+
         [SetUp]
         public void SetUp()
         {
@@ -218,6 +222,167 @@ namespace McpUnity.Tests
             Assert.AreEqual(1, results.Count);
             Assert.IsFalse(results[0]["success"]?.ToObject<bool>() ?? true);
             Assert.IsTrue(results[0]["error"]?.ToString().Contains("Unknown tool"));
+        }
+
+        [UnityTest]
+        public IEnumerator BatchExecuteTool_WithImageResult_FailsWithoutBase64Payload()
+        {
+            _testObject = new GameObject("BatchScreenshotCamera");
+            _testObject.AddComponent<Camera>();
+            JObject parameters = new JObject
+            {
+                ["operations"] = new JArray
+                {
+                    new JObject
+                    {
+                        ["tool"] = "screenshot_camera",
+                        ["id"] = "capture",
+                        ["params"] = new JObject
+                        {
+                            ["cameraInstanceId"] = _testObject.GetInstanceID(),
+                            ["width"] = 8,
+                            ["height"] = 8
+                        }
+                    }
+                }
+            };
+            var tcs = new TaskCompletionSource<JObject>();
+
+            _batchTool.ExecuteAsync(parameters, tcs);
+            while (!tcs.Task.IsCompleted)
+                yield return null;
+
+            JObject result = tcs.Task.Result;
+            JObject operationResult = (JObject)((JArray)result["results"])[0];
+            Assert.IsFalse(result["success"]?.ToObject<bool>() ?? true);
+            Assert.AreEqual(
+                "IMAGE_RESULT_NOT_SUPPORTED_IN_BATCH",
+                operationResult["errorCode"]?.ToString());
+            Assert.That(operationResult["error"]?.ToString(), Does.Contain("directly"));
+            Assert.IsNull(operationResult["result"], "Image result payload must be stripped");
+            Assert.That(result.ToString(), Does.Not.Contain("\"data\""));
+        }
+
+        [UnityTest]
+        public IEnumerator BatchExecuteTool_ImageSideEffect_IsDisclosedBeforePayloadIsDiscarded()
+        {
+            string[] seamNames =
+            {
+                "_resolveGameViewType",
+                "_resolveRenderViewMethod",
+                "_invokeRenderView",
+                "_hasExistingEditorWindow",
+                "_getGameViewWindow"
+            };
+            var originals = new System.Collections.Generic.Dictionary<string, object>();
+            foreach (string seamName in seamNames)
+            {
+                originals[seamName] = GetPrivateStaticField(
+                    typeof(ScreenshotGameViewTool), seamName);
+            }
+
+            BatchTestEditorWindow window =
+                ScriptableObject.CreateInstance<BatchTestEditorWindow>();
+            var source = new RenderTexture(8, 8, 0, RenderTextureFormat.ARGB32);
+            source.Create();
+            try
+            {
+                System.Reflection.MethodInfo dummyMethod = typeof(object).GetMethod(
+                    nameof(ToString), System.Type.EmptyTypes);
+                SetPrivateStaticField(
+                    typeof(ScreenshotGameViewTool),
+                    "_resolveGameViewType",
+                    new System.Func<System.Type>(() => typeof(BatchTestEditorWindow)));
+                SetPrivateStaticField(
+                    typeof(ScreenshotGameViewTool),
+                    "_resolveRenderViewMethod",
+                    new System.Func<System.Type, System.Reflection.MethodInfo>(_ => dummyMethod));
+                SetPrivateStaticField(
+                    typeof(ScreenshotGameViewTool),
+                    "_invokeRenderView",
+                    new System.Func<System.Reflection.MethodInfo, EditorWindow, RenderTexture>(
+                        (_, __) => source));
+                SetPrivateStaticField(
+                    typeof(ScreenshotGameViewTool),
+                    "_hasExistingEditorWindow",
+                    new System.Func<System.Type, bool>(_ => false));
+                SetPrivateStaticField(
+                    typeof(ScreenshotGameViewTool),
+                    "_getGameViewWindow",
+                    new System.Func<System.Type, bool, EditorWindow>((_, __) => window));
+
+                var tcs = new TaskCompletionSource<JObject>();
+                _batchTool.ExecuteAsync(new JObject
+                {
+                    ["operations"] = new JArray
+                    {
+                        new JObject
+                        {
+                            ["tool"] = "screenshot_game_view",
+                            ["params"] = new JObject
+                            {
+                                ["width"] = 8,
+                                ["height"] = 8
+                            }
+                        }
+                    }
+                }, tcs);
+                while (!tcs.Task.IsCompleted)
+                    yield return null;
+
+                JObject operationResult =
+                    (JObject)((JArray)tcs.Task.Result["results"])[0];
+                Assert.That(
+                    operationResult["error"]?.ToString(),
+                    Does.Contain("gameViewWindowCreated=true"));
+                Assert.IsNull(operationResult["result"]);
+            }
+            finally
+            {
+                foreach (System.Collections.Generic.KeyValuePair<string, object> original in originals)
+                {
+                    SetPrivateStaticField(
+                        typeof(ScreenshotGameViewTool), original.Key, original.Value);
+                }
+                Object.DestroyImmediate(window);
+                Object.DestroyImmediate(source);
+            }
+        }
+
+        [UnityTest]
+        public IEnumerator BatchExecuteTool_ImageWithoutWindowCreation_OmitsSideEffectDisclosure()
+        {
+            _testObject = new GameObject("BatchScreenshotCameraWithoutWindowSideEffect");
+            _testObject.AddComponent<Camera>();
+            var tcs = new TaskCompletionSource<JObject>();
+
+            _batchTool.ExecuteAsync(new JObject
+            {
+                ["operations"] = new JArray
+                {
+                    new JObject
+                    {
+                        ["tool"] = "screenshot_camera",
+                        ["params"] = new JObject
+                        {
+                            ["cameraInstanceId"] = _testObject.GetInstanceID(),
+                            ["width"] = 8,
+                            ["height"] = 8
+                        }
+                    }
+                }
+            }, tcs);
+            while (!tcs.Task.IsCompleted)
+                yield return null;
+
+            JObject operationResult =
+                (JObject)((JArray)tcs.Task.Result["results"])[0];
+            Assert.AreEqual(
+                "IMAGE_RESULT_NOT_SUPPORTED_IN_BATCH",
+                operationResult["errorCode"]?.ToString());
+            Assert.That(
+                operationResult["error"]?.ToString(),
+                Does.Not.Contain("gameViewWindowCreated="));
         }
 
         #endregion
@@ -497,5 +662,30 @@ namespace McpUnity.Tests
         }
 
         #endregion
+
+        private static object GetPrivateStaticField(System.Type ownerType, string name)
+        {
+            System.Reflection.FieldInfo field = ownerType.GetField(
+                name,
+                System.Reflection.BindingFlags.NonPublic
+                    | System.Reflection.BindingFlags.Static);
+            if (field == null)
+                throw new System.MissingFieldException(ownerType.FullName, name);
+            return field.GetValue(null);
+        }
+
+        private static void SetPrivateStaticField(
+            System.Type ownerType,
+            string name,
+            object value)
+        {
+            System.Reflection.FieldInfo field = ownerType.GetField(
+                name,
+                System.Reflection.BindingFlags.NonPublic
+                    | System.Reflection.BindingFlags.Static);
+            if (field == null)
+                Assert.Fail($"{ownerType.Name} private field '{name}' was not found");
+            field.SetValue(null, value);
+        }
     }
 }
