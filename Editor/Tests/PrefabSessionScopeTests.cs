@@ -49,6 +49,16 @@ namespace McpUnity.Tests
         private GameObject _sceneObject;
         private Scene _additiveTestScene;
         private bool _ownsFixtureState;
+        private readonly HashSet<int> _ownedPreviewSceneHandles = new HashSet<int>();
+        private System.Action _discardSession;
+
+        private sealed class OrphanPreviewSceneSnapshot
+        {
+            public Scene Scene;
+            public string ScenePath;
+            public readonly List<string> CameraNames = new List<string>();
+            public readonly List<Camera> Cameras = new List<Camera>();
+        }
 
         [SetUp]
         public void SetUp()
@@ -63,6 +73,8 @@ namespace McpUnity.Tests
                     "Save/discard that session before running this fixture.");
             }
 
+            _discardSession = PrefabEditingService.Discard;
+            _ownedPreviewSceneHandles.Clear();
             _ownsFixtureState = true;
             ResetSessionState();
             if (!AssetDatabase.IsValidFolder(TestDirectory))
@@ -90,34 +102,78 @@ namespace McpUnity.Tests
             if (!_ownsFixtureState)
                 return;
 
+            System.Exception cleanupFailure = null;
+            string activeSessionCameraLeak = null;
+            string orphanLeakFailure = null;
             try
             {
-                RestoreUnloadPrefabContents();
-                RestoreSavePrefabContents();
-                RestoreAddAssetPingObject();
+                TryCleanup(RestoreUnloadPrefabContents, ref cleanupFailure);
+                TryCleanup(RestoreSavePrefabContents, ref cleanupFailure);
+                TryCleanup(RestoreAddAssetPingObject, ref cleanupFailure);
+                RememberActivePrefabSessionScene();
+                activeSessionCameraLeak = FindActiveSessionGameCameraLeak();
                 PrefabEditingSessionStatus status = PrefabEditingService.Status;
                 if (status != PrefabEditingSessionStatus.None)
-                    PrefabEditingService.Discard();
+                    TryCleanup(_discardSession, ref cleanupFailure);
                 if (_additiveTestScene.IsValid() && _additiveTestScene.isLoaded)
-                    EditorSceneManager.CloseScene(_additiveTestScene, true);
+                {
+                    TryCleanup(
+                        () => EditorSceneManager.CloseScene(_additiveTestScene, true),
+                        ref cleanupFailure);
+                }
                 _additiveTestScene = default;
             }
             finally
             {
                 if (_sceneObject != null)
-                    Object.DestroyImmediate(_sceneObject);
+                {
+                    TryCleanup(
+                        () => Object.DestroyImmediate(_sceneObject),
+                        ref cleanupFailure);
+                }
+
+                try
+                {
+                    orphanLeakFailure = CloseNewOrphanPreviewScenesWithGameCameras();
+                }
+                catch (System.Exception ex)
+                {
+                    if (cleanupFailure == null)
+                        cleanupFailure = ex;
+                }
 
                 // Never erase the recovery record if cleanup itself failed. The next test run
                 // will skip with an actionable message instead of destroying a live session.
                 if (PrefabEditingService.Status == PrefabEditingSessionStatus.None)
                 {
-                    ResetSessionState();
-                    AssetDatabase.DeleteAsset(AdditiveTestScenePath);
+                    TryCleanup(ResetSessionState, ref cleanupFailure);
+                    TryCleanup(
+                        () => AssetDatabase.DeleteAsset(AdditiveTestScenePath),
+                        ref cleanupFailure);
                     if (AssetDatabase.IsValidFolder(TestDirectory))
-                        AssetDatabase.DeleteAsset(TestDirectory);
-                    AssetDatabase.Refresh();
+                    {
+                        TryCleanup(
+                            () => AssetDatabase.DeleteAsset(TestDirectory),
+                            ref cleanupFailure);
+                    }
+                    TryCleanup(() => AssetDatabase.Refresh(), ref cleanupFailure);
                 }
+
+                _ownsFixtureState = false;
+                _discardSession = null;
+                _ownedPreviewSceneHandles.Clear();
             }
+
+            string leakFailure = CombineFailures(
+                activeSessionCameraLeak, orphanLeakFailure);
+            if (cleanupFailure != null)
+            {
+                if (!string.IsNullOrEmpty(leakFailure))
+                    cleanupFailure.Data["PrefabSessionScopeTests.CameraLeak"] = leakFailure;
+                throw cleanupFailure;
+            }
+            if (!string.IsNullOrEmpty(leakFailure))
+                Assert.Fail(leakFailure);
         }
 
         [Test]
@@ -306,7 +362,7 @@ namespace McpUnity.Tests
                 // Model Unity reusing the unloaded root's stale ID for another preview root.
                 // Acknowledgement must trust the recorded successful cleanup and never resolve
                 // the persisted ID again.
-                unrelatedPreviewScene = EditorSceneManager.NewPreviewScene();
+                unrelatedPreviewScene = NewOwnedPreviewScene();
                 unrelatedPreviewRoot = new GameObject("S6UnrelatedReusedPreviewId");
                 SceneManager.MoveGameObjectToScene(unrelatedPreviewRoot, unrelatedPreviewScene);
                 SessionState.SetInt(
@@ -324,7 +380,7 @@ namespace McpUnity.Tests
             {
                 RestoreUnloadPrefabContents();
                 if (unrelatedPreviewScene.IsValid())
-                    EditorSceneManager.ClosePreviewScene(unrelatedPreviewScene);
+                    CloseOwnedPreviewScene(unrelatedPreviewScene);
             }
         }
 
@@ -980,7 +1036,7 @@ namespace McpUnity.Tests
         [Test]
         public void NoSession_PathResolutionSkipsBuiltInPreviewScenes()
         {
-            Scene previewScene = EditorSceneManager.NewPreviewScene();
+            Scene previewScene = NewOwnedPreviewScene();
             GameObject previewRoot = new GameObject("S6BuiltInPreviewRoot");
             SceneManager.MoveGameObjectToScene(previewRoot, previewScene);
             GameObject previewChild = new GameObject("HiddenPanel");
@@ -1011,7 +1067,7 @@ namespace McpUnity.Tests
             {
                 if (createdRoot != null)
                     Object.DestroyImmediate(createdRoot.transform.root.gameObject);
-                EditorSceneManager.ClosePreviewScene(previewScene);
+                CloseOwnedPreviewScene(previewScene);
             }
         }
 
@@ -1043,18 +1099,122 @@ namespace McpUnity.Tests
         {
             GameObject root = PrefabEditingService.Open(TestPrefabPath);
             GameObject cameraObject = new GameObject("S6PreviewMainCamera");
+            try
+            {
+                cameraObject.transform.SetParent(root.transform, false);
+                cameraObject.tag = "MainCamera";
+                cameraObject.AddComponent<Camera>();
+
+                JObject result = new ScreenshotCameraTool().Execute(new JObject
+                {
+                    ["width"] = 8,
+                    ["height"] = 8
+                });
+
+                Assert.IsTrue(result["success"]?.ToObject<bool>() ?? false);
+                Assert.That(result["message"]?.ToString(), Does.Contain(cameraObject.name));
+            }
+            finally
+            {
+                Object.DestroyImmediate(cameraObject);
+            }
+        }
+
+        [Test]
+        public void TearDown_NewOrphanPreviewCamera_ClosesSceneAndFailsFixture()
+        {
+            Scene leakedScene = NewOwnedPreviewScene();
+            var leakedCameraObject = new GameObject("S8LeakGuardCamera");
+            SceneManager.MoveGameObjectToScene(leakedCameraObject, leakedScene);
+            leakedCameraObject.AddComponent<Camera>();
+            try
+            {
+                AssertionException failure = Assert.Throws<AssertionException>(() => TearDown());
+
+                Assert.IsTrue(
+                    leakedCameraObject == null,
+                    "Closing the leaked preview scene must destroy its camera objects");
+                Assert.That(failure.Message, Does.Contain("S8LeakGuardCamera"));
+                Assert.That(failure.Message, Does.Contain("new orphan preview scene"));
+                Assert.IsFalse(_ownsFixtureState, "Manual TearDown must not run twice");
+            }
+            finally
+            {
+                if (leakedScene.IsValid())
+                    CloseOwnedPreviewScene(leakedScene);
+            }
+        }
+
+        [Test]
+        public void TearDown_ActiveSessionCameraSnapshotFailsEvenThoughDiscardUnloadsScene()
+        {
+            GameObject root = PrefabEditingService.Open(TestPrefabPath);
+            var cameraObject = new GameObject("S8SessionLeakSnapshotCamera");
             cameraObject.transform.SetParent(root.transform, false);
-            cameraObject.tag = "MainCamera";
             cameraObject.AddComponent<Camera>();
 
-            JObject result = new ScreenshotCameraTool().Execute(new JObject
-            {
-                ["width"] = 8,
-                ["height"] = 8
-            });
+            AssertionException failure = Assert.Throws<AssertionException>(() => TearDown());
 
-            Assert.IsTrue(result["success"]?.ToObject<bool>() ?? false);
-            Assert.That(result["message"]?.ToString(), Does.Contain(cameraObject.name));
+            Assert.IsTrue(cameraObject == null, "Discard should unload the session preview scene");
+            Assert.That(failure.Message, Does.Contain("S8SessionLeakSnapshotCamera"));
+            Assert.That(failure.Message, Does.Contain("before Discard"));
+            Assert.IsFalse(_ownsFixtureState, "Manual TearDown must not run twice");
+        }
+
+        [Test]
+        public void LeakGuard_UnownedOrphanReportsDetailsWithoutClosingScene()
+        {
+            Scene unownedScene = EditorSceneManager.NewPreviewScene();
+            var cameraObject = new GameObject("S8UnownedOrphanCamera");
+            SceneManager.MoveGameObjectToScene(cameraObject, unownedScene);
+            cameraObject.AddComponent<Camera>();
+            try
+            {
+                string failure = CloseNewOrphanPreviewScenesWithGameCameras();
+
+                Assert.That(failure, Does.Contain("S8UnownedOrphanCamera"));
+                Assert.That(failure, Does.Contain("scenePath=''"));
+                Assert.That(failure, Does.Contain("left open"));
+                Assert.IsTrue(unownedScene.IsValid());
+                Assert.IsNotNull(cameraObject);
+            }
+            finally
+            {
+                if (unownedScene.IsValid())
+                    EditorSceneManager.ClosePreviewScene(unownedScene);
+            }
+        }
+
+        [Test]
+        public void TearDown_CleanupExceptionRemainsPrimaryWhenLeakIsAlsoDetected()
+        {
+            GameObject root = PrefabEditingService.Open(TestPrefabPath);
+            var cameraObject = new GameObject("S8LeakAlongsideCleanupFailure");
+            cameraObject.transform.SetParent(root.transform, false);
+            cameraObject.AddComponent<Camera>();
+            _discardSession = () =>
+                throw new System.InvalidOperationException("Injected discard cleanup failure");
+            try
+            {
+                System.InvalidOperationException failure =
+                    Assert.Throws<System.InvalidOperationException>(() => TearDown());
+
+                Assert.AreEqual("Injected discard cleanup failure", failure.Message);
+                Assert.That(
+                    failure.Data["PrefabSessionScopeTests.CameraLeak"]?.ToString(),
+                    Does.Contain("S8LeakAlongsideCleanupFailure"));
+                Assert.IsFalse(_ownsFixtureState, "Manual TearDown must not run twice");
+            }
+            finally
+            {
+                _discardSession = PrefabEditingService.Discard;
+                if (PrefabEditingService.Status != PrefabEditingSessionStatus.None)
+                    PrefabEditingService.Discard();
+                ResetSessionState();
+                if (AssetDatabase.IsValidFolder(TestDirectory))
+                    AssetDatabase.DeleteAsset(TestDirectory);
+                AssetDatabase.Refresh();
+            }
         }
 
         [Test]
@@ -1264,6 +1424,207 @@ namespace McpUnity.Tests
 
             Assert.IsNull(error);
             Assert.IsNull(resolved);
+        }
+
+        private string CloseNewOrphanPreviewScenesWithGameCameras()
+        {
+            Dictionary<int, OrphanPreviewSceneSnapshot> current =
+                FindOrphanPreviewScenesWithGameCameras();
+            var ownedLeaks = new List<string>();
+            var unownedSuspiciousScenes = new List<string>();
+            var closeFailures = new List<string>();
+            foreach (OrphanPreviewSceneSnapshot candidate in current.Values)
+            {
+                string details = DescribePreviewScene(candidate);
+                if (!_ownedPreviewSceneHandles.Contains(candidate.Scene.handle))
+                {
+                    unownedSuspiciousScenes.Add(details);
+                    continue;
+                }
+
+                ownedLeaks.Add(details);
+                try
+                {
+                    if (IsLeakedPreviewSceneStillAlive(candidate))
+                        CloseOwnedPreviewScene(candidate.Scene);
+                    if (IsLeakedPreviewSceneStillAlive(candidate))
+                        closeFailures.Add(details + ": scene remained valid after ClosePreviewScene");
+                }
+                catch (System.Exception ex)
+                {
+                    closeFailures.Add(details + ": " + ex.GetType().Name + ":" + ex.Message);
+                }
+            }
+
+            if (ownedLeaks.Count == 0 && unownedSuspiciousScenes.Count == 0)
+                return null;
+
+            string failure = string.Empty;
+            if (ownedLeaks.Count > 0)
+            {
+                failure =
+                    $"PrefabSessionScopeTests created {ownedLeaks.Count} new orphan preview " +
+                    $"scene(s) containing CameraType.Game cameras [{string.Join("; ", ownedLeaks)}]. " +
+                    "The leak guard closed only fixture-owned preview scenes and is failing the test.";
+            }
+            if (unownedSuspiciousScenes.Count > 0)
+            {
+                failure = CombineFailures(
+                    failure,
+                    "PrefabSessionScopeTests observed suspicious orphan preview scene(s) it " +
+                    $"does not own [{string.Join("; ", unownedSuspiciousScenes)}]; they were left open.");
+            }
+            if (closeFailures.Count > 0)
+                failure += $" Close failures: {string.Join("; ", closeFailures)}";
+            return failure;
+        }
+
+        private Scene NewOwnedPreviewScene()
+        {
+            Scene scene = EditorSceneManager.NewPreviewScene();
+            _ownedPreviewSceneHandles.Add(scene.handle);
+            return scene;
+        }
+
+        private void CloseOwnedPreviewScene(Scene scene)
+        {
+            int handle = scene.handle;
+            EditorSceneManager.ClosePreviewScene(scene);
+            if (!scene.IsValid())
+                _ownedPreviewSceneHandles.Remove(handle);
+        }
+
+        private void RememberActivePrefabSessionScene()
+        {
+            GameObject root = PrefabEditingService.PrefabRoot;
+            if (root != null
+                && root.scene.IsValid()
+                && EditorSceneManager.IsPreviewScene(root.scene))
+            {
+                _ownedPreviewSceneHandles.Add(root.scene.handle);
+            }
+        }
+
+        private static string DescribePreviewScene(OrphanPreviewSceneSnapshot snapshot)
+        {
+            return $"scenePath='{snapshot.ScenePath ?? string.Empty}' " +
+                $"cameras=[{string.Join(", ", snapshot.CameraNames)}]";
+        }
+
+        private static bool IsLeakedPreviewSceneStillAlive(
+            OrphanPreviewSceneSnapshot snapshot)
+        {
+            foreach (Camera camera in snapshot.Cameras)
+            {
+                if (camera != null
+                    && camera.gameObject.scene == snapshot.Scene
+                    && EditorSceneManager.IsPreviewScene(camera.gameObject.scene))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private static string FindActiveSessionGameCameraLeak()
+        {
+            if (PrefabEditingService.Status == PrefabEditingSessionStatus.None)
+                return null;
+
+            GameObject prefabRoot = PrefabEditingService.PrefabRoot;
+            if (prefabRoot == null || !prefabRoot.scene.IsValid())
+                return null;
+
+            var cameraNames = new List<string>();
+            foreach (Camera camera in prefabRoot.GetComponentsInChildren<Camera>(true))
+            {
+                if (camera != null && camera.cameraType == CameraType.Game)
+                    cameraNames.Add(camera.name);
+            }
+            if (cameraNames.Count == 0)
+                return null;
+
+            return
+                "PrefabSessionScopeTests left CameraType.Game camera(s) inside the active " +
+                $"session preview scene before Discard [{string.Join(", ", cameraNames)}].";
+        }
+
+        private static string CombineFailures(params string[] failures)
+        {
+            var present = new List<string>();
+            foreach (string failure in failures)
+            {
+                if (!string.IsNullOrEmpty(failure))
+                    present.Add(failure);
+            }
+            return present.Count == 0 ? null : string.Join(" ", present);
+        }
+
+        private static Dictionary<int, OrphanPreviewSceneSnapshot>
+            FindOrphanPreviewScenesWithGameCameras()
+        {
+            var loadedSceneHandles = new HashSet<int>();
+            for (int sceneIndex = 0; sceneIndex < SceneManager.sceneCount; sceneIndex++)
+            {
+                Scene loadedScene = SceneManager.GetSceneAt(sceneIndex);
+                if (loadedScene.IsValid())
+                    loadedSceneHandles.Add(loadedScene.handle);
+            }
+
+            var contextSceneHandles = new HashSet<int>();
+            var prefabStage = PrefabStageUtility.GetCurrentPrefabStage();
+            if (prefabStage != null && prefabStage.scene.IsValid())
+                contextSceneHandles.Add(prefabStage.scene.handle);
+            if (PrefabEditingService.Status != PrefabEditingSessionStatus.None)
+            {
+                GameObject prefabRoot = PrefabEditingService.PrefabRoot;
+                if (prefabRoot != null && prefabRoot.scene.IsValid())
+                    contextSceneHandles.Add(prefabRoot.scene.handle);
+            }
+
+            var result = new Dictionary<int, OrphanPreviewSceneSnapshot>();
+            foreach (Camera camera in UnityEngine.Resources.FindObjectsOfTypeAll<Camera>())
+            {
+                if (camera == null || camera.cameraType != CameraType.Game)
+                    continue;
+
+                Scene scene = camera.gameObject.scene;
+                if (!scene.IsValid()
+                    || loadedSceneHandles.Contains(scene.handle)
+                    || contextSceneHandles.Contains(scene.handle)
+                    || !EditorSceneManager.IsPreviewScene(scene))
+                {
+                    continue;
+                }
+
+                if (!result.TryGetValue(scene.handle, out OrphanPreviewSceneSnapshot snapshot))
+                {
+                    snapshot = new OrphanPreviewSceneSnapshot
+                    {
+                        Scene = scene,
+                        ScenePath = scene.path ?? string.Empty
+                    };
+                    result.Add(scene.handle, snapshot);
+                }
+                snapshot.CameraNames.Add(camera.name);
+                snapshot.Cameras.Add(camera);
+            }
+            return result;
+        }
+
+        private static void TryCleanup(
+            System.Action cleanup,
+            ref System.Exception firstFailure)
+        {
+            try
+            {
+                cleanup();
+            }
+            catch (System.Exception ex)
+            {
+                if (firstFailure == null)
+                    firstFailure = ex;
+            }
         }
 
         private static int CountSceneRootsNamed(string name)

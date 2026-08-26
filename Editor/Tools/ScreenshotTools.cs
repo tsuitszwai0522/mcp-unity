@@ -1,7 +1,13 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Reflection;
 using System.Threading.Tasks;
 using UnityEditor;
+using UnityEditor.SceneManagement;
 using UnityEngine;
+using UnityEngine.Rendering;
+using UnityEngine.SceneManagement;
 using Newtonsoft.Json.Linq;
 using McpUnity.Unity;
 using McpUnity.Utils;
@@ -36,18 +42,267 @@ namespace McpUnity.Tools
             type => UnityEngine.Resources.FindObjectsOfTypeAll(type).Length > 0;
         private static Func<Type, bool, EditorWindow> _getGameViewWindow =
             (type, focus) => EditorWindow.GetWindow(type, false, null, focus);
+        private static Func<EditorWindow, object> _resolveGameViewHost = window =>
+        {
+            var parentField = typeof(EditorWindow).GetField(
+                "m_Parent", BindingFlags.NonPublic | BindingFlags.Instance);
+            if (parentField == null)
+                throw new MissingFieldException(typeof(EditorWindow).FullName, "m_Parent");
+            return parentField.GetValue(window);
+        };
+        private static Func<object, EditorWindow> _resolveActualView = host =>
+        {
+            PropertyInfo actualViewProperty = host?.GetType().GetProperty(
+                "actualView",
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            return actualViewProperty?.GetValue(host, null) as EditorWindow;
+        };
+        private static Func<object, MethodInfo> _resolveRepaintImmediatelyMethod = host =>
+            host?.GetType().GetMethod(
+                "RepaintImmediately",
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance,
+                null,
+                Type.EmptyTypes,
+                null);
+        private static Action<MethodInfo, object> _invokeRepaintImmediately =
+            (method, host) => method.Invoke(host, null);
+        private static Action<Action<ScriptableRenderContext, Camera>>
+            _subscribeBeginCameraRendering = handler =>
+                RenderPipelineManager.beginCameraRendering += handler;
+        private static Action<Action<ScriptableRenderContext, Camera>>
+            _unsubscribeBeginCameraRendering = handler =>
+                RenderPipelineManager.beginCameraRendering -= handler;
+        private static Action<Camera.CameraCallback> _subscribeCameraPreRender =
+            handler => Camera.onPreRender += handler;
+        private static Action<Camera.CameraCallback> _unsubscribeCameraPreRender =
+            handler => Camera.onPreRender -= handler;
+        private static Func<IEnumerable<Camera>> _findAllCameras =
+            () => UnityEngine.Resources.FindObjectsOfTypeAll<Camera>();
+        private static Func<HashSet<int>> _findLoadedSceneHandles = () =>
+        {
+            var handles = new HashSet<int>();
+            for (int sceneIndex = 0; sceneIndex < SceneManager.sceneCount; sceneIndex++)
+            {
+                Scene loadedScene = SceneManager.GetSceneAt(sceneIndex);
+                if (loadedScene.IsValid())
+                    handles.Add(loadedScene.handle);
+            }
+            return handles;
+        };
+        private static Action<Camera, bool> _setCameraEnabled =
+            (camera, enabled) => camera.enabled = enabled;
+
+        private const int MaxDisclosedCameras = 8;
+        private const string ForceFocusRemediation = "retry_with_force_focus=true";
+
+        private enum RerenderEvidence
+        {
+            Observed,
+            KnownAbsent,
+            Unknown
+        }
+
+        private sealed class FreshnessMeasurement
+        {
+            public RerenderEvidence Evidence { get; }
+            public int CameraRenders { get; }
+            public string Reason { get; }
+
+            public FreshnessMeasurement(
+                RerenderEvidence evidence,
+                int cameraRenders,
+                string reason)
+            {
+                Evidence = evidence;
+                CameraRenders = cameraRenders;
+                Reason = reason;
+            }
+        }
+
+        private sealed class CaptureDecision
+        {
+            public string FrameFresh { get; }
+            public string FrameFreshReason { get; }
+            public string DegradedReason { get; }
+            public string Remediation { get; }
+
+            public CaptureDecision(
+                string frameFresh,
+                string frameFreshReason,
+                string degradedReason,
+                string remediation)
+            {
+                FrameFresh = frameFresh;
+                FrameFreshReason = frameFreshReason;
+                DegradedReason = degradedReason;
+                Remediation = remediation;
+            }
+
+            public CaptureDecision WithAdditionalDegradedReason(string reason)
+            {
+                return new CaptureDecision(
+                    FrameFresh,
+                    FrameFreshReason,
+                    ScreenshotGameViewTool.AppendDegradedReason(DegradedReason, reason),
+                    Remediation);
+            }
+        }
 
         private sealed class CaptureDiagnosticsState
         {
-            public string DegradedReason;
             public bool GameViewWindowCreated;
+            public FreshnessMeasurement Freshness;
+            public readonly List<CameraDisclosure> ContextCameras =
+                new List<CameraDisclosure>();
+        }
+
+        private sealed class CameraDisclosure
+        {
+            public string Name;
+            public string ScenePath;
+        }
+
+        private sealed class CameraIsolationScope : IDisposable
+        {
+            private readonly List<Camera> _disabledCameras = new List<Camera>();
+
+            public int IsolatedCount => _disabledCameras.Count;
+            public IEnumerable<Camera> IsolatedCameras => _disabledCameras;
+
+            public static CameraIsolationScope Create(
+                CaptureDiagnosticsState diagnostics,
+                out Camera[] isolatedCamerasOnFailure,
+                out string restoreFailureReason)
+            {
+                var scope = new CameraIsolationScope();
+                isolatedCamerasOnFailure = Array.Empty<Camera>();
+                restoreFailureReason = null;
+                try
+                {
+                    scope.IsolateCameras(diagnostics);
+                    return scope;
+                }
+                catch
+                {
+                    isolatedCamerasOnFailure = scope.IsolatedCameras.ToArray();
+                    restoreFailureReason = scope.RestoreCameras();
+                    throw;
+                }
+            }
+
+            public void Dispose()
+            {
+                RestoreCameras();
+            }
+
+            public string RestoreCameras()
+            {
+                string failureReason = null;
+                foreach (Camera camera in _disabledCameras)
+                {
+                    try
+                    {
+                        if (camera != null)
+                            _setCameraEnabled(camera, true);
+                    }
+                    catch (Exception ex)
+                    {
+                        failureReason = "camera_restore_failed";
+                        McpLogger.LogWarning(
+                            $"Failed to restore isolated Camera " +
+                            $"'{(camera == null ? "<destroyed>" : camera.name)}': {ex.Message}");
+                    }
+                }
+                _disabledCameras.Clear();
+                return failureReason;
+            }
+
+            private void IsolateCameras(CaptureDiagnosticsState diagnostics)
+            {
+                HashSet<int> loadedSceneHandles = _findLoadedSceneHandles();
+
+                var contextSceneHandles = new HashSet<int>();
+                var prefabStage = PrefabStageUtility.GetCurrentPrefabStage();
+                if (prefabStage != null && prefabStage.scene.IsValid())
+                    contextSceneHandles.Add(prefabStage.scene.handle);
+
+                if (PrefabEditingService.Status != PrefabEditingSessionStatus.None)
+                {
+                    GameObject prefabRoot = PrefabEditingService.PrefabRoot;
+                    if (prefabRoot != null && prefabRoot.scene.IsValid())
+                        contextSceneHandles.Add(prefabRoot.scene.handle);
+                }
+
+                foreach (Camera camera in _findAllCameras())
+                {
+                    if (camera == null
+                        || !camera.enabled
+                        || !camera.gameObject.activeInHierarchy
+                        || camera.cameraType != CameraType.Game)
+                    {
+                        continue;
+                    }
+
+                    Scene cameraScene = camera.gameObject.scene;
+                    if (!cameraScene.IsValid() || loadedSceneHandles.Contains(cameraScene.handle))
+                        continue;
+
+                    var disclosure = new CameraDisclosure
+                    {
+                        Name = camera.name,
+                        ScenePath = cameraScene.path ?? string.Empty
+                    };
+                    if (contextSceneHandles.Contains(cameraScene.handle))
+                    {
+                        diagnostics.ContextCameras.Add(disclosure);
+                        continue;
+                    }
+
+                    if (!ShouldIsolateCameraScene(
+                        cameraScene, loadedSceneHandles, contextSceneHandles))
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        // Track before invoking the setter: a custom/native setter may change
+                        // state and then throw, and such a camera still needs a restore attempt.
+                        _disabledCameras.Add(camera);
+                        _setCameraEnabled(camera, false);
+                    }
+                    catch (Exception ex)
+                    {
+                        McpLogger.LogWarning(
+                            $"Failed to isolate Camera '{camera.name}': {ex.Message}");
+                    }
+                }
+            }
+
+            private static bool ShouldIsolateCameraScene(
+                Scene cameraScene,
+                ISet<int> loadedSceneHandles,
+                ISet<int> contextSceneHandles)
+            {
+                return cameraScene.IsValid()
+                    && !loadedSceneHandles.Contains(cameraScene.handle)
+                    && !contextSceneHandles.Contains(cameraScene.handle)
+                    && EditorSceneManager.IsPreviewScene(cameraScene);
+            }
+
         }
 
         public ScreenshotGameViewTool()
         {
             Name = "screenshot_game_view";
             Description = "Captures a screenshot from the Game View, reflecting what the player sees. " +
-                          "Set force_focus=true to force-focus the Game View tab before capturing. " +
+                          "Only frameFresh=verified means the pixels reflect the current scene. " +
+                          "When frameFreshReason includes game_view_not_active_tab, retry with " +
+                          "force_focus=true so the Game View becomes the active tab and rerenders " +
+                          "before capture. When it includes repaint_immediately_unavailable:, retry " +
+                          "with force_focus=true only when isolatedCameraCount=0; focus cannot repair " +
+                          "the post-isolation frame while isolated cameras exist. no_camera_render " +
+                          "has no force-focus remediation. " +
                           "While Prefab contents are open, failed Game View capture never falls " +
                           "back to a loaded scene Main Camera.";
             IsAsync = true;
@@ -133,26 +388,76 @@ namespace McpUnity.Tools
             {
                 GameViewWindowCreated = gameViewWindowCreated
             };
+            CameraIsolationScope cameraIsolation = null;
+            int isolatedCount = 0;
+            Tuple<JObject, CaptureDecision> outcome;
+            Camera[] isolatedCameras = Array.Empty<Camera>();
+            Camera[] createFailureCameras = Array.Empty<Camera>();
+            string createRestoreFailureReason = null;
+            string cameraRestoreFailureReason = null;
 
             try
             {
-                return CaptureGameViewCore(width, height, diagnostics);
+                try
+                {
+                    cameraIsolation = CameraIsolationScope.Create(
+                        diagnostics,
+                        out createFailureCameras,
+                        out createRestoreFailureReason);
+                    isolatedCount = cameraIsolation.IsolatedCount;
+                    outcome = CaptureGameViewCore(width, height, diagnostics, isolatedCount);
+                }
+                catch (Exception ex)
+                {
+                    if (cameraIsolation == null)
+                    {
+                        isolatedCameras = createFailureCameras;
+                        isolatedCount = createFailureCameras.Length;
+                        cameraRestoreFailureReason = createRestoreFailureReason;
+                    }
+                    CaptureDecision decision = DecideCapture(
+                        diagnostics.Freshness,
+                        isolatedCount,
+                        diagnostics.ContextCameras.Count,
+                        true,
+                        false,
+                        $"capture_failed:{ex.GetType().Name}",
+                        null);
+                    outcome = Tuple.Create(
+                        AddFailureDiagnostics(
+                            McpUnitySocketHandler.CreateErrorResponse(
+                                $"Error capturing Game View screenshot: {ex.Message}",
+                                "tool_execution_error"),
+                            decision,
+                            diagnostics.GameViewWindowCreated),
+                        decision);
+                }
+                if (cameraIsolation != null)
+                    isolatedCameras = cameraIsolation.IsolatedCameras.ToArray();
             }
-            catch (Exception ex)
+            finally
             {
-                return AddFailureDiagnostics(
-                    McpUnitySocketHandler.CreateErrorResponse(
-                        $"Error capturing Game View screenshot: {ex.Message}",
-                        "tool_execution_error"),
-                    diagnostics.DegradedReason,
-                    diagnostics.GameViewWindowCreated);
+                if (cameraIsolation != null)
+                    cameraRestoreFailureReason = cameraIsolation.RestoreCameras();
             }
+
+            CaptureDecision finalDecision = ApplyPostCaptureDegradation(
+                outcome.Item1,
+                outcome.Item2,
+                cameraRestoreFailureReason);
+            return AddGameViewDiagnostics(
+                outcome.Item1,
+                diagnostics,
+                isolatedCameras,
+                isolatedCount,
+                finalDecision);
         }
 
-        private static JObject CaptureGameViewCore(
+        private static Tuple<JObject, CaptureDecision> CaptureGameViewCore(
             int width,
             int height,
-            CaptureDiagnosticsState diagnostics)
+            CaptureDiagnosticsState diagnostics,
+            int isolatedCount)
         {
             // Primary: capture the real composited Game View via the editor's own render path
             // (PlayModeView.RenderView). This is focus-independent (no need to bring the Game View tab to
@@ -160,19 +465,27 @@ namespace McpUnity.Tools
             // render request, which skip the URP overlay stack, and unlike ScreenCapture which samples
             // whichever editor view currently has focus (often the Scene View).
             Tuple<JObject, string, bool> renderViewAttempt =
-                TryCaptureViaRenderView(width, height);
+                TryCaptureViaRenderView(width, height, diagnostics);
             diagnostics.GameViewWindowCreated |= renderViewAttempt.Item3;
             if (renderViewAttempt.Item1 != null)
             {
-                return ScreenshotHelper.AddCaptureMetadata(
-                    renderViewAttempt.Item1,
-                    "render_view",
+                CaptureDecision renderViewDecision = DecideCapture(
+                    diagnostics.Freshness,
+                    isolatedCount,
+                    diagnostics.ContextCameras.Count,
                     false,
+                    true,
                     null,
-                    diagnostics.GameViewWindowCreated);
-            }
+                    null);
 
-            diagnostics.DegradedReason = renderViewAttempt.Item2;
+                return Tuple.Create(
+                    ApplyCaptureDecision(
+                        renderViewAttempt.Item1,
+                        "render_view",
+                        renderViewDecision,
+                        diagnostics.GameViewWindowCreated),
+                    renderViewDecision);
+            }
 
             // Fallback: ScreenCapture (works best during Play Mode; samples the focused view's backbuffer)
             var screenshot = _captureScreenshotAsTexture();
@@ -189,7 +502,15 @@ namespace McpUnity.Tools
 
                     McpLogger.LogInfo($"Game View screenshot captured ({width}x{height})");
 
-                    return ScreenshotHelper.AddCaptureMetadata(new JObject
+                    CaptureDecision decision = DecideCapture(
+                        diagnostics.Freshness,
+                        isolatedCount,
+                        diagnostics.ContextCameras.Count,
+                        true,
+                        true,
+                        renderViewAttempt.Item2,
+                        null);
+                    return Tuple.Create(ApplyCaptureDecision(new JObject
                     {
                         ["success"] = true,
                         ["type"] = "image",
@@ -198,9 +519,8 @@ namespace McpUnity.Tools
                         ["message"] = $"Game View screenshot captured ({width}x{height})"
                     },
                     "screen_capture",
-                    true,
-                    diagnostics.DegradedReason,
-                    diagnostics.GameViewWindowCreated);
+                    decision,
+                    diagnostics.GameViewWindowCreated), decision);
                 }
                 finally
                 {
@@ -208,55 +528,131 @@ namespace McpUnity.Tools
                 }
             }
 
-            diagnostics.DegradedReason = string.IsNullOrEmpty(diagnostics.DegradedReason)
-                ? "screen_capture_returned_null"
-                : diagnostics.DegradedReason + ";screen_capture_returned_null";
+            string capturePathReason = AppendDegradedReason(
+                renderViewAttempt.Item2,
+                "screen_capture_returned_null");
 
-            Tuple<JObject, GameObject> prefabScope = _resolvePrefabRoot();
+            return CaptureViaMainCameraFallback(
+                width,
+                height,
+                diagnostics,
+                isolatedCount,
+                capturePathReason);
+        }
+
+        private static Tuple<JObject, CaptureDecision> CaptureViaMainCameraFallback(
+            int width,
+            int height,
+            CaptureDiagnosticsState diagnostics,
+            int isolatedCount,
+            string capturePathReason)
+        {
+            Tuple<JObject, GameObject> prefabScope;
+            try
+            {
+                prefabScope = _resolvePrefabRoot();
+            }
+            catch (Exception ex)
+            {
+                CaptureDecision failureDecision = DecideCapture(
+                    diagnostics.Freshness,
+                    isolatedCount,
+                    diagnostics.ContextCameras.Count,
+                    true,
+                    false,
+                    capturePathReason,
+                    $"main_camera_fallback_failed:{ex.GetType().Name}");
+                return Tuple.Create(
+                    AddFailureDiagnostics(
+                        McpUnitySocketHandler.CreateErrorResponse(
+                            $"Error resolving the Main Camera fallback: {ex.Message}",
+                            "tool_execution_error"),
+                        failureDecision,
+                        diagnostics.GameViewWindowCreated),
+                    failureDecision);
+            }
+
             JObject scopeError = prefabScope.Item1;
             GameObject prefabRoot = prefabScope.Item2;
             if (scopeError != null)
             {
-                return AddFailureDiagnostics(
-                    scopeError,
-                    diagnostics.DegradedReason,
-                    diagnostics.GameViewWindowCreated);
+                CaptureDecision failureDecision = DecideCapture(
+                    diagnostics.Freshness,
+                    isolatedCount,
+                    diagnostics.ContextCameras.Count,
+                    true,
+                    false,
+                    capturePathReason,
+                    "main_camera_fallback_blocked:prefab_scope_error");
+                return Tuple.Create(
+                    AddFailureDiagnostics(
+                        scopeError,
+                        failureDecision,
+                        diagnostics.GameViewWindowCreated),
+                    failureDecision);
             }
             if (prefabRoot != null)
             {
-                return AddFailureDiagnostics(
+                CaptureDecision failureDecision = DecideCapture(
+                    diagnostics.Freshness,
+                    isolatedCount,
+                    diagnostics.ContextCameras.Count,
+                    true,
+                    false,
+                    capturePathReason,
+                    "main_camera_fallback_blocked:prefab_session");
+                return Tuple.Create(AddFailureDiagnostics(
                     McpUnitySocketHandler.CreateErrorResponse(
-                        $"Failed to capture the Game View while Prefab contents " +
+                        $"Failed to capture the Game View. Prefab contents " +
                         $"'{PrefabEditingService.AssetPath}' (root '{prefabRoot.name}') are open. " +
                         "screenshot_game_view does not fall back to a loaded scene Main Camera " +
                         "during a Prefab editing session.",
                         "tool_execution_error"),
-                    diagnostics.DegradedReason,
-                    diagnostics.GameViewWindowCreated);
+                    failureDecision,
+                    diagnostics.GameViewWindowCreated), failureDecision);
             }
 
             // Fallback: render from Main Camera (Edit Mode when Game View isn't actively rendering)
             Camera cam = _findMainCamera();
             if (cam == null)
             {
-                return AddFailureDiagnostics(
+                const string unavailableReason =
+                    "main_camera_fallback_unavailable:no_main_camera";
+                CaptureDecision failureDecision = DecideCapture(
+                    diagnostics.Freshness,
+                    isolatedCount,
+                    diagnostics.ContextCameras.Count,
+                    true,
+                    false,
+                    capturePathReason,
+                    unavailableReason);
+                return Tuple.Create(AddFailureDiagnostics(
                     McpUnitySocketHandler.CreateErrorResponse(
-                        "Failed to capture Game View screenshot. ScreenCapture returned null and no Main Camera found as fallback.",
+                        "Failed to capture Game View screenshot. " +
+                        "No Main Camera was found for the camera fallback.",
                         "tool_execution_error"),
-                    diagnostics.DegradedReason,
-                    diagnostics.GameViewWindowCreated);
+                    failureDecision,
+                    diagnostics.GameViewWindowCreated), failureDecision);
             }
 
             McpLogger.LogInfo("ScreenCapture unavailable, falling back to Main Camera render");
-            return ScreenshotHelper.CaptureFromCamera(
+            CaptureDecision decision = DecideCapture(
+                diagnostics.Freshness,
+                isolatedCount,
+                diagnostics.ContextCameras.Count,
+                true,
+                false,
+                capturePathReason,
+                null);
+            return Tuple.Create(ScreenshotHelper.CaptureFromCamera(
                 cam,
                 width,
                 height,
                 "Game View (via Main Camera)",
                 "main_camera_fallback",
-                true,
-                diagnostics.DegradedReason,
-                diagnostics.GameViewWindowCreated);
+                !string.IsNullOrEmpty(decision.DegradedReason),
+                decision.DegradedReason,
+                diagnostics.GameViewWindowCreated), decision);
         }
 
         /// <summary>
@@ -267,7 +663,10 @@ namespace McpUnity.Tools
         /// demand regardless of which editor tab is active). Reflection because RenderView is protected editor
         /// API. Returns the image result, an unavailable reason, and whether it created a Game View window.
         /// </summary>
-        private static Tuple<JObject, string, bool> TryCaptureViaRenderView(int width, int height)
+        private static Tuple<JObject, string, bool> TryCaptureViaRenderView(
+            int width,
+            int height,
+            CaptureDiagnosticsState diagnostics)
         {
             var previousActiveRT = RenderTexture.active;
             RenderTexture dst = null;
@@ -278,6 +677,10 @@ namespace McpUnity.Tools
                 var gameViewType = _resolveGameViewType();
                 if (gameViewType == null)
                 {
+                    diagnostics.Freshness = new FreshnessMeasurement(
+                        RerenderEvidence.KnownAbsent,
+                        0,
+                        "repaint_immediately_not_attempted");
                     return Tuple.Create<JObject, string, bool>(
                         null,
                         "render_view_unavailable:gameview_type_missing",
@@ -289,6 +692,10 @@ namespace McpUnity.Tools
                 gameViewWindowCreated = !hadExistingWindow && gameView != null;
                 if (gameView == null)
                 {
+                    diagnostics.Freshness = new FreshnessMeasurement(
+                        RerenderEvidence.KnownAbsent,
+                        0,
+                        "repaint_immediately_not_attempted");
                     return Tuple.Create<JObject, string, bool>(
                         null,
                         "render_view_unavailable:window_null",
@@ -299,12 +706,17 @@ namespace McpUnity.Tools
                 var renderViewMethod = _resolveRenderViewMethod(gameViewType);
                 if (renderViewMethod == null)
                 {
+                    diagnostics.Freshness = new FreshnessMeasurement(
+                        RerenderEvidence.KnownAbsent,
+                        0,
+                        "repaint_immediately_not_attempted");
                     return Tuple.Create<JObject, string, bool>(
                         null,
                         "render_view_unavailable:method_missing",
                         gameViewWindowCreated);
                 }
 
+                diagnostics.Freshness = PerformFreshnessHandshake(gameView);
                 var srcRt = _invokeRenderView(renderViewMethod, gameView);
                 if (srcRt == null)
                 {
@@ -361,6 +773,411 @@ namespace McpUnity.Tools
             }
         }
 
+        private static FreshnessMeasurement PerformFreshnessHandshake(EditorWindow gameView)
+        {
+            object host;
+            EditorWindow actualView;
+            MethodInfo repaintImmediately;
+            try
+            {
+                host = _resolveGameViewHost(gameView);
+                if (host == null)
+                {
+                    return new FreshnessMeasurement(
+                        RerenderEvidence.KnownAbsent,
+                        0,
+                        "repaint_immediately_unavailable:host_null");
+                }
+
+                try
+                {
+                    actualView = _resolveActualView(host);
+                }
+                catch (Exception ex)
+                {
+                    Exception cause = GetRenderViewFailureCause(ex);
+                    McpLogger.LogWarning(
+                        $"GameView active-tab resolution failed; continuing capture: " +
+                        cause.Message);
+                    return new FreshnessMeasurement(
+                        RerenderEvidence.KnownAbsent,
+                        0,
+                        "actual_view_unresolved");
+                }
+                if (actualView == null)
+                {
+                    return new FreshnessMeasurement(
+                        RerenderEvidence.KnownAbsent,
+                        0,
+                        "actual_view_unresolved");
+                }
+                if (!ReferenceEquals(actualView, gameView))
+                {
+                    return new FreshnessMeasurement(
+                        RerenderEvidence.KnownAbsent,
+                        0,
+                        "game_view_not_active_tab");
+                }
+
+                repaintImmediately = _resolveRepaintImmediatelyMethod(host);
+                if (repaintImmediately == null)
+                {
+                    return new FreshnessMeasurement(
+                        RerenderEvidence.KnownAbsent,
+                        0,
+                        "repaint_immediately_unavailable:method_missing");
+                }
+            }
+            catch (Exception ex)
+            {
+                Exception cause = GetRenderViewFailureCause(ex);
+                return new FreshnessMeasurement(
+                    RerenderEvidence.KnownAbsent,
+                    0,
+                    $"repaint_immediately_unavailable:{cause.GetType().Name}");
+            }
+
+            int cameraRenders = 0;
+            Action<ScriptableRenderContext, Camera> srpHandler =
+                (context, camera) =>
+                {
+                    if (camera != null
+                        && camera.enabled
+                        && camera.gameObject.activeInHierarchy
+                        && camera.cameraType == CameraType.Game)
+                        cameraRenders++;
+                };
+            Camera.CameraCallback builtInHandler = camera =>
+            {
+                if (camera != null
+                    && camera.enabled
+                    && camera.gameObject.activeInHierarchy
+                    && camera.cameraType == CameraType.Game)
+                    cameraRenders++;
+            };
+            bool srpSubscribed = false;
+            bool builtInSubscribed = false;
+            RerenderEvidence evidence;
+            string evidenceReason;
+            Exception counterCleanupFailure = null;
+            try
+            {
+                _subscribeBeginCameraRendering(srpHandler);
+                srpSubscribed = true;
+                _subscribeCameraPreRender(builtInHandler);
+                builtInSubscribed = true;
+                _invokeRepaintImmediately(repaintImmediately, host);
+                evidence = cameraRenders > 0
+                    ? RerenderEvidence.Observed
+                    : RerenderEvidence.KnownAbsent;
+                evidenceReason = cameraRenders > 0
+                    ? "camera_render_observed"
+                    : "no_camera_render";
+            }
+            catch (Exception ex)
+            {
+                Exception cause = GetRenderViewFailureCause(ex);
+                evidence = srpSubscribed && builtInSubscribed && cameraRenders == 0
+                    ? RerenderEvidence.KnownAbsent
+                    : RerenderEvidence.Unknown;
+                evidenceReason =
+                    $"repaint_immediately_unavailable:{cause.GetType().Name}";
+                McpLogger.LogWarning(
+                    $"GameView synchronous repaint unavailable, continuing capture: " +
+                    cause.Message);
+            }
+            finally
+            {
+                if (builtInSubscribed)
+                {
+                    try
+                    {
+                        _unsubscribeCameraPreRender(builtInHandler);
+                    }
+                    catch (Exception ex)
+                    {
+                        counterCleanupFailure = GetRenderViewFailureCause(ex);
+                    }
+                }
+                if (srpSubscribed)
+                {
+                    try
+                    {
+                        _unsubscribeBeginCameraRendering(srpHandler);
+                    }
+                    catch (Exception ex)
+                    {
+                        if (counterCleanupFailure == null)
+                            counterCleanupFailure = GetRenderViewFailureCause(ex);
+                    }
+                }
+
+                if (counterCleanupFailure != null)
+                {
+                    McpLogger.LogWarning(
+                        "GameView repaint render-counter cleanup failed; continuing capture: " +
+                        counterCleanupFailure.Message);
+                }
+            }
+
+            return new FreshnessMeasurement(
+                evidence,
+                cameraRenders,
+                counterCleanupFailure == null
+                    ? evidenceReason
+                    : AppendReason(
+                        $"render_counter_cleanup_failed:{counterCleanupFailure.GetType().Name}",
+                        evidenceReason));
+        }
+
+        private static string AppendDegradedReason(string existing, string additional)
+        {
+            if (string.IsNullOrEmpty(additional))
+                return existing;
+            return string.IsNullOrEmpty(existing)
+                ? additional
+                : existing + ";" + additional;
+        }
+
+        private static string AppendReason(string primary, string underlying)
+        {
+            if (string.IsNullOrEmpty(underlying) || primary == underlying)
+                return primary;
+            return string.IsNullOrEmpty(primary)
+                ? underlying
+                : primary + ";" + underlying;
+        }
+
+        private static bool HasReason(string reasons, string exactReason)
+        {
+            return !string.IsNullOrEmpty(reasons)
+                && reasons.Split(';').Any(reason => reason == exactReason);
+        }
+
+        private static bool HasReasonPrefix(string reasons, string prefix)
+        {
+            return !string.IsNullOrEmpty(reasons)
+                && reasons.Split(';').Any(
+                    reason => reason.StartsWith(prefix, StringComparison.Ordinal));
+        }
+
+        private static CaptureDecision DecideCapture(
+            FreshnessMeasurement freshness,
+            int isolatedCount,
+            int contextCount,
+            bool capturePathFallback,
+            bool pixelsMayPredateIsolation,
+            string capturePathReason,
+            string fallbackFailureReason)
+        {
+            freshness = freshness ?? new FreshnessMeasurement(
+                RerenderEvidence.Unknown,
+                0,
+                "repaint_immediately_not_attempted");
+
+            bool isolatedFramePredatesIsolation = pixelsMayPredateIsolation
+                && isolatedCount > 0
+                && freshness.Evidence == RerenderEvidence.KnownAbsent
+                && !HasReasonPrefix(
+                    freshness.Reason,
+                    "render_counter_cleanup_failed:");
+            string frameFresh;
+            string frameFreshReason;
+            if (capturePathFallback)
+            {
+                frameFresh = "not_applicable";
+                frameFreshReason = AppendReason(
+                    "capture_path_not_render_view", freshness.Reason);
+            }
+            else if (contextCount > 0)
+            {
+                frameFresh = "unknown";
+                frameFreshReason = AppendReason(
+                    "context_camera_may_compose", freshness.Reason);
+            }
+            else if (freshness.Reason.StartsWith(
+                "render_counter_cleanup_failed:",
+                StringComparison.Ordinal))
+            {
+                frameFresh = "unknown";
+                frameFreshReason = freshness.Reason;
+            }
+            else if (freshness.Evidence == RerenderEvidence.Observed)
+            {
+                frameFresh = "verified";
+                frameFreshReason = freshness.Reason;
+            }
+            else if (freshness.Evidence == RerenderEvidence.KnownAbsent)
+            {
+                frameFresh = "not_fresh";
+                frameFreshReason = freshness.Reason;
+            }
+            else
+            {
+                frameFresh = "unknown";
+                frameFreshReason = freshness.Reason;
+            }
+
+            string degradedReason = isolatedFramePredatesIsolation
+                ? "isolated_frame_predates_isolation"
+                : null;
+            if (capturePathFallback)
+                degradedReason = AppendDegradedReason(degradedReason, capturePathReason);
+            degradedReason = AppendDegradedReason(degradedReason, fallbackFailureReason);
+
+            bool inactiveTabCanBeRemediated =
+                HasReason(frameFreshReason, "game_view_not_active_tab");
+            bool repaintUnavailableCanBeRemediated = isolatedCount == 0
+                && HasReasonPrefix(
+                    frameFreshReason,
+                    "repaint_immediately_unavailable:");
+
+            return new CaptureDecision(
+                frameFresh,
+                frameFreshReason,
+                degradedReason,
+                inactiveTabCanBeRemediated || repaintUnavailableCanBeRemediated
+                    ? ForceFocusRemediation
+                    : null);
+        }
+
+        private static CaptureDecision ApplyPostCaptureDegradation(
+            JObject response,
+            CaptureDecision decision,
+            string additionalReason)
+        {
+            if (string.IsNullOrEmpty(additionalReason))
+                return decision;
+
+            string previousReason = decision.DegradedReason;
+            string previousDiagnostics = BuildDegradedDiagnostics(previousReason);
+            CaptureDecision updatedDecision =
+                decision.WithAdditionalDegradedReason(additionalReason);
+            string updatedDiagnostics =
+                BuildDegradedDiagnostics(updatedDecision.DegradedReason);
+
+            if (response?["error"] is JObject error)
+            {
+                error["message"] = error["message"]?.ToString()
+                    .Replace(previousDiagnostics, updatedDiagnostics);
+                return updatedDecision;
+            }
+
+            response["degraded"] = true;
+            response["degradedReason"] = updatedDecision.DegradedReason;
+            response["message"] = response["message"]?.ToString()
+                .Replace(previousDiagnostics, updatedDiagnostics);
+            return updatedDecision;
+        }
+
+        private static string BuildDegradedDiagnostics(string degradedReason)
+        {
+            return string.IsNullOrEmpty(degradedReason)
+                ? "degraded=false"
+                : $"degraded=true degradedReason={degradedReason}";
+        }
+
+        private static JObject ApplyCaptureDecision(
+            JObject response,
+            string capturePath,
+            CaptureDecision decision,
+            bool gameViewWindowCreated)
+        {
+            return ScreenshotHelper.AddCaptureMetadata(
+                response,
+                capturePath,
+                !string.IsNullOrEmpty(decision.DegradedReason),
+                decision.DegradedReason,
+                gameViewWindowCreated);
+        }
+
+        private static JObject AddGameViewDiagnostics(
+            JObject response,
+            CaptureDiagnosticsState diagnostics,
+            IEnumerable<Camera> isolatedCameraObjects,
+            int isolatedCount,
+            CaptureDecision decision)
+        {
+            JArray isolatedCameras = BuildCameraDisclosures(isolatedCameraObjects);
+            JArray contextCameras = BuildCameraDisclosures(diagnostics.ContextCameras);
+            int cameraRenders = diagnostics.Freshness?.CameraRenders ?? 0;
+            string diagnosticText =
+                $"frameFresh={decision.FrameFresh} " +
+                $"cameraRenders={cameraRenders} " +
+                $"frameFreshReason={decision.FrameFreshReason} " +
+                $"isolatedCameraCount={isolatedCount} " +
+                $"contextCameraCount={diagnostics.ContextCameras.Count}";
+            if (!string.IsNullOrEmpty(decision.Remediation))
+                diagnosticText += $" remediation={decision.Remediation}";
+
+            if (response?["error"] is JObject error)
+            {
+                string errorMessage = error["message"]?.ToString();
+                error["message"] = AppendMessageDiagnostics(errorMessage, diagnosticText);
+                return response;
+            }
+
+            response["frameFresh"] = decision.FrameFresh;
+            response["cameraRenders"] = cameraRenders;
+            response["frameFreshReason"] = decision.FrameFreshReason;
+            response["isolatedCameras"] = isolatedCameras;
+            response["contextCameras"] = contextCameras;
+            response["isolatedCameraCount"] = isolatedCount;
+            response["contextCameraCount"] = diagnostics.ContextCameras.Count;
+
+            string message = response["message"]?.ToString();
+            response["message"] = AppendMessageDiagnostics(message, diagnosticText);
+            return response;
+        }
+
+        private static string AppendMessageDiagnostics(string message, string diagnostics)
+        {
+            if (string.IsNullOrEmpty(message))
+                return diagnostics;
+
+            int openBracket = message.LastIndexOf('[');
+            int closeBracket = message.LastIndexOf(']');
+            if (openBracket >= 0 && closeBracket == message.Length - 1 && openBracket < closeBracket)
+                return message.Insert(closeBracket, " " + diagnostics);
+
+            return $"{message} [{diagnostics}]";
+        }
+
+        private static JArray BuildCameraDisclosures(
+            IEnumerable<CameraDisclosure> disclosures)
+        {
+            var result = new JArray();
+            foreach (CameraDisclosure disclosure in disclosures)
+            {
+                if (result.Count >= MaxDisclosedCameras)
+                    break;
+                result.Add(new JObject
+                {
+                    ["name"] = disclosure.Name ?? string.Empty,
+                    ["scenePath"] = disclosure.ScenePath ?? string.Empty
+                });
+            }
+            return result;
+        }
+
+        private static JArray BuildCameraDisclosures(IEnumerable<Camera> cameras)
+        {
+            var result = new JArray();
+            foreach (Camera camera in cameras)
+            {
+                if (result.Count >= MaxDisclosedCameras)
+                    break;
+                if (camera == null)
+                    continue;
+                result.Add(new JObject
+                {
+                    ["name"] = camera.name ?? string.Empty,
+                    ["scenePath"] = camera.gameObject.scene.path ?? string.Empty
+                });
+            }
+            return result;
+        }
+
         private static Exception GetRenderViewFailureCause(Exception exception)
         {
             if (!(exception is System.Reflection.TargetInvocationException))
@@ -374,14 +1191,16 @@ namespace McpUnity.Tools
 
         private static JObject AddFailureDiagnostics(
             JObject errorResponse,
-            string degradedReason,
+            CaptureDecision decision,
             bool gameViewWindowCreated)
         {
             if (!(errorResponse?["error"] is JObject error))
                 return errorResponse;
 
-            string diagnostics =
-                $"degraded=true degradedReason={degradedReason}";
+            bool degraded = !string.IsNullOrEmpty(decision.DegradedReason);
+            string diagnostics = $"degraded={degraded.ToString().ToLowerInvariant()}";
+            if (!string.IsNullOrEmpty(decision.DegradedReason))
+                diagnostics += $" degradedReason={decision.DegradedReason}";
             if (gameViewWindowCreated)
                 diagnostics += " gameViewWindowCreated=true";
 

@@ -8,7 +8,7 @@ import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 // --- screenshot_game_view ---
 
 const gameViewToolName = 'screenshot_game_view';
-const gameViewToolDescription = 'Captures a screenshot from the Game View, reflecting what the player sees. Set force_focus=true to force-focus the Game View tab before capture. While Prefab contents are open, failed Game View capture never falls back to a loaded scene Main Camera.';
+const gameViewToolDescription = 'Captures a screenshot from the Game View, reflecting what the player sees. Only frameFresh=verified means the pixels reflect the current scene. When frameFreshReason includes game_view_not_active_tab, retry with force_focus=true so the Game View becomes the active tab and rerenders before capture through Unity\'s normal path. When it includes repaint_immediately_unavailable:, retry with force_focus=true only when isolatedCameraCount=0; focus cannot repair the post-isolation frame while isolated cameras exist. no_camera_render has no force-focus remediation. While Prefab contents are open, failed Game View capture never falls back to a loaded scene Main Camera.';
 
 function screenshotDimension(name: 'width' | 'height') {
   const message = `Screenshot ${name} must be between 1 and 4096 pixels (maximum 4096)`;
@@ -21,7 +21,7 @@ const gameViewParamsSchema = z.object({
   force_focus: z
     .boolean()
     .optional()
-    .describe('Force-focus the Game View tab before capture (adds a 1-frame delay). Use when Scene View is the active tab and you need the actual Game View render. Default: false.')
+    .describe('Force-focus the Game View tab before capture (waits 2 editor updates). Use when frameFreshReason indicates this remediation is applicable. Default: false.')
 });
 
 // --- screenshot_scene_view ---
@@ -76,38 +76,102 @@ async function screenshotHandler(mcpUnity: McpUnity, toolName: string, params: a
   const messageHasDegraded = message.includes('degraded=');
   let text = message;
 
-  if (!messageHasCapturePath || !messageHasDegraded) {
-    const diagnostics: string[] = [];
-    let unityMetadataAbsent = false;
-    if (!messageHasCapturePath) {
-      if (typeof response.capturePath === 'string') {
-        diagnostics.push(`capturePath=${response.capturePath}`);
+  const diagnostics: string[] = [];
+  let coreUnityMetadataAbsent = false;
+  let s8bUnityMetadataAbsent = false;
+  if (!messageHasCapturePath) {
+    if (typeof response.capturePath === 'string') {
+      diagnostics.push(`capturePath=${response.capturePath}`);
+    } else {
+      diagnostics.push('capturePath=unknown');
+      coreUnityMetadataAbsent = true;
+    }
+  }
+  if (!messageHasDegraded) {
+    if (typeof response.degraded === 'boolean') {
+      diagnostics.push(`degraded=${response.degraded}`);
+    } else {
+      diagnostics.push('degraded=unknown');
+      coreUnityMetadataAbsent = true;
+    }
+  }
+  if (hasRequiredUnityMetadata
+    && typeof response.degradedReason === 'string'
+    && !message.includes('degradedReason=')) {
+    diagnostics.push(`degradedReason=${response.degradedReason}`);
+  }
+  if (hasRequiredUnityMetadata
+    && typeof response.gameViewWindowCreated === 'boolean'
+    && !message.includes('gameViewWindowCreated=')) {
+    diagnostics.push(`gameViewWindowCreated=${response.gameViewWindowCreated}`);
+  }
+
+  if (toolName === gameViewToolName) {
+    if (!message.includes('frameFresh=')) {
+      if (typeof response.frameFresh === 'string') {
+        diagnostics.push(`frameFresh=${response.frameFresh}`);
       } else {
-        diagnostics.push('capturePath=unknown');
-        unityMetadataAbsent = true;
+        diagnostics.push('frameFresh=unknown');
+        s8bUnityMetadataAbsent = true;
       }
     }
-    if (!messageHasDegraded) {
-      if (typeof response.degraded === 'boolean') {
-        diagnostics.push(`degraded=${response.degraded}`);
+    if (!message.includes('cameraRenders=')) {
+      if (Number.isInteger(response.cameraRenders)) {
+        diagnostics.push(`cameraRenders=${response.cameraRenders}`);
       } else {
-        diagnostics.push('degraded=unknown');
-        unityMetadataAbsent = true;
+        diagnostics.push('cameraRenders=unknown');
+        s8bUnityMetadataAbsent = true;
       }
     }
-    if (hasRequiredUnityMetadata
-      && typeof response.degradedReason === 'string'
-      && !message.includes('degradedReason=')) {
-      diagnostics.push(`degradedReason=${response.degradedReason}`);
+    if (!message.includes('frameFreshReason=')) {
+      if (typeof response.frameFreshReason === 'string') {
+        diagnostics.push(`frameFreshReason=${response.frameFreshReason}`);
+      } else {
+        diagnostics.push('frameFreshReason=unknown');
+        s8bUnityMetadataAbsent = true;
+      }
     }
-    if (hasRequiredUnityMetadata
-      && typeof response.gameViewWindowCreated === 'boolean'
-      && !message.includes('gameViewWindowCreated=')) {
-      diagnostics.push(`gameViewWindowCreated=${response.gameViewWindowCreated}`);
+    if (!message.includes('isolatedCameras=')) {
+      if (Array.isArray(response.isolatedCameras)) {
+        diagnostics.push(`isolatedCameras=${JSON.stringify(response.isolatedCameras)}`);
+      } else {
+        diagnostics.push('isolatedCameras=unknown');
+        s8bUnityMetadataAbsent = true;
+      }
     }
-    if (unityMetadataAbsent) {
-      diagnostics.push('(unity-side metadata absent)');
+    if (!message.includes('isolatedCameraCount=')) {
+      if (Number.isInteger(response.isolatedCameraCount)) {
+        diagnostics.push(`isolatedCameraCount=${response.isolatedCameraCount}`);
+      } else {
+        diagnostics.push('isolatedCameraCount=unknown');
+        s8bUnityMetadataAbsent = true;
+      }
     }
+    if (!message.includes('contextCameras=')) {
+      if (Array.isArray(response.contextCameras)) {
+        diagnostics.push(`contextCameras=${JSON.stringify(response.contextCameras)}`);
+      } else {
+        diagnostics.push('contextCameras=unknown');
+        s8bUnityMetadataAbsent = true;
+      }
+    }
+    if (!message.includes('contextCameraCount=')) {
+      if (Number.isInteger(response.contextCameraCount)) {
+        diagnostics.push(`contextCameraCount=${response.contextCameraCount}`);
+      } else {
+        diagnostics.push('contextCameraCount=unknown');
+        s8bUnityMetadataAbsent = true;
+      }
+    }
+  }
+
+  if (coreUnityMetadataAbsent) {
+    diagnostics.push('(core unity-side metadata absent)');
+  }
+  if (s8bUnityMetadataAbsent) {
+    diagnostics.push('(S8-b unity-side metadata absent)');
+  }
+  if (diagnostics.length > 0) {
     text += `\n${diagnostics.join(' ')}`;
   }
 

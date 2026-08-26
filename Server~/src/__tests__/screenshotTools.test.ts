@@ -47,6 +47,17 @@ describe('screenshot_game_view', () => {
     expect(cameraCall?.[1]).toContain('never falls back to loaded scene cameras');
 
     const gameViewCall = mockServerTool.mock.calls.find((c) => c[0] === 'screenshot_game_view');
+    expect(gameViewCall?.[1]).toContain(
+      'Only frameFresh=verified means the pixels reflect the current scene',
+    );
+    expect(gameViewCall?.[1]).toContain('repaint_immediately_unavailable:');
+    expect(gameViewCall?.[1]).toContain('retry with force_focus=true');
+    expect(gameViewCall?.[1]).toContain('active tab and rerenders before capture');
+    expect(gameViewCall?.[1]).toContain('only when isolatedCameraCount=0');
+    expect(gameViewCall?.[1]).toContain(
+      'focus cannot repair the post-isolation frame while isolated cameras exist',
+    );
+    expect(gameViewCall?.[1]).toContain('no_camera_render has no force-focus remediation');
     expect(gameViewCall?.[1]).toContain('Prefab contents are open');
     expect(gameViewCall?.[1]).toContain('never falls back to a loaded scene Main Camera');
   });
@@ -91,6 +102,124 @@ describe('screenshot_game_view', () => {
     expect(result).not.toHaveProperty('structuredContent');
   });
 
+  it('carries freshness and camera-isolation metadata into text before the image', async () => {
+    (mockSendRequest as any).mockResolvedValue({
+      success: true,
+      mimeType: 'image/png',
+      data: 'iVBORw0KGgo=',
+      message: 'Game View screenshot captured [capturePath=render_view degraded=false]',
+      capturePath: 'render_view',
+      degraded: false,
+      frameFresh: 'verified',
+      cameraRenders: 2,
+      frameFreshReason: 'camera_render_observed',
+      isolatedCameras: [
+        { name: 'OrphanPreviewCamera', scenePath: 'Assets/Orphan.prefab' },
+      ],
+      isolatedCameraCount: 9,
+      contextCameras: [
+        { name: 'SessionCamera', scenePath: 'Assets/Session.prefab' },
+      ],
+      contextCameraCount: 1,
+    });
+    const handler = getHandler('screenshot_game_view');
+
+    const result = await handler({ width: 320, height: 180 });
+    const text = result.content[0].text;
+
+    expect(result.content).toHaveLength(2);
+    expect(text).toContain('frameFresh=verified');
+    expect(text).toContain('cameraRenders=2');
+    expect(text).toContain('frameFreshReason=camera_render_observed');
+    expect(text).toContain(
+      'isolatedCameras=[{"name":"OrphanPreviewCamera","scenePath":"Assets/Orphan.prefab"}]',
+    );
+    expect(text).toContain(
+      'contextCameras=[{"name":"SessionCamera","scenePath":"Assets/Session.prefab"}]',
+    );
+    expect(text).toContain('isolatedCameraCount=9');
+    expect(text).toContain('contextCameraCount=1');
+    expect(text).not.toContain('metadata absent');
+    expect(result.content[1].type).toBe('image');
+    expect(result).not.toHaveProperty('structuredContent');
+  });
+
+  it('does not duplicate the five S8-b scalar tokens already emitted by Unity', async () => {
+    (mockSendRequest as any).mockResolvedValue({
+      success: true,
+      mimeType: 'image/png',
+      data: 'iVBORw0KGgo=',
+      message: 'Game View screenshot captured [capturePath=render_view degraded=false frameFresh=verified cameraRenders=2 frameFreshReason=camera_render_observed isolatedCameraCount=1 contextCameraCount=0]',
+      capturePath: 'render_view',
+      degraded: false,
+      frameFresh: 'verified',
+      cameraRenders: 2,
+      frameFreshReason: 'camera_render_observed',
+      isolatedCameras: [
+        { name: 'OrphanPreviewCamera', scenePath: 'Assets/Orphan.prefab' },
+      ],
+      isolatedCameraCount: 1,
+      contextCameras: [],
+      contextCameraCount: 0,
+    });
+    const handler = getHandler('screenshot_game_view');
+
+    const result = await handler({ width: 320, height: 180 });
+    const text = result.content[0].text;
+
+    for (const token of [
+      'frameFresh=verified',
+      'cameraRenders=2',
+      'frameFreshReason=camera_render_observed',
+      'isolatedCameraCount=1',
+      'contextCameraCount=0',
+    ]) {
+      expect(text.split(token)).toHaveLength(2);
+    }
+    expect(text).toContain(
+      'isolatedCameras=[{"name":"OrphanPreviewCamera","scenePath":"Assets/Orphan.prefab"}]',
+    );
+    expect(text).toContain('contextCameras=[]');
+    expect(result.content).toHaveLength(2);
+    expect(result.content[0].type).toBe('text');
+    expect(result.content[1].type).toBe('image');
+    expect(result).not.toHaveProperty('structuredContent');
+  });
+
+  it('does not apply Game View S8-b enrichment to other screenshot tools', async () => {
+    (mockSendRequest as any).mockResolvedValue({
+      success: true,
+      mimeType: 'image/png',
+      data: 'iVBORw0KGgo=',
+      message: 'Scene View screenshot captured [capturePath=scene_view_camera degraded=false]',
+      capturePath: 'scene_view_camera',
+      degraded: false,
+      frameFresh: 'verified',
+      cameraRenders: 3,
+      frameFreshReason: 'camera_render_observed',
+      isolatedCameras: [],
+      isolatedCameraCount: 0,
+      contextCameras: [],
+      contextCameraCount: 0,
+    });
+    const handler = getHandler('screenshot_scene_view');
+
+    const result = await handler({ width: 320, height: 180 });
+    const text = result.content[0].text;
+
+    expect(text).not.toContain('frameFresh=');
+    expect(text).not.toContain('cameraRenders=');
+    expect(text).not.toContain('frameFreshReason=');
+    expect(text).not.toContain('isolatedCameras=');
+    expect(text).not.toContain('isolatedCameraCount=');
+    expect(text).not.toContain('contextCameras=');
+    expect(text).not.toContain('contextCameraCount=');
+    expect(result.content).toHaveLength(2);
+    expect(result.content[0].type).toBe('text');
+    expect(result.content[1].type).toBe('image');
+    expect(result).not.toHaveProperty('structuredContent');
+  });
+
   it('includes degraded diagnostics in machine-readable text before the image', async () => {
     (mockSendRequest as any).mockResolvedValue({
       success: true,
@@ -132,11 +261,39 @@ describe('screenshot_game_view', () => {
 
     expect(result.content[0].text).toContain('capturePath=unknown');
     expect(result.content[0].text).toContain('degraded=unknown');
-    expect(result.content[0].text).toContain('unity-side metadata absent');
+    expect(result.content[0].text).toContain('core unity-side metadata absent');
     expect(result.content[1].type).toBe('image');
   });
 
-  it('trusts complete message metadata when sibling fields are absent', async () => {
+  it('marks missing S8-b Game View metadata without changing the content shape', async () => {
+    (mockSendRequest as any).mockResolvedValue({
+      success: true,
+      mimeType: 'image/png',
+      data: 'iVBORw0KGgo=',
+      message: 'Game View screenshot captured [capturePath=render_view degraded=false]',
+      capturePath: 'render_view',
+      degraded: false,
+    });
+    const handler = getHandler('screenshot_game_view');
+
+    const result = await handler({ width: 320, height: 180 });
+    const text = result.content[0].text;
+
+    expect(text).toContain('frameFresh=unknown');
+    expect(text).toContain('cameraRenders=unknown');
+    expect(text).toContain('frameFreshReason=unknown');
+    expect(text).toContain('isolatedCameras=unknown');
+    expect(text).toContain('isolatedCameraCount=unknown');
+    expect(text).toContain('contextCameras=unknown');
+    expect(text).toContain('contextCameraCount=unknown');
+    expect(text).toContain('S8-b unity-side metadata absent');
+    expect(text).not.toContain('core unity-side metadata absent');
+    expect(result.content).toHaveLength(2);
+    expect(result.content[1].type).toBe('image');
+    expect(result).not.toHaveProperty('structuredContent');
+  });
+
+  it('marks S8-b metadata absent independently of S8-a sibling fields', async () => {
     (mockSendRequest as any).mockResolvedValue({
       success: true,
       mimeType: 'image/png',
@@ -150,8 +307,18 @@ describe('screenshot_game_view', () => {
 
     expect(text.match(/capturePath=render_view/g)).toHaveLength(1);
     expect(text.match(/degraded=false/g)).toHaveLength(1);
-    expect(text).not.toContain('unknown');
-    expect(text).not.toContain('unity-side metadata absent');
+    expect(text).toContain('frameFresh=unknown');
+    expect(text).toContain('cameraRenders=unknown');
+    expect(text).toContain('frameFreshReason=unknown');
+    expect(text).toContain('isolatedCameras=unknown');
+    expect(text).toContain('isolatedCameraCount=unknown');
+    expect(text).toContain('contextCameras=unknown');
+    expect(text).toContain('contextCameraCount=unknown');
+    expect(text).toContain('S8-b unity-side metadata absent');
+    expect(text).not.toContain('core unity-side metadata absent');
+    expect(result.content).toHaveLength(2);
+    expect(result.content[1].type).toBe('image');
+    expect(result).not.toHaveProperty('structuredContent');
   });
 
   it('fills only the missing message metadata token without duplicating the existing one', async () => {
