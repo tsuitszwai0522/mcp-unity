@@ -5,11 +5,13 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { McpUnityError, ErrorType } from '../utils/errors.js';
 import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { payloadContent } from '../utils/toolPayload.js';
+import { getRegisteredToolSchema } from '../utils/structuredContentSeam.js';
 
 const toolName = 'batch_execute';
 const toolDescription = `Executes multiple tool operations in a single batch request.
 Reduces network round-trips and enables Undo-backed atomic operations outside active Prefab contents sessions.
 atomic=true is rejected while a Prefab contents session is active and cannot include open_prefab_contents because preview changes bypass Unity Undo.
+Inner schema validation occurs before any operation executes; with stopOnError=true, any operation validation failure prevents the entire batch from executing.
 Performance improvement: 10-100x for repetitive operations.`;
 
 const operationSchema = z.object({
@@ -64,6 +66,67 @@ interface BatchExecuteResponse {
   summary: BatchSummary;
 }
 
+const validationErrorMessage = (
+  index: number,
+  id: string,
+  tool: string,
+  reason: string,
+): string => `Batch operation ${index} (id "${id}", tool "${tool}") ${reason}`;
+
+const pickParsedCallerParams = (
+  parsedParams: Record<string, unknown>,
+  callerParams: Record<string, unknown>,
+): Record<string, unknown> => Object.fromEntries(
+  Object.keys(callerParams)
+    .filter((key) => Object.prototype.hasOwnProperty.call(parsedParams, key))
+    .map((key) => [key, parsedParams[key]]),
+);
+
+const throwWithNodeSideContext = (
+  error: unknown,
+  locallyRejectedOperations: OperationResult[],
+  validationWarnings: string[],
+): never => {
+  if (locallyRejectedOperations.length === 0 && validationWarnings.length === 0) {
+    throw error;
+  }
+
+  const type = error instanceof McpUnityError ? error.type : ErrorType.INTERNAL;
+  const originalMessage = error instanceof Error ? error.message : String(error);
+  const contextLines = [
+    ...(locallyRejectedOperations.length === 0
+      ? []
+      : [
+          'Node-side rejections:',
+          ...locallyRejectedOperations.map((operation) => `  - ${operation.error}`),
+        ]),
+    ...(validationWarnings.length === 0
+      ? []
+      : [
+          'Warnings:',
+          ...validationWarnings.map((warning) => `  - ${warning}`),
+        ]),
+  ];
+  const originalDetails = error instanceof McpUnityError ? error.details : undefined;
+  const details = originalDetails !== null
+    && typeof originalDetails === 'object'
+    && !Array.isArray(originalDetails)
+    ? originalDetails
+    : originalDetails === undefined
+      ? {}
+      : { unityErrorDetails: originalDetails };
+
+  throw new McpUnityError(
+    type,
+    `${originalMessage}\n\n${contextLines.join('\n')}`,
+    {
+      ...details,
+      locallyRejectedOperations,
+      validationWarnings,
+    },
+  );
+};
+
 /**
  * Creates and registers the Batch Execute tool with the MCP server
  */
@@ -81,7 +144,7 @@ export function registerBatchExecuteTool(server: McpServer, mcpUnity: McpUnity, 
           stopOnError: params.stopOnError,
           atomic: params.atomic
         });
-        const result = await batchExecuteHandler(mcpUnity, params, logger);
+        const result = await batchExecuteHandler(server, mcpUnity, params, logger);
         logger.info(`Tool execution completed: ${toolName}`);
         return result;
       } catch (error) {
@@ -93,6 +156,7 @@ export function registerBatchExecuteTool(server: McpServer, mcpUnity: McpUnity, 
 }
 
 async function batchExecuteHandler(
+  server: McpServer,
   mcpUnity: McpUnity,
   params: z.infer<typeof paramsSchema>,
   logger: Logger
@@ -112,31 +176,185 @@ async function batchExecuteHandler(
     );
   }
 
-  // Validate no nested batch_execute operations
-  for (const op of params.operations) {
-    if (op.tool === 'batch_execute') {
-      throw new McpUnityError(
-        ErrorType.VALIDATION,
-        "Cannot nest batch_execute operations"
+  const stopOnError = params.stopOnError ?? true;
+  const forwardedOperationIndexes: number[] = [];
+  const locallyRejectedOperations: OperationResult[] = [];
+  const validationWarnings: string[] = [];
+  const forwardedOperations = params.operations.flatMap((op, index) => {
+    const id = op.id ?? index.toString();
+    let validationFailure: string | undefined;
+
+    if (op.tool === toolName) {
+      validationFailure = validationErrorMessage(
+        index,
+        id,
+        op.tool,
+        'Cannot nest batch_execute operations',
       );
     }
-  }
 
-  logger.info(`Sending batch with ${params.operations.length} operations to Unity`);
-
-  // Send the batch request to Unity
-  const response = await mcpUnity.sendRequest({
-    method: toolName,
-    params: {
-      operations: params.operations.map((op, index) => ({
-        tool: op.tool,
-        params: op.params ?? {},
-        id: op.id ?? index.toString()
-      })),
-      stopOnError: params.stopOnError ?? true,
-      atomic: params.atomic ?? false
+    const schema = getRegisteredToolSchema(server, op.tool);
+    if (!validationFailure && !schema) {
+      const warning = validationErrorMessage(
+        index,
+        id,
+        op.tool,
+        'was not validated by Node because its schema is not registered; Unity will perform authoritative tool lookup and validation.',
+      );
+      validationWarnings.push(warning);
+      logger.warn(warning);
     }
-  }) as BatchExecuteResponse;
+
+    const validation = validationFailure || !schema
+      ? undefined
+      : schema.safeParse(op.params ?? {});
+    if (validation && !validation.success) {
+      const details = validation.error.issues
+        .map((issue) => issue.path.length > 0
+          ? `${issue.message} at ${issue.path.join('.')}`
+          : issue.message)
+        .join('; ');
+      validationFailure = validationErrorMessage(
+        index,
+        id,
+        op.tool,
+        `has invalid params: ${details}`,
+      );
+    }
+
+    if (validationFailure) {
+      if (stopOnError) {
+        throw new McpUnityError(ErrorType.VALIDATION, validationFailure);
+      }
+
+      locallyRejectedOperations.push({
+        index,
+        id,
+        success: false,
+        error: validationFailure,
+        errorCode: 'NODE_SCHEMA_VALIDATION',
+      });
+      return [];
+    }
+
+    const parsedParams = validation?.success
+      ? validation.data as Record<string, unknown>
+      : undefined;
+    const callerParams = op.params ?? {};
+    forwardedOperationIndexes.push(index);
+    return [{
+      tool: op.tool,
+      // Keep caller presence semantics while matching direct-call coercion.
+      // A caller-provided top-level object retains any parsed nested defaults.
+      params: parsedParams
+        ? pickParsedCallerParams(parsedParams, callerParams)
+        : callerParams,
+      id,
+    }];
+  });
+
+  logger.info(`Sending batch with ${forwardedOperations.length} operations to Unity`);
+
+  let response: BatchExecuteResponse;
+  if (forwardedOperations.length === 0) {
+    response = {
+      success: false,
+      type: 'text',
+      message: `Batch execution completed with errors. 0/${params.operations.length} operations succeeded, ${locallyRejectedOperations.length} failed.`,
+      results: locallyRejectedOperations,
+      summary: {
+        total: params.operations.length,
+        succeeded: 0,
+        failed: locallyRejectedOperations.length,
+        executed: 0,
+      },
+    };
+  } else {
+    const unityResponse = await mcpUnity.sendRequest({
+      method: toolName,
+      params: {
+        operations: forwardedOperations,
+        stopOnError,
+        atomic: params.atomic ?? false
+      }
+    })
+      .catch((error) => throwWithNodeSideContext(
+        error,
+        locallyRejectedOperations,
+        validationWarnings,
+      )) as BatchExecuteResponse;
+
+    const rawUnityResults = Array.isArray(unityResponse.results)
+      ? unityResponse.results
+      : [];
+    if (!stopOnError) {
+      const receivedIndexes = rawUnityResults.map((result) => result.index);
+      const receivedIndexSet = new Set(receivedIndexes);
+      const missingForwardedIndexes = forwardedOperationIndexes.filter(
+        (_originalIndex, forwardedIndex) => !receivedIndexSet.has(forwardedIndex),
+      );
+      const hasUnexpectedIndexes = receivedIndexes.some((index) =>
+        !Number.isInteger(index) || index < 0 || index >= forwardedOperations.length);
+      const hasDuplicateIndexes = receivedIndexSet.size !== receivedIndexes.length;
+
+      if (
+        rawUnityResults.length !== forwardedOperations.length
+        || missingForwardedIndexes.length > 0
+        || hasUnexpectedIndexes
+        || hasDuplicateIndexes
+      ) {
+        const protocolError = new McpUnityError(
+          ErrorType.TOOL_EXECUTION,
+          'Unity batch response violated result coverage for stopOnError=false: ' +
+          `expected ${forwardedOperations.length} results but received ${rawUnityResults.length}; ` +
+          `missing original operation indexes: ${missingForwardedIndexes.join(', ') || 'none'}.`,
+          {
+            expectedResultCount: forwardedOperations.length,
+            actualResultCount: rawUnityResults.length,
+            missingOriginalOperationIndexes: missingForwardedIndexes,
+            receivedUnityResultIndexes: receivedIndexes,
+          },
+        );
+        throwWithNodeSideContext(
+          protocolError,
+          locallyRejectedOperations,
+          validationWarnings,
+        );
+      }
+    }
+
+    if (locallyRejectedOperations.length === 0) {
+      response = unityResponse;
+    } else {
+      const unityResults = rawUnityResults.map((result, resultIndex) => ({
+        ...result,
+        index: forwardedOperationIndexes[result.index]
+          ?? forwardedOperationIndexes[resultIndex]
+          ?? result.index,
+      }));
+      const results = [...unityResults, ...locallyRejectedOperations]
+        .sort((left, right) => left.index - right.index);
+      const succeeded = unityResponse.summary?.succeeded
+        ?? unityResults.filter((result) => result.success).length;
+      const unityFailed = unityResponse.summary?.failed
+        ?? unityResults.filter((result) => !result.success).length;
+      const failed = unityFailed + locallyRejectedOperations.length;
+      const executed = unityResponse.summary?.executed ?? unityResults.length;
+
+      response = {
+        ...unityResponse,
+        success: false,
+        message: `Batch execution completed with errors. ${succeeded}/${params.operations.length} operations succeeded, ${failed} failed.`,
+        results,
+        summary: {
+          total: params.operations.length,
+          succeeded,
+          failed,
+          executed,
+        },
+      };
+    }
+  }
 
   // Format the response message
   let resultText = response.message || 'Batch execution completed';
@@ -147,6 +365,12 @@ async function batchExecuteHandler(
     if (response.summary.failed > 0) {
       resultText += `, ${response.summary.failed} failed`;
     }
+  }
+
+  if (validationWarnings.length > 0) {
+    resultText += '\n\nWarnings:\n' + validationWarnings
+      .map((warning) => `  - ${warning}`)
+      .join('\n');
   }
 
   // Build structured results with full tool data for each operation
@@ -194,7 +418,8 @@ async function batchExecuteHandler(
     message: response.message
       || `${response.summary?.succeeded ?? 0}/${response.summary?.total ?? structuredResults.length} operations succeeded`,
     results: structuredResults,
-    summary: response.summary
+    summary: response.summary,
+    ...(validationWarnings.length === 0 ? {} : { warnings: validationWarnings }),
   };
 
   const hasOperationFailures = !response.success

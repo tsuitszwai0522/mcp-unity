@@ -1,6 +1,9 @@
 import { jest, describe, it, expect, beforeEach } from '@jest/globals';
+import * as z from 'zod';
 import { McpUnityError, ErrorType } from '../utils/errors.js';
 import { registerBatchExecuteTool } from '../tools/batchExecuteTool.js';
+import { registerRunTestsTool } from '../tools/runTestsTool.js';
+import { installStructuredContentSeam } from '../utils/structuredContentSeam.js';
 
 // Mock the McpUnity class
 const mockSendRequest = jest.fn();
@@ -20,6 +23,25 @@ const mockLogger = {
 const mockServerTool = jest.fn();
 const mockServer = {
   tool: mockServerTool
+};
+
+type ToolHandler = (params: any) => Promise<any>;
+
+const createHandlerServer = (registerAdditionalTools?: (server: any) => void) => {
+  const handlers = new Map<string, ToolHandler>();
+  const handlerServer = {
+    tool: jest.fn((name: string, ...args: unknown[]) => {
+      handlers.set(name, args.at(-1) as ToolHandler);
+    }),
+    registerTool: jest.fn((name: string, ...args: unknown[]) => {
+      handlers.set(name, args.at(-1) as ToolHandler);
+    }),
+  } as any;
+  installStructuredContentSeam(handlerServer);
+  registerRunTestsTool(handlerServer, mockMcpUnity as any, mockLogger as any);
+  registerAdditionalTools?.(handlerServer);
+  registerBatchExecuteTool(handlerServer, mockMcpUnity as any, mockLogger as any);
+  return { handlerServer, handlers };
 };
 
 describe('Batch Execute Tool', () => {
@@ -50,6 +72,8 @@ describe('Batch Execute Tool', () => {
       expect(description).toContain('atomic=true is rejected');
       expect(description).toContain('active Prefab contents session');
       expect(description).toContain('cannot include open_prefab_contents');
+      expect(description).toContain('before any operation executes');
+      expect(description).toContain('prevents the entire batch from executing');
     });
 
     it('should have correct schema with operations array', () => {
@@ -66,8 +90,8 @@ describe('Batch Execute Tool', () => {
     let toolHandler: (params: any) => Promise<any>;
 
     beforeEach(() => {
-      registerBatchExecuteTool(mockServer as any, mockMcpUnity as any, mockLogger as any);
-      toolHandler = mockServerTool.mock.calls[0][3];
+      const { handlers } = createHandlerServer();
+      toolHandler = handlers.get('batch_execute')!;
     });
 
     it('should send batch request to Unity with correct parameters', async () => {
@@ -84,8 +108,8 @@ describe('Batch Execute Tool', () => {
 
       const params = {
         operations: [
-          { tool: 'create_gameobject', params: { name: 'Test1' } },
-          { tool: 'create_gameobject', params: { name: 'Test2' } }
+          { tool: 'run_tests', params: { testFilter: 'Test1' } },
+          { tool: 'run_tests', params: { testFilter: 'Test2' } }
         ],
         stopOnError: true,
         atomic: false
@@ -97,8 +121,8 @@ describe('Batch Execute Tool', () => {
         method: 'batch_execute',
         params: expect.objectContaining({
           operations: expect.arrayContaining([
-            expect.objectContaining({ tool: 'create_gameobject' }),
-            expect.objectContaining({ tool: 'create_gameobject' })
+            expect.objectContaining({ tool: 'run_tests' }),
+            expect.objectContaining({ tool: 'run_tests' })
           ]),
           stopOnError: true,
           atomic: false
@@ -111,23 +135,286 @@ describe('Batch Execute Tool', () => {
       expect(result.isError).toBeUndefined();
     });
 
-    it('should throw error when operations array is empty', async () => {
+    it('validates with the real run_tests schema without injecting its defaults into Unity params', async () => {
+      mockSendRequest.mockResolvedValue({
+        success: true,
+        type: 'text',
+        message: 'Successfully executed 1/1 operations.',
+        results: [{ index: 0, id: 'run', success: true }],
+        summary: { total: 1, succeeded: 1, failed: 0, executed: 1 }
+      });
+      const callerParams = {};
+
+      await toolHandler({
+        operations: [{ tool: 'run_tests', id: 'run', params: callerParams }]
+      });
+
+      const request = mockSendRequest.mock.calls[0][0] as any;
+      expect(request.params.operations).toEqual([
+        { tool: 'run_tests', id: 'run', params: callerParams }
+      ]);
+      expect(Object.keys(request.params.operations[0].params)).toEqual(Object.keys(callerParams));
+      expect(request.params.operations[0].params).not.toHaveProperty('returnOnlyFailures');
+    });
+
+    it('forwards caller-provided keys with dynamic-schema preprocess coercion', async () => {
+      const { handlers } = createHandlerServer((server) => {
+        server.tool(
+          'test_echo',
+          'Echoes a coerced integer',
+          {
+            n: z.preprocess(
+              (value) => typeof value === 'string' ? Number(value) : value,
+              z.number().int(),
+            ),
+          },
+          async () => ({ content: [{ type: 'text', text: 'unused' }] }),
+        );
+      });
+      const dynamicBatchHandler = handlers.get('batch_execute')!;
+      mockSendRequest.mockResolvedValue({
+        success: true,
+        type: 'text',
+        message: 'Successfully executed 1/1 operations.',
+        results: [{ index: 0, id: 'echo', success: true }],
+        summary: { total: 1, succeeded: 1, failed: 0, executed: 1 }
+      });
+
+      await dynamicBatchHandler({
+        operations: [{ tool: 'test_echo', id: 'echo', params: { n: '7' } }]
+      });
+
+      expect(mockSendRequest).toHaveBeenCalledWith({
+        method: 'batch_execute',
+        params: {
+          operations: [{ tool: 'test_echo', id: 'echo', params: { n: 7 } }],
+          stopOnError: true,
+          atomic: false
+        }
+      });
+      const forwardedNumber = (mockSendRequest.mock.calls[0][0] as any)
+        .params.operations[0].params.n;
+      expect(typeof forwardedNumber).toBe('number');
+    });
+
+    it('should return a client-visible validation error when operations array is empty', async () => {
       const params = {
         operations: [],
         stopOnError: true
       };
 
-      await expect(toolHandler(params)).rejects.toThrow(McpUnityError);
+      const result = await toolHandler(params);
+      expect(result.isError).toBe(true);
+      expect(result.structuredContent.error).toMatchObject({
+        type: ErrorType.VALIDATION,
+        message: "The 'operations' array is required and must contain at least one operation"
+      });
+      expect(result.content).toEqual([{ type: 'text', text: result.structuredContent.error.message }]);
     });
 
-    it('should throw error when nested batch_execute is detected', async () => {
+    it('should return a client-visible error when nested batch_execute is detected', async () => {
       const params = {
         operations: [
           { tool: 'batch_execute', params: { operations: [] } }
         ]
       };
 
-      await expect(toolHandler(params)).rejects.toThrow('Cannot nest batch_execute');
+      const result = await toolHandler(params);
+      expect(result.isError).toBe(true);
+      expect(result.structuredContent.error).toMatchObject({
+        type: ErrorType.VALIDATION,
+        message: expect.stringContaining('Cannot nest batch_execute')
+      });
+      expect(result.content[0].text).toContain('Batch operation 0 (id "0", tool "batch_execute")');
+    });
+
+    it('fails fast on known invalid inner params with operation context and valid parameter names', async () => {
+      const params = {
+        operations: [
+          {
+            tool: 'run_tests',
+            id: 'invalid-tests',
+            params: { bogusOne: true, bogusTwo: 2 }
+          },
+          { tool: 'not_in_registry_but_valid_in_unity', id: 'later', params: {} }
+        ],
+        stopOnError: true
+      };
+
+      const result = await toolHandler(params);
+      expect(result.isError).toBe(true);
+      expect(result.structuredContent.error.message).toBe(
+        'Batch operation 0 (id "invalid-tests", tool "run_tests") has invalid params: ' +
+        'Unrecognized parameter(s): "bogusOne", "bogusTwo". ' +
+        'Valid parameters for run_tests: testMode, testFilter, assemblyNames, returnOnlyFailures, returnWithLogs'
+      );
+      expect(result.content).toEqual([{
+        type: 'text',
+        text: result.structuredContent.error.message
+      }]);
+      expect(mockSendRequest).not.toHaveBeenCalled();
+    });
+
+    it('forwards tools absent from the Node registry for authoritative Unity lookup', async () => {
+      mockSendRequest.mockResolvedValue({
+        success: false,
+        type: 'text',
+        message: 'Batch execution stopped on error. 0/1 operations succeeded.',
+        results: [{ index: 0, id: 'missing-tool', success: false, error: 'Unknown tool' }],
+        summary: { total: 1, succeeded: 0, failed: 1, executed: 1 }
+      });
+      const params = {
+        operations: [{ tool: 'not_a_registered_tool', id: 'missing-tool', params: {} }]
+      };
+
+      const result = await toolHandler(params);
+
+      expect(mockSendRequest).toHaveBeenCalledWith({
+        method: 'batch_execute',
+        params: {
+          operations: [{ tool: 'not_a_registered_tool', id: 'missing-tool', params: {} }],
+          stopOnError: true,
+          atomic: false
+        }
+      });
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain('Warnings:');
+      expect(result.content[0].text).toContain(
+        'was not validated by Node because its schema is not registered'
+      );
+      expect(JSON.parse(result.content[1].text).warnings[0]).toContain(
+        'was not validated by Node because its schema is not registered'
+      );
+    });
+
+    it('continues valid operations after Node validation failures when stopOnError=false', async () => {
+      mockSendRequest.mockResolvedValue({
+        success: true,
+        type: 'text',
+        message: 'Successfully executed 1/1 operations.',
+        results: [{ index: 0, id: 'valid-tests', success: true }],
+        summary: { total: 1, succeeded: 1, failed: 0, executed: 1 }
+      });
+
+      const result = await toolHandler({
+        operations: [
+          { tool: 'run_tests', id: 'invalid-tests', params: { bogus: true } },
+          { tool: 'run_tests', id: 'valid-tests', params: { returnOnlyFailures: false } }
+        ],
+        stopOnError: false
+      });
+
+      expect(mockSendRequest).toHaveBeenCalledWith({
+        method: 'batch_execute',
+        params: {
+          operations: [{
+            tool: 'run_tests',
+            id: 'valid-tests',
+            params: { returnOnlyFailures: false }
+          }],
+          stopOnError: false,
+          atomic: false
+        }
+      });
+      const payload = JSON.parse(result.content[1].text);
+      expect(result.isError).toBe(true);
+      expect(payload.summary).toEqual({ total: 2, succeeded: 1, failed: 1, executed: 1 });
+      expect(payload.results).toEqual([
+        expect.objectContaining({
+          id: 'invalid-tests',
+          status: 'Error',
+          errorCode: 'NODE_SCHEMA_VALIDATION',
+          error: expect.stringContaining('Batch operation 0')
+        }),
+        expect.objectContaining({ id: 'valid-tests', status: 'OK' })
+      ]);
+    });
+
+    it('reports zero executed operations when Node rejects the entire batch', async () => {
+      const result = await toolHandler({
+        operations: [
+          { tool: 'run_tests', id: 'invalid-0', params: { bogus: true } },
+          { tool: 'run_tests', id: 'invalid-1', params: { nope: true } }
+        ],
+        stopOnError: false
+      });
+
+      expect(mockSendRequest).not.toHaveBeenCalled();
+      expect(JSON.parse(result.content[1].text).summary).toEqual({
+        total: 2,
+        succeeded: 0,
+        failed: 2,
+        executed: 0
+      });
+    });
+
+    it('fails loudly when a non-stopping Unity response omits a forwarded result', async () => {
+      mockSendRequest.mockResolvedValue({
+        success: true,
+        type: 'text',
+        message: 'Unexpectedly incomplete response',
+        results: [{ index: 0, id: 'first', success: true }],
+        summary: { total: 2, succeeded: 1, failed: 0, executed: 1 }
+      });
+
+      const result = await toolHandler({
+        operations: [
+          { tool: 'run_tests', id: 'first', params: {} },
+          { tool: 'run_tests', id: 'missing', params: {} }
+        ],
+        stopOnError: false
+      });
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toBe(
+        'Unity batch response violated result coverage for stopOnError=false: ' +
+        'expected 2 results but received 1; missing original operation indexes: 1.'
+      );
+      expect(result.structuredContent.error).toMatchObject({
+        type: ErrorType.TOOL_EXECUTION,
+        details: {
+          expectedResultCount: 2,
+          actualResultCount: 1,
+          missingOriginalOperationIndexes: [1],
+          receivedUnityResultIndexes: [0]
+        }
+      });
+    });
+
+    it('preserves Node rejections and warnings when the Unity request rejects', async () => {
+      mockSendRequest.mockRejectedValueOnce(new McpUnityError(
+        ErrorType.TIMEOUT,
+        'Request timed out',
+        { requestId: 'batch-timeout' }
+      ));
+
+      const result = await toolHandler({
+        operations: [
+          { tool: 'run_tests', id: 'invalid-tests', params: { bogus: true } },
+          { tool: 'unity_only_tool', id: 'unity-only', params: {} }
+        ],
+        stopOnError: false
+      });
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain('Request timed out');
+      expect(result.content[0].text).toContain('Node-side rejections:');
+      expect(result.content[0].text).toContain('Batch operation 0 (id "invalid-tests"');
+      expect(result.content[0].text).toContain('Warnings:');
+      expect(result.content[0].text).toContain('Batch operation 1 (id "unity-only"');
+      expect(result.structuredContent.error).toMatchObject({
+        type: ErrorType.TIMEOUT,
+        details: {
+          requestId: 'batch-timeout',
+          locallyRejectedOperations: [{
+            index: 0,
+            id: 'invalid-tests',
+            success: false,
+            errorCode: 'NODE_SCHEMA_VALIDATION'
+          }],
+          validationWarnings: [expect.stringContaining('Batch operation 1')]
+        }
+      });
     });
 
     it('forwards atomic prefab-opening batches and preserves Unity validation errors', async () => {
@@ -145,11 +432,26 @@ describe('Batch Execute Tool', () => {
         atomic: true
       };
 
-      await expect(toolHandler(params)).rejects.toMatchObject({
+      const result = await toolHandler(params);
+      const warning =
+        'Batch operation 0 (id "0", tool "open_prefab_contents") was not validated by Node ' +
+        'because its schema is not registered; Unity will perform authoritative tool lookup and validation.';
+      const expectedMessage =
+        `atomic=true cannot include open_prefab_contents\n\nWarnings:\n  - ${warning}`;
+      expect(result.isError).toBe(true);
+      expect(result.structuredContent.error).toEqual({
         type: ErrorType.TOOL_EXECUTION,
-        message: 'atomic=true cannot include open_prefab_contents',
-        details: { unityErrorType: 'validation_error' }
+        message: expectedMessage,
+        details: {
+          unityErrorType: 'validation_error',
+          locallyRejectedOperations: [],
+          validationWarnings: [warning]
+        }
       });
+      expect(result.content).toEqual([{
+        type: 'text',
+        text: expectedMessage
+      }]);
       expect(mockSendRequest).toHaveBeenCalledWith({
         method: 'batch_execute',
         params: {

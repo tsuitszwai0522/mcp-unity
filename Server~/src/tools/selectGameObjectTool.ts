@@ -53,7 +53,11 @@ export function registerSelectGameObjectTool(server: McpServer, mcpUnity: McpUni
  * @throws McpUnityError if the request to Unity fails
  */
 async function toolHandler(mcpUnity: McpUnity, params: any): Promise<CallToolResult> {
-  // Custom validation since we can't use refine/superRefine while maintaining ZodObject type
+  // Custom validation, kept in the handler for a clearer error message.
+  // (Historical note: this used to say refine/superRefine was impossible while keeping a
+  //  ZodObject. That was a zod 3 constraint — in zod 4 .refine() returns a ZodObject and the
+  //  strict-schema seam accepts it. The seam rejects object-level checks, so handler-side
+  //  validation remains the right place; the old rationale no longer applies.)
   if (params.objectPath === undefined && params.objectName === undefined && params.instanceId === undefined) {
     throw new McpUnityError(
       ErrorType.VALIDATION,

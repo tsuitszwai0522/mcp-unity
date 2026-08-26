@@ -22,7 +22,9 @@ const createServer = (withStructuredContentSeam = false) => {
     tool: jest.fn((name: string, ...args: unknown[]) => {
       handlers.set(name, args.at(-1) as ToolHandler);
     }),
-    registerTool: jest.fn(),
+    registerTool: jest.fn((name: string, ...args: unknown[]) => {
+      handlers.set(name, args.at(-1) as ToolHandler);
+    }),
   } as any;
 
   if (withStructuredContentSeam) {

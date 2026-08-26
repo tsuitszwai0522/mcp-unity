@@ -252,7 +252,9 @@ async function startServer() {
         serverLogger.warn('Failed to register dynamic tools (non-fatal)', error);
       }
     } else {
-      serverLogger.info('Unity not connected — dynamic tools will be registered when Unity connects');
+      // NOTE: dynamic tools are registered exactly once, here, at startup. There is no
+      // connection-event listener, so if Unity is not up yet they are NOT registered later.
+      serverLogger.info('Unity not connected — dynamic tools were NOT registered (no retry on later connect; restart the server after Unity is up)');
     }
 
     // 3. NOW connect the MCP server to the transport

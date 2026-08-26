@@ -4,6 +4,64 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [fork-1.14.0] - 2026-08-26
+
+### Changed — BREAKING
+
+- **Every registered tool now rejects unknown top-level parameters.** Previously 175 of 176 tools
+  silently stripped undeclared parameters and returned success, while advertising
+  `additionalProperties: false` that nothing enforced. A central registration seam now converts every
+  `server.tool(name, description, shape, callback)` registration into a strict `registerTool` call, so
+  the advertised schema and the runtime behaviour finally agree.
+  Callers that passed harmless extra parameters now receive an explicit error naming both the
+  offending keys and the valid parameter names for that tool.
+- **`batch_execute` validates inner operation parameters** against the same schema used for direct
+  calls, closing the documented bypass. With `stopOnError: false` an invalid operation is reported as
+  failed while the remaining operations still execute; with `stopOnError: true` validation happens
+  before any operation runs, so the whole batch is rejected without side effects. Operations whose
+  tool is not in the Node registry are forwarded to Unity unvalidated and disclosed in `warnings`.
+- **Dynamic tool parameter coercion narrowed.** `z.coerce.boolean()` accepted every value (`"false"`
+  and `"0"` both became `true`); it now accepts only real booleans and `"true"`/`"false"` strings.
+  `z.coerce.number()` silently turned `null`, `true`, `""` and `[]` into numbers; it now accepts only
+  numbers and numeric strings. Emitted JSON Schema is byte-identical to before.
+
+### Fixed
+
+- Registering a top-level `ZodObject` that carries an object-level refinement now fails loudly at
+  registration time instead of silently discarding the refinement (zod 4 returns a `ZodObject` from
+  `.refine()`, so such schemas previously passed through the seam unnoticed).
+- Registration forms the seam cannot make strict (5-argument `tool()` with annotations, plain JSON
+  Schema `inputSchema`) now fail loudly rather than silently registering a non-strict tool.
+- The tool schema registry is per-server instead of module-global, so separate server instances no
+  longer observe each other's tools.
+- `batch_execute` no longer injects schema defaults into the payload sent to Unity, which had changed
+  established behaviour for tools whose Unity-side default differs from the Node schema default.
+  Caller-supplied keys still receive normal parsing so batch and direct calls agree on the wire.
+- `batch_execute` summary no longer counts locally rejected operations as executed, verifies that
+  Unity returned a result for every forwarded operation, and surfaces warnings in the primary text
+  block as other tools already did.
+
+> **Consumers pinning `#main` or an unpinned ref**: this release changes call behaviour. Any existing
+> call that passes a parameter the tool does not declare will now fail instead of silently succeeding.
+> Review call sites before upgrading, or pin an earlier tag.
+
+## [fork-1.13.0] - 2026-08-26
+
+### Added
+
+- Game View screenshots now report whether the captured pixels actually reflect the current scene
+  (`frameFresh`, `frameFreshReason`, `cameraRenders`) alongside the cameras that were temporarily
+  isolated or merely disclosed (`isolatedCameras`, `contextCameras` and their counts).
+
+### Fixed
+
+- Cameras belonging to orphaned prefab preview scenes are now disabled for the duration of a Game
+  View capture and restored afterwards; such cameras composite into the Game View and, with a higher
+  depth and a skybox clear, could replace the entire image. Unity's own Prefab Stage and MCP prefab
+  session cameras are disclosed but never touched.
+- `PlayModeView.RenderView` does not render when called on its own; the capture path now forces a
+  synchronous repaint so a stale cached frame is not returned as if it were current.
+
 ## [fork-1.12.0] - 2026-08-25
 
 ### Added

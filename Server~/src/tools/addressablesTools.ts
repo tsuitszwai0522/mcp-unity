@@ -245,7 +245,7 @@ export function registerAddrListEntriesTool(server: McpServer, mcpUnity: McpUnit
     label_filter: z.string().optional().describe('Only list entries containing this label'),
     address_pattern: z.string().optional().describe('Glob-style pattern on entry address (supports *)'),
     asset_path_prefix: z.string().optional().describe('Only list entries whose assetPath starts with this prefix'),
-    limit: z.coerce.number().int().optional().describe('Max entries to return (default 200)'),
+    limit: z.preprocess((value) => typeof value === 'string' && value.trim() !== '' && /^[+-]?(?:(?:\d+(?:\.\d*)?)|(?:\.\d+))(?:[eE][+-]?\d+)?$/.test(value.trim()) ? Number(value.trim()) : value, z.number().int()).optional().describe('Max entries to return (default 200)'),
   });
 
   wrap(server, mcpUnity, logger, name, description, schema.shape, async (params) => {

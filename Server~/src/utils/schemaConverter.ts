@@ -1,5 +1,25 @@
 import * as z from 'zod';
 
+const NUMERIC_STRING = /^[+-]?(?:(?:\d+(?:\.\d*)?)|(?:\.\d+))(?:[eE][+-]?\d+)?$/;
+
+const preprocessNumber = (value: unknown): unknown => {
+  if (typeof value !== 'string') return value;
+  const trimmed = value.trim();
+  return trimmed !== '' && NUMERIC_STRING.test(trimmed) ? Number(trimmed) : value;
+};
+
+const preprocessBoolean = (value: unknown): unknown => {
+  if (typeof value !== 'string') return value;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'true') return true;
+  if (normalized === 'false') return false;
+  return value;
+};
+
+const numberSchema = (): z.ZodTypeAny => z.preprocess(preprocessNumber, z.number());
+const integerSchema = (): z.ZodTypeAny => z.preprocess(preprocessNumber, z.number().int());
+const booleanSchema = (): z.ZodTypeAny => z.preprocess(preprocessBoolean, z.boolean());
+
 /**
  * Convert a JSON Schema object to a Zod raw shape for MCP SDK registration.
  * Supports basic types: string (with enum), number, integer, boolean, array, object.
@@ -7,15 +27,15 @@ import * as z from 'zod';
  */
 /**
  * Resolve the Zod type for array items based on JSON Schema `items` definition.
- * Uses coerce variants so string-encoded values ("10" → 10) are accepted.
+ * Accepts string-encoded number and boolean values without coercing unrelated JSON values.
  */
 function resolveItemType(items: any): z.ZodTypeAny {
   if (!items?.type) return z.any();
   switch (items.type) {
     case 'string':  return z.string();
-    case 'integer': return z.coerce.number().int();
-    case 'number':  return z.coerce.number();
-    case 'boolean': return z.coerce.boolean();
+    case 'integer': return integerSchema();
+    case 'number':  return numberSchema();
+    case 'boolean': return booleanSchema();
     default:        return z.any();
   }
 }
@@ -41,13 +61,13 @@ export function jsonSchemaToZodShape(schema: any): z.ZodRawShape {
         }
         break;
       case 'integer':
-        zodType = z.coerce.number().int();
+        zodType = integerSchema();
         break;
       case 'number':
-        zodType = z.coerce.number();
+        zodType = numberSchema();
         break;
       case 'boolean':
-        zodType = z.coerce.boolean();
+        zodType = booleanSchema();
         break;
       case 'array':
         zodType = z.array(resolveItemType(prop.items));
@@ -64,9 +84,9 @@ export function jsonSchemaToZodShape(schema: any): z.ZodRawShape {
       zodType = zodType.describe(prop.description);
     }
 
-    if (!required.has(key)) {
-      zodType = zodType.optional();
-    }
+    zodType = required.has(key)
+      ? zodType.nonoptional()
+      : zodType.optional();
 
     shape[key] = zodType;
   }
