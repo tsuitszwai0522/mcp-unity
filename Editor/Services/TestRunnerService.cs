@@ -23,6 +23,9 @@ namespace McpUnity.Services
         private bool _returnOnlyFailures;
         private bool _returnWithLogs;
         private List<ITestResultAdaptor> _results;
+        private TestMode _testMode;
+        private string _testFilter;
+        private string[] _assemblyNames;
 
         /// <summary>
         /// Constructor
@@ -79,15 +82,20 @@ namespace McpUnity.Services
             _tcs = new TaskCompletionSource<JObject>();
             _returnOnlyFailures = returnOnlyFailures;
             _returnWithLogs = returnWithLogs;
+            _testMode = testMode;
+            _testFilter = string.IsNullOrEmpty(testFilter) ? null : testFilter;
+            _assemblyNames = assemblyNames != null && assemblyNames.Length > 0
+                ? assemblyNames.ToArray()
+                : null;
 
-            if (!string.IsNullOrEmpty(testFilter))
+            if (_testFilter != null)
             {
-                filter.testNames = new[] { testFilter };
+                filter.testNames = new[] { _testFilter };
             }
 
-            if (assemblyNames != null && assemblyNames.Length > 0)
+            if (_assemblyNames != null)
             {
-                filter.assemblyNames = assemblyNames;
+                filter.assemblyNames = _assemblyNames;
             }
 
             _testRunnerApi.Execute(new ExecutionSettings(filter));
@@ -175,7 +183,14 @@ namespace McpUnity.Services
             if (_tcs == null)
                 return;
             
-            var summary = BuildResultJson(_results, result);
+            var summary = BuildResultJson(
+                _results,
+                result,
+                _returnOnlyFailures,
+                _returnWithLogs,
+                _testMode,
+                _testFilter,
+                _assemblyNames);
             _tcs.TrySetResult(summary);
             _tcs = null;
         }
@@ -199,34 +214,115 @@ namespace McpUnity.Services
             return await _tcs.Task;
         }
 
-        private JObject BuildResultJson(List<ITestResultAdaptor> results, ITestResultAdaptor result)
+        internal static JObject BuildResultJson(
+            IReadOnlyList<ITestResultAdaptor> results,
+            ITestResultAdaptor result,
+            bool returnOnlyFailures,
+            bool returnWithLogs,
+            TestMode testMode,
+            string testFilter,
+            IReadOnlyList<string> assemblyNames)
         {
-            var arr = new JArray(results
+            var serializedResults = results
                 .Where(r => !r.HasChildren)
-                .Where(r => !_returnOnlyFailures || r.ResultState.StartsWith("Failed"))
+                .Where(r => !returnOnlyFailures || r.ResultState.StartsWith("Failed"))
                 .Select(r => new JObject {
                     ["name"]      = r.Name,
                     ["fullName"]  = r.FullName,
                     ["state"]     = r.ResultState,
                     ["message"]   = r.Message,
                     ["duration"]  = r.Duration,
-                    ["logs"]      = _returnWithLogs ? r.Output : null,
+                    ["logs"]      = returnWithLogs ? r.Output : null,
                     ["stackTrace"] = r.StackTrace
-                }));
+                })
+                .ToList();
 
-            int testCount = result.PassCount + result.SkipCount + result.FailCount;
-            return new JObject { 
-                ["success"]           = true,
-                ["type"]              = "text",
-                ["message"]           = $"{result.Test.Name} test run completed: {result.PassCount}/{testCount} passed - {result.FailCount}/{testCount} failed - {result.SkipCount}/{testCount} skipped",
-                ["resultState"]       = result.ResultState,
-                ["durationSeconds"]   = result.Duration,
-                ["testCount"]         = results.Count,
-                ["passCount"]         = result.PassCount,
-                ["failCount"]         = result.FailCount,
-                ["skipCount"]         = result.SkipCount,
-                ["results"]           = arr
+            return BuildResponse(
+                serializedResults,
+                result.Test.Name,
+                result.ResultState,
+                result.Duration,
+                results.Count,
+                result.PassCount,
+                result.FailCount,
+                result.SkipCount,
+                result.InconclusiveCount,
+                testMode.ToString(),
+                testFilter,
+                assemblyNames);
+        }
+
+        internal static JObject BuildResponse(
+            IReadOnlyList<JObject> serializedResults,
+            string runName,
+            string resultState,
+            double durationSeconds,
+            int treeNodeCount,
+            int passCount,
+            int failCount,
+            int skipCount,
+            int inconclusiveCount,
+            string testMode,
+            string testFilter,
+            IReadOnlyList<string> assemblyNames)
+        {
+            int executed = passCount + failCount + skipCount + inconclusiveCount;
+            bool noTestsMatched = executed == 0;
+            string message = noTestsMatched
+                ? BuildNoTestsMatchedMessage(testMode, testFilter, assemblyNames)
+                : $"{runName} test run completed: {passCount}/{executed} passed - {failCount}/{executed} failed - {skipCount}/{executed} skipped - {inconclusiveCount}/{executed} inconclusive";
+
+            var filter = new JObject
+            {
+                ["testMode"] = testMode,
+                ["testFilter"] = testFilter != null ? new JValue(testFilter) : JValue.CreateNull(),
+                ["assemblyNames"] = assemblyNames != null
+                    ? (JToken)new JArray(assemblyNames)
+                    : JValue.CreateNull()
             };
+
+            var response = new JObject
+            {
+                ["success"] = !noTestsMatched,
+                ["type"] = "text",
+                ["message"] = message,
+                ["resultState"] = resultState,
+                ["durationSeconds"] = durationSeconds,
+                ["testCount"] = executed,
+                ["treeNodeCount"] = treeNodeCount,
+                ["passCount"] = passCount,
+                ["failCount"] = failCount,
+                ["skipCount"] = skipCount,
+                ["inconclusiveCount"] = inconclusiveCount,
+                ["filter"] = filter,
+                ["results"] = new JArray(
+                    serializedResults.Select(item => item.DeepClone()))
+            };
+
+            if (noTestsMatched)
+            {
+                response["error_code"] = "no_tests_matched";
+            }
+
+            return response;
+        }
+
+        private static string BuildNoTestsMatchedMessage(
+            string testMode,
+            string testFilter,
+            IReadOnlyList<string> assemblyNames)
+        {
+            string filterValue = string.IsNullOrEmpty(testFilter)
+                ? "(none)"
+                : $"\"{testFilter}\"";
+            string assemblyValue = assemblyNames == null || assemblyNames.Count == 0
+                ? "(none)"
+                : $"[\"{string.Join("\", \"", assemblyNames)}\"]";
+
+            return $"No tests matched. testMode={testMode}, testFilter={filterValue}, assemblyNames={assemblyValue}. " +
+                   "testFilter matches full test names starting at the namespace " +
+                   "(e.g. \"MyNamespace.MyFixture.MyTest\"); an assembly name is not part of a test's full name - " +
+                   "use assemblyNames for that. Use the get_tests resource to list available tests.";
         }
 
         #endregion

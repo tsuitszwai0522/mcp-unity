@@ -60,11 +60,17 @@ namespace McpUnity.Tools
                 }
             }
 
-            TestMode testMode = TestMode.EditMode;
-
-            if (Enum.TryParse(testModeStr, true, out TestMode parsedMode))
+            bool isNumericMode = int.TryParse(testModeStr, out _);
+            if (string.IsNullOrWhiteSpace(testModeStr)
+                || isNumericMode
+                || !Enum.TryParse(testModeStr, true, out TestMode testMode)
+                || !Enum.IsDefined(typeof(TestMode), testMode))
             {
-                testMode = parsedMode;
+                string validModes = string.Join(", ", Enum.GetNames(typeof(TestMode)));
+                tcs.SetResult(McpUnitySocketHandler.CreateErrorResponse(
+                    $"Invalid testMode '{testModeStr}'. Valid values: {validModes}.",
+                    "validation_error"));
+                return;
             }
 
             string assemblyLog = assemblyNames != null ? string.Join(",", assemblyNames) : "(none)";

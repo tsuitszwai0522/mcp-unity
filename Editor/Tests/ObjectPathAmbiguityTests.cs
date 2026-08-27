@@ -42,7 +42,7 @@ namespace McpUnity.Tests
             _prefix = "S7ObjectPath_" + Guid.NewGuid().ToString("N");
             _originalActiveScene = SceneManager.GetActiveScene();
 
-            // Self-heal residue from a previous run killed mid-test (e.g. the 30s run_tests
+            // Self-heal residue from a previous run killed mid-test (e.g. the 180s run_tests
             // cap): the scene folder name is constant, so leftovers are always claimable here.
             // UTF only warns about leftover assets, it never fails the run, so TearDown alone
             // is not a sufficient guarantee.

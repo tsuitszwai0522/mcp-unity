@@ -2,7 +2,6 @@ import * as z from 'zod';
 import { Logger } from '../utils/logger.js';
 import { McpUnity } from '../unity/mcpUnity.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { McpUnityError, ErrorType } from '../utils/errors.js';
 import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 
 // Constants for the tool
@@ -52,7 +51,6 @@ export function registerRunTestsTool(server: McpServer, mcpUnity: McpUnity, logg
  * @param mcpUnity The McpUnity instance to communicate with Unity
  * @param params The parameters for the tool
  * @returns A promise that resolves to the tool execution result
- * @throws McpUnityError if the request to Unity fails
  */
 async function toolHandler(mcpUnity: McpUnity, params: any = {}): Promise<CallToolResult> {
   const {
@@ -75,22 +73,36 @@ async function toolHandler(mcpUnity: McpUnity, params: any = {}): Promise<CallTo
     }
   });
   
-  // Process the test results
-  if (!response.success) {
-    throw new McpUnityError(
-      ErrorType.TOOL_EXECUTION,
-      response.message || `Failed to run tests: Mode=${testMode}, Filter=${testFilter || 'none'}`
-    );
-  }
-  
   // Extract test results
   const testResults = response.results || [];
   const testCount = response.testCount || 0;
   const passCount = response.passCount || 0;
   const failCount = response.failCount || 0;
   const skipCount = response.skipCount || 0;
-  
-  return {
+  const inconclusiveCount = response.inconclusiveCount || 0;
+
+  const payload: Record<string, unknown> = {
+    testCount,
+    passCount,
+    failCount,
+    skipCount,
+    inconclusiveCount,
+    results: testResults
+  };
+
+  for (const field of [
+    'resultState',
+    'durationSeconds',
+    'treeNodeCount',
+    'filter',
+    'error_code'
+  ] as const) {
+    if (response[field] !== undefined) {
+      payload[field] = response[field];
+    }
+  }
+
+  const result: CallToolResult = {
     content: [
       {
         type: 'text',
@@ -98,14 +110,14 @@ async function toolHandler(mcpUnity: McpUnity, params: any = {}): Promise<CallTo
       },
       {
         type: 'text',
-        text: JSON.stringify({
-          testCount,
-          passCount,
-          failCount,
-          skipCount,
-          results: testResults
-        }, null, 2)
+        text: JSON.stringify(payload, null, 2)
       }
     ]
   };
+
+  if (!response.success) {
+    result.isError = true;
+  }
+
+  return result;
 }
