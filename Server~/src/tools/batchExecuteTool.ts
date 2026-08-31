@@ -11,6 +11,7 @@ const toolName = 'batch_execute';
 const toolDescription = `Executes multiple tool operations in a single batch request.
 Reduces network round-trips and enables Undo-backed atomic operations outside active Prefab contents sessions.
 atomic=true is rejected while a Prefab contents session is active and cannot include open_prefab_contents because preview changes bypass Unity Undo.
+Atomic rollback only restores Undo-tracked in-memory state. Asset paths observed during the batch window are reported, may include other editor activity, and have no disk-reversion guarantee from Unity Undo.
 Inner schema validation occurs before any operation executes; with stopOnError=true, any operation validation failure prevents the entire batch from executing.
 Performance improvement: 10-100x for repetitive operations.`;
 
@@ -30,7 +31,7 @@ const paramsSchema = z.object({
     .describe('If true, stops execution on the first error. Default: true'),
   atomic: z.boolean()
     .default(false)
-    .describe('If true, rolls back all operations if any fails using Unity Undo. Rejected while a Prefab contents session is active and cannot include open_prefab_contents. Default: false')
+    .describe('If true, restores Undo-tracked in-memory state if any operation fails. Asset paths observed during the batch window are reported, may include other editor activity, and have no disk-reversion guarantee from Unity Undo. Rejected while a Prefab contents session is active and cannot include open_prefab_contents. Default: false')
 });
 
 /**
@@ -64,6 +65,7 @@ interface BatchExecuteResponse {
   message: string;
   results: OperationResult[];
   summary: BatchSummary;
+  unrevertedAssetWrites?: string[];
 }
 
 const validationErrorMessage = (
@@ -419,6 +421,9 @@ async function batchExecuteHandler(
       || `${response.summary?.succeeded ?? 0}/${response.summary?.total ?? structuredResults.length} operations succeeded`,
     results: structuredResults,
     summary: response.summary,
+    ...(response.unrevertedAssetWrites === undefined
+      ? {}
+      : { unrevertedAssetWrites: response.unrevertedAssetWrites }),
     ...(validationWarnings.length === 0 ? {} : { warnings: validationWarnings }),
   };
 

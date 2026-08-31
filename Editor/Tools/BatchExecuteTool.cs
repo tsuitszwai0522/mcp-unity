@@ -25,7 +25,10 @@ namespace McpUnity.Tools
             Name = "batch_execute";
             Description = "Executes multiple tool operations in a single batch request. Reduces " +
                           "round-trips and enables Undo-backed atomic operations outside active " +
-                          "Prefab contents sessions; atomic=true is rejected while a session is active.";
+                          "Prefab contents sessions; atomic=true is rejected while a session is active. " +
+                          "Atomic rollback only restores Undo-tracked in-memory state. Asset paths " +
+                          "observed during the batch window are reported, may include other editor " +
+                          "activity, and have no disk-reversion guarantee from Unity Undo.";
             IsAsync = true;
         }
 
@@ -104,6 +107,8 @@ namespace McpUnity.Tools
             int succeeded = 0;
             int failed = 0;
             int undoGroup = -1;
+            int assetWriteCollectionId = -1;
+            string[] unrevertedAssetWrites = Array.Empty<string>();
 
             // Start undo group for atomic operations
             if (atomic)
@@ -111,8 +116,11 @@ namespace McpUnity.Tools
                 Undo.IncrementCurrentGroup();
                 undoGroup = Undo.GetCurrentGroup();
                 Undo.SetCurrentGroupName("Batch Execute");
+                assetWriteCollectionId = AtomicBatchAssetWriteTracker.Begin();
             }
 
+            try
+            {
             for (int i = 0; i < operations.Count; i++)
             {
                 JObject operation = operations[i] as JObject;
@@ -123,7 +131,8 @@ namespace McpUnity.Tools
 
                     if (stopOnError)
                     {
-                        RevertIfAtomic(atomic, undoGroup);
+                        unrevertedAssetWrites = RevertIfAtomic(
+                            atomic, undoGroup, assetWriteCollectionId);
                         break;
                     }
                     continue;
@@ -141,7 +150,8 @@ namespace McpUnity.Tools
 
                     if (stopOnError)
                     {
-                        RevertIfAtomic(atomic, undoGroup);
+                        unrevertedAssetWrites = RevertIfAtomic(
+                            atomic, undoGroup, assetWriteCollectionId);
                         break;
                     }
                     continue;
@@ -155,7 +165,8 @@ namespace McpUnity.Tools
 
                     if (stopOnError)
                     {
-                        RevertIfAtomic(atomic, undoGroup);
+                        unrevertedAssetWrites = RevertIfAtomic(
+                            atomic, undoGroup, assetWriteCollectionId);
                         break;
                     }
                     continue;
@@ -169,7 +180,8 @@ namespace McpUnity.Tools
 
                     if (stopOnError)
                     {
-                        RevertIfAtomic(atomic, undoGroup);
+                        unrevertedAssetWrites = RevertIfAtomic(
+                            atomic, undoGroup, assetWriteCollectionId);
                         break;
                     }
                     continue;
@@ -230,7 +242,8 @@ namespace McpUnity.Tools
 
                     if (stopOnError)
                     {
-                        RevertIfAtomic(atomic, undoGroup);
+                        unrevertedAssetWrites = RevertIfAtomic(
+                            atomic, undoGroup, assetWriteCollectionId);
                         break;
                     }
                 }
@@ -258,7 +271,8 @@ namespace McpUnity.Tools
 
                         if (stopOnError)
                         {
-                            RevertIfAtomic(atomic, undoGroup);
+                            unrevertedAssetWrites = RevertIfAtomic(
+                                atomic, undoGroup, assetWriteCollectionId);
                             break;
                         }
 
@@ -285,7 +299,8 @@ namespace McpUnity.Tools
 
                         if (stopOnError)
                         {
-                            RevertIfAtomic(atomic, undoGroup);
+                            unrevertedAssetWrites = RevertIfAtomic(
+                                atomic, undoGroup, assetWriteCollectionId);
                             break;
                         }
                     }
@@ -297,7 +312,8 @@ namespace McpUnity.Tools
 
                     if (stopOnError)
                     {
-                        RevertIfAtomic(atomic, undoGroup);
+                        unrevertedAssetWrites = RevertIfAtomic(
+                            atomic, undoGroup, assetWriteCollectionId);
                         break;
                     }
                 }
@@ -307,9 +323,10 @@ namespace McpUnity.Tools
             }
 
             // Collapse undo group
-            if (atomic && undoGroup >= 0 && failed == 0)
+            if (atomic && failed == 0)
             {
-                Undo.CollapseUndoOperations(undoGroup);
+                if (undoGroup >= 0)
+                    Undo.CollapseUndoOperations(undoGroup);
             }
 
             // Build response
@@ -320,7 +337,21 @@ namespace McpUnity.Tools
             }
             else if (atomic && stopOnError)
             {
-                message = $"Batch execution failed and rolled back. {succeeded} operations succeeded before failure.";
+                message = "Batch execution failed. Unity Undo restored only Undo-tracked " +
+                    $"in-memory state. {succeeded} operations succeeded before failure.";
+                if (unrevertedAssetWrites.Length > 0)
+                {
+                    message += $" {unrevertedAssetWrites.Length} asset path(s) were observed " +
+                        "in Unity save/postprocess callbacks during this batch's collection " +
+                        "window. This evidence may include writes from other editor activity; " +
+                        "Unity Undo does not establish that those disk writes were reverted. " +
+                        "See unrevertedAssetWrites.";
+                }
+                else
+                {
+                    message += " No asset save/postprocess callbacks were observed during this " +
+                        "batch's collection window.";
+                }
             }
             else if (stopOnError)
             {
@@ -331,7 +362,7 @@ namespace McpUnity.Tools
                 message = $"Batch execution completed with errors. {succeeded}/{operations.Count} operations succeeded, {failed} failed.";
             }
 
-            tcs.SetResult(new JObject
+            var response = new JObject
             {
                 ["success"] = failed == 0,
                 ["type"] = "text",
@@ -344,15 +375,33 @@ namespace McpUnity.Tools
                     ["failed"] = failed,
                     ["executed"] = succeeded + failed
                 }
-            });
+            };
+
+            if (atomic && failed > 0)
+                response["unrevertedAssetWrites"] = new JArray(unrevertedAssetWrites);
+
+            tcs.SetResult(response);
+            }
+            finally
+            {
+                if (assetWriteCollectionId >= 0)
+                    AtomicBatchAssetWriteTracker.End(assetWriteCollectionId);
+            }
         }
 
-        private void RevertIfAtomic(bool atomic, int undoGroup)
+        private string[] RevertIfAtomic(
+            bool atomic,
+            int undoGroup,
+            int assetWriteCollectionId)
         {
-            if (atomic && undoGroup >= 0)
-            {
+            if (!atomic)
+                return Array.Empty<string>();
+
+            string[] assetWrites = AtomicBatchAssetWriteTracker.End(assetWriteCollectionId);
+            if (undoGroup >= 0)
                 Undo.RevertAllDownToGroup(undoGroup);
-            }
+
+            return assetWrites;
         }
 
         private JObject CreateOperationResult(

@@ -21,6 +21,41 @@ const setStateParamsSchema = z.object({
   action: z.string().describe('The action to perform: "play", "pause", "unpause", or "stop"')
 });
 
+const targetStateFailure = (action: string, state: any, context: string) => {
+  if (action !== 'play' && action !== 'stop') {
+    return undefined;
+  }
+
+  const expectedIsPlaying = action === 'play';
+  const actualIsPlaying = state?.isPlaying;
+  if (actualIsPlaying === expectedIsPlaying) {
+    return undefined;
+  }
+
+  const actualState = typeof actualIsPlaying === 'boolean'
+    ? String(actualIsPlaying)
+    : 'unavailable';
+  const message =
+    `Editor state action '${action}' did not reach its target ${context}: ` +
+    `expected isPlaying=${expectedIsPlaying}, actual isPlaying=${actualState}.`;
+
+  return {
+    isError: true,
+    content: [
+      {
+        type: 'text' as const,
+        text: message
+      },
+      payloadContent({
+        state,
+        message,
+        expectedIsPlaying,
+        actualIsPlaying: actualIsPlaying ?? null
+      })
+    ]
+  };
+};
+
 export function registerEditorStateTools(server: McpServer, mcpUnity: McpUnity, logger: Logger) {
   // Register get_editor_state
   logger.info(`Registering tool: ${getStateName}`);
@@ -94,6 +129,16 @@ export function registerEditorStateTools(server: McpServer, mcpUnity: McpUnity, 
           );
         }
 
+        const stateFailure = targetStateFailure(
+          action,
+          response.state,
+          'after Unity responded'
+        );
+        if (stateFailure) {
+          logger.error(`Tool execution failed: ${setStateName}`, stateFailure.content[0].text);
+          return stateFailure;
+        }
+
         logger.info(`Tool execution successful: ${setStateName}`);
         return {
           content: [
@@ -122,6 +167,19 @@ export function registerEditorStateTools(server: McpServer, mcpUnity: McpUnity, 
             });
 
             if (verifyResponse.success) {
+              const stateFailure = targetStateFailure(
+                action,
+                verifyResponse.state,
+                'after reconnection'
+              );
+              if (stateFailure) {
+                logger.error(
+                  `Tool execution failed: ${setStateName}`,
+                  stateFailure.content[0].text
+                );
+                return stateFailure;
+              }
+
               logger.info(`Tool execution successful: ${setStateName} (after reconnection)`);
               return {
                 content: [

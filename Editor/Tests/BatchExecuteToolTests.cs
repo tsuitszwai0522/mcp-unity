@@ -1,4 +1,6 @@
 using System.Collections;
+using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using NUnit.Framework;
 using McpUnity.Tools;
@@ -17,6 +19,24 @@ namespace McpUnity.Tests
     {
         private BatchExecuteTool _batchTool;
         private GameObject _testObject;
+        private string _testAssetFolder;
+        private const string MalformedResultToolName = "batch_test_malformed_result";
+
+        private sealed class MalformedResultTool : McpToolBase
+        {
+            internal MalformedResultTool()
+            {
+                Name = MalformedResultToolName;
+            }
+
+            public override JObject Execute(JObject parameters)
+            {
+                return new JObject
+                {
+                    ["success"] = new JObject()
+                };
+            }
+        }
 
         private sealed class BatchTestEditorWindow : EditorWindow
         {
@@ -25,6 +45,8 @@ namespace McpUnity.Tests
         [SetUp]
         public void SetUp()
         {
+            GetServerTools().Remove(MalformedResultToolName);
+            ResetAtomicAssetWriteTracker();
             // Get the server instance to access registered tools
             _batchTool = new BatchExecuteTool(McpUnityServer.Instance);
         }
@@ -32,11 +54,20 @@ namespace McpUnity.Tests
         [TearDown]
         public void TearDown()
         {
+            GetServerTools().Remove(MalformedResultToolName);
+            ResetAtomicAssetWriteTracker();
+
             // Clean up any test objects
             if (_testObject != null)
             {
                 Object.DestroyImmediate(_testObject);
                 _testObject = null;
+            }
+
+            if (!string.IsNullOrEmpty(_testAssetFolder))
+            {
+                AssetDatabase.DeleteAsset(_testAssetFolder);
+                _testAssetFolder = null;
             }
         }
 
@@ -59,6 +90,9 @@ namespace McpUnity.Tests
         {
             Assert.IsNotNull(_batchTool.Description);
             Assert.IsTrue(_batchTool.Description.Contains("batch"), "Description should mention batch");
+            Assert.That(_batchTool.Description, Does.Contain("Undo-tracked in-memory state"));
+            Assert.That(_batchTool.Description, Does.Contain("other editor activity"));
+            Assert.That(_batchTool.Description, Does.Contain("disk-reversion guarantee"));
         }
 
         #endregion
@@ -387,6 +421,163 @@ namespace McpUnity.Tests
 
         #endregion
 
+        #region Atomic Rollback Honesty Tests
+
+        [Test]
+        public void BatchExecuteTool_UnexpectedCoroutineException_EndsAssetCollectionInFinally()
+        {
+            GetServerTools().Add(MalformedResultToolName, new MalformedResultTool());
+            var tcs = new TaskCompletionSource<JObject>();
+            var parameters = new JObject
+            {
+                ["operations"] = new JArray
+                {
+                    new JObject
+                    {
+                        ["tool"] = MalformedResultToolName,
+                        ["params"] = new JObject()
+                    }
+                },
+                ["atomic"] = true,
+                ["stopOnError"] = true
+            };
+            System.Reflection.MethodInfo method = typeof(BatchExecuteTool).GetMethod(
+                "ExecuteBatchCoroutine",
+                System.Reflection.BindingFlags.NonPublic
+                    | System.Reflection.BindingFlags.Instance);
+            Assert.IsNotNull(method);
+            var coroutine = (IEnumerator)method.Invoke(
+                _batchTool,
+                new object[] { parameters, tcs });
+
+            bool threw = false;
+            try
+            {
+                while (coroutine.MoveNext())
+                {
+                }
+            }
+            catch (System.Exception)
+            {
+                threw = true;
+            }
+
+            Assert.IsTrue(threw, "The malformed result must exercise the outer finally path.");
+            Assert.IsFalse(IsAtomicAssetWriteTrackerCollecting());
+        }
+
+        [Test]
+        public void AtomicAssetWriteTracker_ResetAllClearsActiveCollection()
+        {
+            System.Type trackerType = GetAtomicAssetWriteTrackerType();
+            System.Reflection.MethodInfo begin = trackerType.GetMethod(
+                "Begin",
+                System.Reflection.BindingFlags.NonPublic
+                    | System.Reflection.BindingFlags.Static);
+            System.Reflection.MethodInfo resetAll = trackerType.GetMethod(
+                "ResetAll",
+                System.Reflection.BindingFlags.NonPublic
+                    | System.Reflection.BindingFlags.Static);
+            Assert.IsNotNull(begin);
+            Assert.IsNotNull(resetAll);
+
+            begin.Invoke(null, null);
+            Assert.IsTrue(IsAtomicAssetWriteTrackerCollecting());
+
+            resetAll.Invoke(null, null);
+
+            Assert.IsFalse(IsAtomicAssetWriteTrackerCollecting());
+        }
+
+        [UnityTest]
+        public IEnumerator BatchExecuteTool_AtomicFailureWithoutAssetWrites_ReportsEmptyEvidence()
+        {
+            var tcs = new TaskCompletionSource<JObject>();
+            _batchTool.ExecuteAsync(new JObject
+            {
+                ["operations"] = new JArray
+                {
+                    new JObject
+                    {
+                        ["tool"] = "nonexistent_tool_atomic_no_write",
+                        ["params"] = new JObject()
+                    }
+                },
+                ["atomic"] = true,
+                ["stopOnError"] = true
+            }, tcs);
+
+            while (!tcs.Task.IsCompleted)
+                yield return null;
+
+            JObject result = tcs.Task.Result;
+            Assert.IsFalse(result["success"]?.ToObject<bool>() ?? true, result.ToString());
+            Assert.AreEqual(0, ((JArray)result["unrevertedAssetWrites"]).Count);
+            Assert.That(result["message"]?.ToString(), Does.Contain("Undo-tracked in-memory state"));
+            Assert.That(
+                result["message"]?.ToString(),
+                Does.Contain("No asset save/postprocess callbacks were observed"));
+            Assert.That(result["message"]?.ToString(), Does.Not.Contain("failed and rolled back"));
+        }
+
+        [UnityTest]
+        public IEnumerator BatchExecuteTool_AtomicFailureReportsObservedDiskAssetWrites()
+        {
+            _testAssetFolder =
+                $"Assets/McpUnityBatchAtomicWrite_{System.Guid.NewGuid():N}";
+            var tcs = new TaskCompletionSource<JObject>();
+            _batchTool.ExecuteAsync(new JObject
+            {
+                ["operations"] = new JArray
+                {
+                    new JObject
+                    {
+                        ["tool"] = "manage_asset",
+                        ["params"] = new JObject
+                        {
+                            ["action"] = "create_folder",
+                            ["assetPath"] = _testAssetFolder
+                        }
+                    },
+                    new JObject
+                    {
+                        ["tool"] = "nonexistent_tool_after_atomic_write",
+                        ["params"] = new JObject()
+                    }
+                },
+                ["atomic"] = true,
+                ["stopOnError"] = true
+            }, tcs);
+
+            while (!tcs.Task.IsCompleted)
+                yield return null;
+
+            JObject result = tcs.Task.Result;
+            Assert.IsFalse(result["success"]?.ToObject<bool>() ?? true, result.ToString());
+            var writes = ((JArray)result["unrevertedAssetWrites"])
+                .Values<string>()
+                .ToArray();
+            CollectionAssert.Contains(writes, _testAssetFolder);
+            CollectionAssert.AreEqual(
+                writes
+                    .Distinct(System.StringComparer.Ordinal)
+                    .OrderBy(path => path, System.StringComparer.Ordinal)
+                    .ToArray(),
+                writes,
+                "Asset write evidence must be deduplicated and sorted.");
+            Assert.IsTrue(
+                AssetDatabase.IsValidFolder(_testAssetFolder),
+                "Unity Undo must not be reported as reverting the persisted folder.");
+            Assert.That(result["message"]?.ToString(), Does.Contain("were observed"));
+            Assert.That(result["message"]?.ToString(), Does.Contain("other editor activity"));
+            Assert.That(
+                result["message"]?.ToString(),
+                Does.Not.Contain("asset path(s) were written to disk"));
+            Assert.That(result["message"]?.ToString(), Does.Contain("unrevertedAssetWrites"));
+        }
+
+        #endregion
+
         #region Successful Execution Tests
 
         [UnityTest]
@@ -686,6 +877,43 @@ namespace McpUnity.Tests
             if (field == null)
                 Assert.Fail($"{ownerType.Name} private field '{name}' was not found");
             field.SetValue(null, value);
+        }
+
+        private static Dictionary<string, McpToolBase> GetServerTools()
+        {
+            System.Reflection.FieldInfo field = typeof(McpUnityServer).GetField(
+                "_tools",
+                System.Reflection.BindingFlags.NonPublic
+                    | System.Reflection.BindingFlags.Instance);
+            if (field == null)
+                throw new System.MissingFieldException(typeof(McpUnityServer).FullName, "_tools");
+            return (Dictionary<string, McpToolBase>)field.GetValue(McpUnityServer.Instance);
+        }
+
+        private static System.Type GetAtomicAssetWriteTrackerType()
+        {
+            return typeof(BatchExecuteTool).Assembly.GetType(
+                "McpUnity.Services.AtomicBatchAssetWriteTracker",
+                true);
+        }
+
+        private static bool IsAtomicAssetWriteTrackerCollecting()
+        {
+            return (bool)GetPrivateStaticField(
+                GetAtomicAssetWriteTrackerType(),
+                "_isCollecting");
+        }
+
+        private static void ResetAtomicAssetWriteTracker()
+        {
+            System.Type trackerType = GetAtomicAssetWriteTrackerType();
+            System.Reflection.MethodInfo method = trackerType.GetMethod(
+                "ResetAll",
+                System.Reflection.BindingFlags.NonPublic
+                    | System.Reflection.BindingFlags.Static);
+            if (method == null)
+                throw new System.MissingMethodException(trackerType.FullName, "ResetAll");
+            method.Invoke(null, null);
         }
     }
 }

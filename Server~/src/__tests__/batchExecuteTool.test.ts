@@ -83,6 +83,9 @@ describe('Batch Execute Tool', () => {
       expect(schema).toHaveProperty('operations');
       expect(schema).toHaveProperty('stopOnError');
       expect(schema).toHaveProperty('atomic');
+      expect(schema.atomic.description).toContain('Undo-tracked in-memory state');
+      expect(schema.atomic.description).toContain('other editor activity');
+      expect(schema.atomic.description).toContain('no disk-reversion guarantee');
     });
   });
 
@@ -687,6 +690,30 @@ describe('Batch Execute Tool', () => {
           atomic: false
         })
       });
+    });
+
+    it('preserves unreverted disk-write evidence in the structured batch payload', async () => {
+      mockSendRequest.mockResolvedValue({
+        success: false,
+        type: 'text',
+        message: "Batch execution failed. Unity Undo restored only Undo-tracked in-memory state. 0 operations succeeded before failure. 1 asset path(s) were observed in Unity save/postprocess callbacks during this batch's collection window. This evidence may include writes from other editor activity; Unity Undo does not establish that those disk writes were reverted. See unrevertedAssetWrites.",
+        unrevertedAssetWrites: ['Assets/AtomicWrite.mat'],
+        results: [
+          { index: 0, id: '0', success: false, error: 'Operation failed' }
+        ],
+        summary: { total: 1, succeeded: 0, failed: 1, executed: 1 }
+      });
+
+      const result = await toolHandler({
+        operations: [{ tool: 'run_tests', params: {} }],
+        stopOnError: true,
+        atomic: true
+      });
+
+      expect(result.isError).toBe(true);
+      expect(JSON.parse(result.content[1].text)).toEqual(expect.objectContaining({
+        unrevertedAssetWrites: ['Assets/AtomicWrite.mat']
+      }));
     });
   });
 });

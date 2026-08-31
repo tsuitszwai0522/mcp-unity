@@ -2,12 +2,11 @@ import * as z from 'zod';
 import { Logger } from '../utils/logger.js';
 import { McpUnity } from '../unity/mcpUnity.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { McpUnityError, ErrorType } from '../utils/errors.js';
 import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 
 // Constants for the tool
 const toolName = 'execute_menu_item';
-const toolDescription = 'Executes a Unity menu item by path';
+const toolDescription = 'Executes a Unity menu item by path. Error capture covers only the synchronous main-thread call window; delayCall, background-thread, and post-return errors are not captured.';
 const paramsSchema = z.object({
   menuPath: z.string().describe('The path to the menu item to execute (e.g. "GameObject/Create Empty")')
 });
@@ -32,7 +31,11 @@ export function registerMenuItemTool(server: McpServer, mcpUnity: McpUnity, logg
       try {
         logger.info(`Executing tool: ${toolName}`, params);
         const result = await toolHandler(mcpUnity, params);
-        logger.info(`Tool execution successful: ${toolName}`);
+        if (result.isError) {
+          logger.error(`Tool execution failed: ${toolName}`, params);
+        } else {
+          logger.info(`Tool execution successful: ${toolName}`);
+        }
         return result;
       } catch (error) {
         logger.error(`Tool execution failed: ${toolName}`, error);
@@ -48,7 +51,6 @@ export function registerMenuItemTool(server: McpServer, mcpUnity: McpUnity, logg
  * @param mcpUnity The McpUnity instance to communicate with Unity
  * @param params The parameters for the tool
  * @returns A promise that resolves to the tool execution result
- * @throws McpUnityError if the request to Unity fails
  */
 async function toolHandler(mcpUnity: McpUnity, params: any): Promise<CallToolResult> {
   const { menuPath } = params;
@@ -57,17 +59,24 @@ async function toolHandler(mcpUnity: McpUnity, params: any): Promise<CallToolRes
     params: { menuPath }
   });
   
-  if (!response.success) {
-    throw new McpUnityError(
-      ErrorType.TOOL_EXECUTION,
-      response.message || `Failed to execute menu item: ${menuPath}`
-    );
-  }
-  
-  return {
-    content: [{
-      type: response.type || 'text',
-      text: response.message || `Successfully executed menu item: ${menuPath}` 
-    }]
+  const result: CallToolResult = {
+    content: [
+      {
+        type: 'text',
+        text: response.message || (response.success
+          ? `Successfully executed menu item: ${menuPath}`
+          : `Failed to execute menu item: ${menuPath}`)
+      },
+      {
+        type: 'text',
+        text: JSON.stringify(response, null, 2)
+      }
+    ]
   };
+
+  if (!response.success) {
+    result.isError = true;
+  }
+
+  return result;
 }
