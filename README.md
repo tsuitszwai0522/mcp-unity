@@ -113,7 +113,7 @@ The following tools are available for manipulating and querying Unity scenes and
 - `get_console_logs`: Retrieves logs from the Unity console with pagination support
   > **Example prompt:** "Show me the last 20 error logs from the Unity console"
 
-- `recompile_scripts`: Recompiles all scripts in the Unity project
+- `recompile_scripts`: Refreshes the AssetDatabase by default to discover file changes, then recompiles scripts. With `refreshAssets: false`, recompiles only scripts already known to the AssetDatabase and does not discover added or deleted files
   > **Example prompt:** "Recompile scripts in my Unity project"
 
 - `save_scene`: Saves the current active scene, with optional Save As to a new path

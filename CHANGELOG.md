@@ -4,6 +4,43 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [fork-1.17.0] - 2026-09-02
+
+### Changed — BREAKING
+
+- **`recompile_scripts` now refreshes the AssetDatabase before compiling.** It previously only called
+  `CompilationPipeline.RequestScriptCompilation()` and never touched `AssetDatabase`, so a `.cs` file
+  added on disk, or an edit to an existing `.asmdef`, produced a **silent false green** — the tool
+  returned `"Successfully recompiled all scripts with 0 warning(s)"` while the change was not in any
+  assembly. Deleting a `.cs` produced a persistent `error CS2001` instead.
+  A new `refreshAssets` parameter (**default `true`**) makes the tool call `AssetDatabase.Refresh()`
+  first. Order is: subscribe to compilation events → refresh → request compilation only if Unity is
+  not already compiling. Subscribing first means compiler messages produced by the refresh-triggered
+  compilation are now captured (previously those errors were invisible to both this tool and
+  `get_console_logs`).
+  Pass `refreshAssets: false` for the old behaviour. Cost measured on a large project: a no-op refresh
+  blocks the main thread for ~200–350 ms; ~1 s when there is a new file to discover.
+- **`recompile_scripts` responses no longer overstate what was compiled.** New fields `refreshed`,
+  `refreshDurationMs` and `compilationWasAlreadyInProgress` (tri-state). Two paths are now explicit
+  instead of claiming success: a request that piggybacks on another in-flight request, and a request
+  that arrives while Unity was already compiling. Neither can confirm that its own file changes were
+  part of the observed compilation, so neither reports `"Successfully recompiled all scripts"`.
+- **`recompile_scripts` failures reach the caller with their typed error code.** The Node handler
+  previously threw on `success: false`, discarding the payload; it now sets `isError: true` and keeps
+  `error_code` plus the refresh metadata.
+
+### Fixed
+
+- **`get_console_logs` reported a fabricated filtered total.** `ConsoleLogsService` stopped counting at
+  the pagination early-exit but returned that partial count as the number of entries matching the
+  filter, which `GetConsoleLogsResource` printed as `"Retrieved N of M"`. The counter now walks the
+  whole buffer; the returned page is unchanged.
+- **`recompile_scripts` silently replaced an explicit `logsLimit: 0` with `100`** (`||` instead of `??`).
+- **Missing Unity-side response metadata is now reported as `unknown` rather than coerced to `false`**,
+  and an explicit `null` from Unity is preserved instead of being misreported as "metadata absent".
+- Tool descriptions in the README, the C# tool and the Node wrapper claimed `recompile_scripts`
+  recompiled "all scripts in the Unity project"; all three now state what it actually does.
+
 ## [fork-1.14.0] - 2026-08-26
 
 ### Changed — BREAKING

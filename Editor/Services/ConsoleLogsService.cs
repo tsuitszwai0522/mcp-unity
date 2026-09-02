@@ -120,7 +120,7 @@ namespace McpUnity.Services
             {
                 totalCount = _logEntries.Count;
                 
-                // Single pass: count filtered entries and collect the requested page (newest first)
+                // Single pass: count every filtered entry and collect the requested page (newest first)
                 for (int i = _logEntries.Count - 1; i >= 0; i--)
                 {
                     var entry = _logEntries[i];
@@ -152,9 +152,6 @@ namespace McpUnity.Services
                     }
                     
                     currentIndex++;
-                    
-                    // Early exit if we've collected enough logs
-                    if (currentIndex >= offset + limit) break;
                 }
             }
             

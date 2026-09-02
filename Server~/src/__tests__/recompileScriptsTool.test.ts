@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
-import { McpUnityError, ErrorType } from '../utils/errors.js';
 import { registerRecompileScriptsTool } from '../tools/recompileScriptsTool.js';
 import {
   PAYLOAD_MAX_CHARS,
@@ -30,6 +29,7 @@ const mockServer = { tool: mockServerTool } as any;
 type ToolHandler = (params: {
   returnWithLogs?: boolean;
   logsLimit?: number;
+  refreshAssets?: boolean;
 }) => Promise<any>;
 
 const getToolHandler = (): ToolHandler => {
@@ -50,6 +50,9 @@ describe('recompile_scripts', () => {
       truncated: false,
       totalLogs: 1,
       returnedLogs: 1,
+      refreshed: true,
+      refreshDurationMs: 204,
+      compilationWasAlreadyInProgress: false,
     };
     (mockSendRequest as any).mockResolvedValue(response);
 
@@ -66,6 +69,9 @@ describe('recompile_scripts', () => {
       truncated: true,
       totalLogs: 3,
       returnedLogs: 1,
+      refreshed: true,
+      refreshDurationMs: 346,
+      compilationWasAlreadyInProgress: false,
     };
     (mockSendRequest as any).mockResolvedValue(response);
 
@@ -77,6 +83,138 @@ describe('recompile_scripts', () => {
       truncated: response.truncated,
       totalLogs: response.totalLogs,
       returnedLogs: response.returnedLogs,
+      refreshed: response.refreshed,
+      refreshDurationMs: response.refreshDurationMs,
+      compilationWasAlreadyInProgress: response.compilationWasAlreadyInProgress,
+    });
+  });
+
+  it('defaults refreshAssets to true and forwards it to Unity', async () => {
+    (mockSendRequest as any).mockResolvedValue({
+      success: true,
+      message: 'Scripts recompiled',
+      logs: [],
+      totalLogs: 0,
+      refreshed: true,
+      refreshDurationMs: 204,
+    });
+
+    await getToolHandler()({});
+
+    expect(mockSendRequest).toHaveBeenCalledWith({
+      method: 'recompile_scripts',
+      params: {
+        returnWithLogs: true,
+        logsLimit: 100,
+        refreshAssets: true,
+      },
+    });
+  });
+
+  it('forwards refreshAssets false to Unity', async () => {
+    (mockSendRequest as any).mockResolvedValue({
+      success: true,
+      message: 'Scripts recompiled',
+      logs: [],
+      totalLogs: 0,
+      refreshed: false,
+      refreshDurationMs: 0,
+    });
+
+    await getToolHandler()({ refreshAssets: false });
+
+    expect(mockSendRequest).toHaveBeenCalledWith({
+      method: 'recompile_scripts',
+      params: {
+        returnWithLogs: true,
+        logsLimit: 100,
+        refreshAssets: false,
+      },
+    });
+  });
+
+  it('forwards refresh execution metadata in structured content', async () => {
+    (mockSendRequest as any).mockResolvedValue({
+      success: true,
+      message: 'Scripts recompiled',
+      logs: [],
+      totalLogs: 0,
+      refreshed: true,
+      refreshDurationMs: 1186,
+      compilationWasAlreadyInProgress: true,
+    });
+
+    const result = await getToolHandler()({});
+    const payload = JSON.parse(result.content[1].text as string);
+
+    expect(payload.refreshed).toBe(true);
+    expect(payload.refreshDurationMs).toBe(1186);
+    expect(payload.compilationWasAlreadyInProgress).toBe(true);
+  });
+
+  it('reports missing Unity-side recompilation metadata as unknown', async () => {
+    (mockSendRequest as any).mockResolvedValue({
+      success: true,
+      message: 'Scripts recompiled by an older Unity package',
+      logs: [],
+      totalLogs: 0,
+    });
+
+    const result = await getToolHandler()({});
+    const payload = JSON.parse(result.content[1].text as string);
+
+    expect(result.content[0].text).toContain('refreshed=unknown');
+    expect(result.content[0].text).toContain('refreshDurationMs=unknown');
+    expect(result.content[0].text).toContain(
+      'compilationWasAlreadyInProgress=unknown',
+    );
+    expect(result.content[0].text).toContain(
+      'unity-side recompilation metadata absent',
+    );
+    expect(payload.refreshed).toBe('unknown');
+    expect(payload.refreshDurationMs).toBe('unknown');
+    expect(payload.compilationWasAlreadyInProgress).toBe('unknown');
+  });
+
+  it('preserves explicit null compilation state without reporting metadata absent', async () => {
+    const response = {
+      success: true,
+      message: 'Piggybacked compilation completed with uncertain coverage',
+      logs: [],
+      totalLogs: 0,
+      refreshed: false,
+      refreshDurationMs: 0,
+      compilationWasAlreadyInProgress: null,
+    };
+    (mockSendRequest as any).mockResolvedValue(response);
+
+    const result = await getToolHandler()({ refreshAssets: false });
+    const payload = JSON.parse(result.content[1].text as string);
+
+    expect(result.content[0].text).toBe(response.message);
+    expect(result.content[0].text).not.toContain('metadata absent');
+    expect(payload.compilationWasAlreadyInProgress).toBeNull();
+  });
+
+  it('preserves an explicit logsLimit of zero', async () => {
+    (mockSendRequest as any).mockResolvedValue({
+      success: true,
+      message: 'Scripts recompiled',
+      logs: [],
+      totalLogs: 0,
+      refreshed: false,
+      refreshDurationMs: 0,
+    });
+
+    await getToolHandler()({ logsLimit: 0 });
+
+    expect(mockSendRequest).toHaveBeenCalledWith({
+      method: 'recompile_scripts',
+      params: {
+        returnWithLogs: true,
+        logsLimit: 0,
+        refreshAssets: true,
+      },
     });
   });
 
@@ -164,6 +302,9 @@ describe('recompile_scripts', () => {
       truncated: false,
       totalLogs: 0,
       returnedLogs: 0,
+      refreshed: false,
+      refreshDurationMs: 0,
+      compilationWasAlreadyInProgress: false,
     });
 
     const result = await getToolHandler()({ returnWithLogs: true, logsLimit: 100 });
@@ -173,18 +314,31 @@ describe('recompile_scripts', () => {
     expect(payload.message).toBe(result.content[0].text);
   });
 
-  it('throws McpUnityError when Unity reports failure', async () => {
+  it('returns typed refresh failures as isError with observability metadata', async () => {
     (mockSendRequest as any).mockResolvedValue({
       success: false,
-      message: 'Recompilation failed',
+      message: 'AssetDatabase.Refresh failed before script recompilation',
+      error_code: 'asset_database_refresh_failed',
+      logs: [],
+      totalLogs: 0,
+      returnedLogs: 0,
+      refreshed: true,
+      refreshDurationMs: 17,
+      compilationWasAlreadyInProgress: false,
     });
 
-    const request = getToolHandler()({ returnWithLogs: true, logsLimit: 100 });
+    const result = await getToolHandler()({ returnWithLogs: true, logsLimit: 100 });
+    const payload = JSON.parse(result.content[1].text as string);
 
-    await expect(request).rejects.toThrow(McpUnityError);
-    await expect(request).rejects.toMatchObject({
-      type: ErrorType.TOOL_EXECUTION,
-      message: 'Recompilation failed',
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toBe(
+      'AssetDatabase.Refresh failed before script recompilation',
+    );
+    expect(payload).toMatchObject({
+      error_code: 'asset_database_refresh_failed',
+      refreshed: true,
+      refreshDurationMs: 17,
+      compilationWasAlreadyInProgress: false,
     });
   });
 });
