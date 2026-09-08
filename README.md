@@ -83,8 +83,20 @@ The following tools are available for manipulating and querying Unity scenes and
 - `add_package`: Installs new packages in the Unity Package Manager
   > **Example prompt:** "Add the TextMeshPro package to my project"
 
-- `run_tests`: Runs tests using the Unity Test Runner. Supports `testFilter` (testNames) and `assemblyNames` for scoping a run; `assemblyNames` entries accept the NUnit `!` exclusion prefix, e.g. `["!Unity.Multiplayer.Tools.Adapters.Tests"]` to skip a broken third-party test assembly without embedding the package
+- `run_tests`: Runs tests using the Unity Test Runner. Unity's internal wait is 75% of the configured Node transport timeout, leaving time for a `test_run_still_running` receipt to reach the caller. The receipt includes `runId`, `expectedArtifactPath`, and `artifactExists:false`; only a completed, validated NUnit XML file is published as `artifactPath`. A timed-out run is not cancelled: poll it with `get_test_run`. Artifacts live under `Library/McpUnity/TestResults/`; retention applies only to this tool's GUID-named files, and only the 20 most recent are kept. Supports `testFilter` (testNames) and `assemblyNames` for scoping a run; `assemblyNames` entries accept the NUnit `!` exclusion prefix, e.g. `["!Unity.Multiplayer.Tools.Adapters.Tests"]` to skip a broken third-party test assembly without embedding the package
   > **Example prompt:** "Run all the EditMode tests in my project, but skip the Unity.Multiplayer.Tools.Adapters.Tests assembly"
+
+- `get_test_run`: Polls a test run by Unity GUID `runId`; omit `runId` to retrieve the most recent run, including after a PlayMode domain reload disconnects the original request. SessionState retains bounded metadata only; completed result rows and logs are rebuilt from the NUnit XML artifact
+  > **Example prompt:** "Get the most recent Unity test run"
+
+`run_tests` permits one tracked run at a time because Unity's global test callbacks do not identify
+which run emitted them. A concurrent MCP request returns `test_run_in_progress`. Wait for the active
+run and poll it; the lock normally clears on `RunFinished`. If Unity never emits that callback after a
+cancel, terminal framework error, or compile interruption, the record becomes stale after 24 hours:
+the next poll or `run_tests` call releases the lock, reports `lockReleased:true`, and asks the caller to
+retry. Starting another run from Unity's Test Runner window while an MCP run is active emits a second
+`RunStarted`; the MCP record is then marked `untrusted`, its result is discarded, and no result is
+published under the MCP run's `runId`.
 
 - `send_console_log`: Send a console log to Unity
   > **Example prompt:** "Send a console log to Unity Editor"
@@ -700,7 +712,7 @@ Error:
 Connection failed: Unknown error
 ```
 
-This error occurs because the bridge connection is lost when the domain reloads upon switching to Play Mode.  The workaround is to turn off **Reload Domain** in **Edit > Project Settings > Editor > "Enter Play Mode Settings"**.
+This occurs because the bridge connection is lost when the domain reloads upon switching to Play Mode. The Unity-side service registers its callbacks before any potentially blocking Node install/build work. After the bridge reconnects, call `get_test_run` without a `runId`; bounded run metadata survives the reload in `SessionState`, while completed result rows and logs are rebuilt from `Library/McpUnity/TestResults/<runId>.xml`. Disabling **Reload Domain** in **Edit > Project Settings > Editor > "Enter Play Mode Settings"** also avoids the disconnect, but is no longer required to recover the result. Do not start a separate run from the Test Runner window while recovery is pending: a second global `RunStarted` makes attribution impossible, so MCP marks the record `untrusted` and discards the result.
 
 </details>
 

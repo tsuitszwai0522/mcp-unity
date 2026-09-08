@@ -4,6 +4,38 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [fork-1.18.0] - 2026-09-08
+
+### Added
+
+- `run_tests` now returns Unity Test Framework's own run GUID and a verified NUnit XML artifact under
+  `Library/McpUnity/TestResults/<runId>.xml`. Artifact publication uses a validated temp file plus an
+  atomic move/replace, and only the 20 most recent XML artifacts are retained.
+- Added `get_test_run`; pass a `runId` or omit it to poll the most recent run after a PlayMode domain
+  reload disconnect. Bounded run metadata persists in Unity `SessionState`; result rows and logs are
+  rebuilt from the NUnit XML artifact instead of being stored in one unbounded SessionState string.
+
+### Changed — BREAKING
+
+- **Concurrent `run_tests` changed from last-caller-wins to a hard rejection.** A second request now
+  receives `test_run_in_progress` and the active `runId`; callers must poll that run before retrying.
+  Unity's callback API has no run GUID, so a second global `RunStarted` (including one launched from the
+  Test Runner window) invalidates the MCP record as `untrusted` and discards the unattributable result.
+- **Running artifact metadata no longer uses `artifactPath`.** `run_tests` timeout receipts and running
+  `get_test_run` responses now return `expectedArtifactPath` plus `artifactExists:false`; `artifactPath`
+  is reserved for a completed artifact that exists and passes NUnit XML validation.
+
+### Fixed
+
+- Timeout waiters capture their own completion task and no longer write into a later request. Unity's
+  wait budget is 75% of the Node transport timeout, allowing the polling receipt to arrive before the
+  transport timer fires; timeout leaves the Unity run active instead of cancelling it.
+- Active-run records that never receive `RunFinished` are released as stale after 24 hours, with an
+  explicit `lockReleased:true` response. Test callbacks are registered before server installation so
+  domain-reload recovery cannot miss completion during a blocking npm install/build.
+- Artifact save failures no longer turn a passing test run into `success:false`; test truth is preserved
+  and the save problem is disclosed through `artifactError` and the response message.
+
 ## [fork-1.17.0] - 2026-09-02
 
 ### Changed — BREAKING
@@ -40,6 +72,62 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
   and an explicit `null` from Unity is preserved instead of being misreported as "metadata absent".
 - Tool descriptions in the README, the C# tool and the Node wrapper claimed `recompile_scripts`
   recompiled "all scripts in the Unity project"; all three now state what it actually does.
+
+## [fork-1.16.0] - 2026-08-31
+
+### Changed — BREAKING
+
+- **`execute_menu_item` no longer reports success when the menu method throws.** Unity swallows
+  exceptions inside `EditorApplication.ExecuteMenuItem`, so a `try/catch` around the call could not see
+  them and every such failure returned `success:true` with "Successfully executed menu item". The tool
+  now subscribes to `Application.logMessageReceived` across the synchronous dispatch window and reports
+  `success:false` when an Exception/Error/Assert is logged there.
+  Attribution is limited to "logged during this window" and does not claim causation: a menu that pumps
+  the editor loop (typically `Assets/Refresh`) can pull unrelated asset import errors into the window,
+  so `capturedLogs` is returned verbatim for the caller to judge. The window covers the synchronous main
+  thread only — `delayCall`, background threads, and post-return errors are not captured.
+- **Failure reporting changed from one bare string to 10 typed `error_code` values**:
+  `menu_item_not_found`, `menu_item_is_submenu`, `menu_item_disabled`, `menu_item_validate_threw`,
+  `menu_item_threw`, `menu_item_logged_errors`, `menu_item_refused`, `menu_item_not_found_or_disabled`
+  (a degraded value used when internal reflection is unavailable and the cases cannot be told apart),
+  `editor_busy_compiling`, and `validation_error`. Both success and failure now carry `dispatched` and
+  `capturedLogs`.
+- **Node returns `isError:true` with the full payload instead of throwing.** Callers that relied on
+  catching an exception must switch to checking `isError`.
+
+### Fixed
+
+- `batch_execute` atomic rollback no longer overstates what it undid. `Undo.RevertAllDownToGroup` only
+  restores in-memory Undo-tracked state, so asset writes already flushed to disk survive the rollback.
+  Responses now include `unrevertedAssetWrites[]`, collected as evidence via `OnWillSaveAssets` and
+  `OnPostprocessAllAssets` rather than from a hardcoded tool allowlist; nothing written to disk yields an
+  empty array.
+- `set_editor_state` verifies `play`/`stop` actually took effect on both the happy path and the
+  reconnect path, returning `isError` with `expectedIsPlaying`/`actualIsPlaying` on mismatch. Previously
+  a reply from Unity was treated as success.
+
+## [fork-1.15.0] - 2026-08-27
+
+### Changed — BREAKING
+
+- **A zero-match `run_tests` no longer looks identical to an all-green run.** Three zero-match paths
+  previously returned byte-identical responses with `resultState:"Passed"`. Zero executed tests now
+  return `success:false` with `error_code:"no_tests_matched"` and a message that restates the actual
+  filter and explains that `testFilter` matches full test names starting at the namespace. The predicate
+  includes `inconclusiveCount`: NUnit does not count Inconclusive as skipped, so omitting it would
+  misreport an all-inconclusive run as a filter miss.
+- **`testCount` changed meaning** from the NUnit tree node count (which includes assembly, namespace,
+  fixture and parametrized parent nodes) to `pass + fail + skip + inconclusive`, matching the message.
+  The tree node count moved to the new `treeNodeCount` field, and `inconclusiveCount` was added.
+- **An invalid `testMode` is now a `validation_error` that lists the valid values and does not execute.**
+  Previously it silently fell back to EditMode, so a typo while asking for PlayMode returned a green
+  EditMode result. Purely numeric strings and comma-joined flag values are rejected; case-insensitive
+  names such as `"editmode"` are still accepted.
+
+### Fixed
+
+- Node now forwards `resultState`, `durationSeconds`, `treeNodeCount`, `inconclusiveCount`, `filter` and
+  `error_code`; the first two never reached the caller before.
 
 ## [fork-1.14.0] - 2026-08-26
 

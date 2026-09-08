@@ -1,10 +1,16 @@
+using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Reflection;
 using System.Threading.Tasks;
+using System.Xml.Linq;
 using McpUnity.Services;
 using McpUnity.Tools;
 using Newtonsoft.Json.Linq;
 using NUnit.Framework;
 using NUnit.Framework.Interfaces;
+using UnityEditor;
 using UnityEditor.TestTools.TestRunner.Api;
 
 namespace McpUnity.Tests
@@ -334,6 +340,8 @@ namespace McpUnity.Tests
             Assert.IsTrue(completionSource.Task.IsCompleted);
             JObject response = completionSource.Task.Result;
             Assert.AreEqual("validation_error", response["error"]?["type"]?.ToString());
+            Assert.IsNull(response["success"]);
+            Assert.IsNull(response["error_code"]);
             Assert.That(response["error"]?["message"]?.ToString(), Does.Contain(invalidMode));
             Assert.That(response["error"]?["message"]?.ToString(), Does.Contain("EditMode"));
             Assert.That(response["error"]?["message"]?.ToString(), Does.Contain("PlayMode"));
@@ -354,6 +362,1002 @@ namespace McpUnity.Tests
             Assert.AreEqual(1, service.ExecuteCalls);
             Assert.AreEqual(TestMode.EditMode, service.LastTestMode.Value);
             Assert.IsTrue(completionSource.Task.Result.Value<bool>("success"));
+        }
+
+        [Test]
+        public async Task ExecuteUsesUnityRunGuidAndReturnsVerifiedArtifact()
+        {
+            const string unityRunId = "11111111-1111-1111-1111-111111111111";
+            string artifactDirectory = PrepareArtifactDirectory(nameof(ExecuteUsesUnityRunGuidAndReturnsVerifiedArtifact));
+            try
+            {
+                var api = new FakeTestRunnerApi(unityRunId, ArtifactSaveBehavior.ValidXml);
+                var service = new TestRunnerService(api, new InMemoryTestRunRegistry(), artifactDirectory);
+
+                Task<JObject> pending = service.ExecuteTestsAsync(
+                    TestMode.EditMode,
+                    returnOnlyFailures: false,
+                    returnWithLogs: false,
+                    testFilter: "RunA");
+                api.CompleteSuccessfulRun("RunA.Test");
+                JObject response = await pending;
+
+                Assert.AreEqual(1, api.ExecuteCalls);
+                Assert.AreEqual(unityRunId, response.Value<string>("runId"));
+                Assert.AreEqual(
+                    Path.Combine(artifactDirectory, $"{unityRunId}.xml"),
+                    response.Value<string>("artifactPath"));
+                Assert.IsTrue(File.Exists(response.Value<string>("artifactPath")));
+                foreach (string baselineField in new[]
+                {
+                    "success",
+                    "type",
+                    "message",
+                    "resultState",
+                    "durationSeconds",
+                    "testCount",
+                    "treeNodeCount",
+                    "passCount",
+                    "failCount",
+                    "skipCount",
+                    "inconclusiveCount",
+                    "filter",
+                    "results"
+                })
+                {
+                    Assert.IsNotNull(
+                        response.Property(baselineField),
+                        $"Happy-path response must preserve baseline field '{baselineField}'.");
+                }
+            }
+            finally
+            {
+                DeleteArtifactDirectory(artifactDirectory);
+            }
+        }
+
+        [Test]
+        public async Task CompletionProtectsCurrentArtifactFromFutureDatedRetentionEntries()
+        {
+            const string unityRunId = "16161616-1616-1616-1616-161616161616";
+            string artifactDirectory = PrepareArtifactDirectory(
+                nameof(CompletionProtectsCurrentArtifactFromFutureDatedRetentionEntries));
+            try
+            {
+                Directory.CreateDirectory(artifactDirectory);
+                DateTime futureTimestamp = DateTime.UtcNow.AddYears(10);
+                foreach (int value in Enumerable.Range(1, 20))
+                {
+                    string existingArtifact = Path.Combine(
+                        artifactDirectory,
+                        $"17000000-0000-0000-0000-{value:000000000000}.xml");
+                    File.WriteAllText(existingArtifact, "<test-run />");
+                    File.SetLastWriteTimeUtc(
+                        existingArtifact,
+                        futureTimestamp.AddMinutes(value));
+                }
+
+                var api = new FakeTestRunnerApi(unityRunId, ArtifactSaveBehavior.ValidXml);
+                var service = new TestRunnerService(
+                    api,
+                    new InMemoryTestRunRegistry(),
+                    artifactDirectory);
+                Task<JObject> pending = service.ExecuteTestsAsync(
+                    TestMode.EditMode,
+                    false,
+                    false,
+                    "FutureDatedArtifacts");
+
+                api.CompleteSuccessfulRun("FutureDatedArtifacts.Test");
+                JObject response = await pending;
+
+                string currentArtifact = Path.Combine(
+                    artifactDirectory,
+                    $"{unityRunId}.xml");
+                Assert.AreEqual("completed", response.Value<string>("status"));
+                Assert.AreEqual(currentArtifact, response.Value<string>("artifactPath"));
+                Assert.IsTrue(File.Exists(currentArtifact));
+                Assert.AreEqual(20, Directory.GetFiles(artifactDirectory, "*.xml").Length);
+            }
+            finally
+            {
+                DeleteArtifactDirectory(artifactDirectory);
+            }
+        }
+
+        [Test]
+        public async Task ArtifactMissingAfterPruneUsesArtifactFailureResponse()
+        {
+            const string unityRunId = "18181818-1818-1818-1818-181818181818";
+            string artifactDirectory = PrepareArtifactDirectory(
+                nameof(ArtifactMissingAfterPruneUsesArtifactFailureResponse));
+            try
+            {
+                var api = new FakeTestRunnerApi(unityRunId, ArtifactSaveBehavior.ValidXml);
+                var service = new TestRunnerService(
+                    api,
+                    new InMemoryTestRunRegistry(),
+                    artifactDirectory,
+                    pruneArtifacts: File.Delete);
+                Task<JObject> pending = service.ExecuteTestsAsync(
+                    TestMode.EditMode,
+                    false,
+                    false,
+                    "ArtifactRemovedByPrune");
+
+                api.CompleteSuccessfulRun("ArtifactRemovedByPrune.Test");
+                JObject response = await pending;
+                JObject polled = service.GetTestRun(unityRunId);
+
+                Assert.IsNull(response.Property("artifactPath"));
+                Assert.AreEqual("failed_to_save", response.Value<string>("status"));
+                Assert.AreEqual(
+                    "test_result_artifact_write_failed",
+                    response["artifactError"]?.Value<string>("error_code"));
+                Assert.That(
+                    response["artifactError"]?.Value<string>("message"),
+                    Does.Contain("disappeared after pruning"));
+                Assert.AreEqual("failed_to_save", polled.Value<string>("status"));
+                Assert.IsNull(polled["artifactPath"]);
+                Assert.That(
+                    polled["artifactError"]?.Value<string>("message"),
+                    Does.Contain("disappeared after pruning"));
+            }
+            finally
+            {
+                DeleteArtifactDirectory(artifactDirectory);
+            }
+        }
+
+        [Test]
+        public async Task ConcurrentRunFailsLoudWithoutCallingExecuteTwice()
+        {
+            const string unityRunId = "22222222-2222-2222-2222-222222222222";
+            string artifactDirectory = PrepareArtifactDirectory(nameof(ConcurrentRunFailsLoudWithoutCallingExecuteTwice));
+            try
+            {
+                var api = new FakeTestRunnerApi(unityRunId, ArtifactSaveBehavior.ValidXml);
+                var service = new TestRunnerService(api, new InMemoryTestRunRegistry(), artifactDirectory);
+                Task<JObject> runA = service.ExecuteTestsAsync(
+                    TestMode.EditMode,
+                    false,
+                    false,
+                    "RunA");
+
+                JObject runB = await service.ExecuteTestsAsync(
+                    TestMode.EditMode,
+                    false,
+                    false,
+                    "RunB");
+
+                Assert.AreEqual(1, api.ExecuteCalls);
+                Assert.IsFalse(runB.Value<bool>("success"));
+                Assert.AreEqual("test_run_in_progress", runB.Value<string>("error_code"));
+                Assert.AreEqual(unityRunId, runB.Value<string>("activeRunId"));
+
+                api.CompleteSuccessfulRun("RunA.Test");
+                await runA;
+            }
+            finally
+            {
+                DeleteArtifactDirectory(artifactDirectory);
+            }
+        }
+
+        [Test]
+        public async Task PollKeepsRunAFilterAndResultsAfterRunBIsRejected()
+        {
+            const string unityRunId = "33333333-3333-3333-3333-333333333333";
+            string artifactDirectory = PrepareArtifactDirectory(nameof(PollKeepsRunAFilterAndResultsAfterRunBIsRejected));
+            try
+            {
+                var api = new FakeTestRunnerApi(unityRunId, ArtifactSaveBehavior.ValidXml);
+                var registry = new InMemoryTestRunRegistry();
+                var service = new TestRunnerService(api, registry, artifactDirectory);
+                Task<JObject> runA = service.ExecuteTestsAsync(
+                    TestMode.EditMode,
+                    false,
+                    false,
+                    "RunA.Filter");
+
+                JObject runB = await service.ExecuteTestsAsync(
+                    TestMode.PlayMode,
+                    false,
+                    true,
+                    "RunB.Filter");
+                Assert.AreEqual("test_run_in_progress", runB.Value<string>("error_code"));
+
+                api.CompleteSuccessfulRun("RunA.Filter.TestOne");
+                await runA;
+                JObject polled = service.GetTestRun(unityRunId);
+
+                Assert.AreEqual("completed", polled.Value<string>("status"));
+                Assert.AreEqual(
+                    "RunA.Filter",
+                    polled["filter"]?.Value<string>("testFilter"));
+                Assert.AreEqual(
+                    "RunA.Filter.TestOne",
+                    polled["results"]?[0]?.Value<string>("fullName"));
+                Assert.That(polled.ToString(), Does.Not.Contain("RunB.Filter"));
+                Assert.AreEqual(1, api.ExecuteCalls);
+            }
+            finally
+            {
+                DeleteArtifactDirectory(artifactDirectory);
+            }
+        }
+
+        [TestCase(ArtifactSaveBehavior.Throws, "simulated artifact failure")]
+        [TestCase(ArtifactSaveBehavior.WritesNothing, "the file does not exist")]
+        [TestCase(
+            ArtifactSaveBehavior.WritesMalformedXml,
+            "the file is not complete NUnit XML (")]
+        [TestCase(
+            ArtifactSaveBehavior.WritesWrongRootXml,
+            "the XML root element is not <test-run>")]
+        public async Task ArtifactSaveFailureNeverReturnsArtifactPath(
+            ArtifactSaveBehavior saveBehavior,
+            string expectedArtifactErrorPrefix)
+        {
+            const string unityRunId = "44444444-4444-4444-4444-444444444444";
+            string artifactDirectory = PrepareArtifactDirectory(
+                $"{nameof(ArtifactSaveFailureNeverReturnsArtifactPath)}-{saveBehavior}");
+            try
+            {
+                var api = new FakeTestRunnerApi(unityRunId, saveBehavior);
+                var service = new TestRunnerService(api, new InMemoryTestRunRegistry(), artifactDirectory);
+                Task<JObject> pending = service.ExecuteTestsAsync(
+                    TestMode.EditMode,
+                    false,
+                    false,
+                    "ArtifactFailure");
+
+                api.CompleteSuccessfulRun("ArtifactFailure.Test");
+                JObject response = await pending;
+                JObject polled = service.GetTestRun(unityRunId);
+
+                Assert.IsNull(response["artifactPath"]);
+                Assert.IsNull(response.Property("artifactPath"));
+                Assert.IsTrue(response.Value<bool>("success"));
+                Assert.IsNull(response["error_code"]);
+                Assert.AreEqual("failed_to_save", response.Value<string>("status"));
+                Assert.AreEqual(
+                    "test_result_artifact_write_failed",
+                    response["artifactError"]?.Value<string>("error_code"));
+                string responseArtifactError =
+                    response["artifactError"]?.Value<string>("message");
+                Assert.That(responseArtifactError, Is.Not.Null.And.Not.Empty);
+                Assert.That(
+                    responseArtifactError,
+                    Does.StartWith(expectedArtifactErrorPrefix));
+                Assert.That(
+                    response.Value<string>("message"),
+                    Does.Contain("artifact could not be saved"));
+                Assert.AreEqual("failed_to_save", polled.Value<string>("status"));
+                Assert.IsNull(polled["artifactPath"]);
+                Assert.IsTrue(polled.Value<bool>("success"));
+                Assert.AreEqual(
+                    "test_result_artifact_write_failed",
+                    polled["artifactError"]?.Value<string>("error_code"));
+                string polledArtifactError =
+                    polled["artifactError"]?.Value<string>("message");
+                Assert.That(polledArtifactError, Is.Not.Null.And.Not.Empty);
+                Assert.That(
+                    polledArtifactError,
+                    Does.StartWith(expectedArtifactErrorPrefix));
+            }
+            finally
+            {
+                DeleteArtifactDirectory(artifactDirectory);
+            }
+        }
+
+        [Test]
+        public void ArtifactWriteValidatesBeforeAndAfterPublishing()
+        {
+            MethodInfo writer = typeof(TestRunnerService).GetMethod(
+                "TryWriteArtifact",
+                BindingFlags.NonPublic | BindingFlags.Instance);
+            MethodInfo validator = typeof(TestRunnerService).GetMethod(
+                "TryValidateArtifact",
+                BindingFlags.NonPublic | BindingFlags.Static);
+
+            Assert.AreEqual(
+                2,
+                CountDirectCalls(writer, validator),
+                "TryWriteArtifact must validate both the temporary artifact before publishing " +
+                "and the final artifact after publishing.");
+        }
+
+        [Test]
+        public async Task PollFailsLoudlyWhenCompletedArtifactWasDeleted()
+        {
+            const string unityRunId = "77777777-7777-7777-7777-777777777777";
+            string artifactDirectory = PrepareArtifactDirectory(nameof(PollFailsLoudlyWhenCompletedArtifactWasDeleted));
+            try
+            {
+                var api = new FakeTestRunnerApi(unityRunId, ArtifactSaveBehavior.ValidXml);
+                var service = new TestRunnerService(api, new InMemoryTestRunRegistry(), artifactDirectory);
+                Task<JObject> pending = service.ExecuteTestsAsync(
+                    TestMode.EditMode,
+                    false,
+                    false,
+                    "DeletedArtifact");
+                api.CompleteSuccessfulRun("DeletedArtifact.Test");
+                JObject completed = await pending;
+                File.Delete(completed.Value<string>("artifactPath"));
+
+                JObject polled = service.GetTestRun(unityRunId);
+
+                Assert.IsFalse(polled.Value<bool>("success"));
+                Assert.AreEqual(
+                    "test_result_artifact_unavailable",
+                    polled.Value<string>("error_code"));
+                Assert.AreEqual("completed", polled.Value<string>("status"));
+                Assert.IsNull(polled["artifactPath"]);
+            }
+            finally
+            {
+                DeleteArtifactDirectory(artifactDirectory);
+            }
+        }
+
+        [Test]
+        public async Task WaitForCompletionReturnsTimeoutWithoutCompletingPendingRun()
+        {
+            var completionSource = new TaskCompletionSource<JObject>();
+            var delayCompletionSource = new TaskCompletionSource<bool>();
+            JObject timeout = new JObject
+            {
+                ["success"] = false,
+                ["error_code"] = "test_run_still_running",
+                ["message"] = "poll"
+            };
+
+            Task<JObject> waiter = TestRunnerService.WaitForCompletionAsync(
+                completionSource.Task,
+                delayCompletionSource.Task,
+                timeout);
+
+            delayCompletionSource.SetResult(true);
+            JObject response = await waiter;
+
+            Assert.AreSame(timeout, response);
+            Assert.IsFalse(completionSource.Task.IsCompleted);
+        }
+
+        [Test]
+        public void UnityWaitBudgetIsShorterThanNodeTransportTimeout()
+        {
+            TimeSpan budget = TestRunnerService.GetUnityWaitBudget(10);
+
+            Assert.AreEqual(7.5, budget.TotalSeconds);
+            Assert.Less(budget.TotalSeconds, 10);
+        }
+
+        [Test]
+        public async Task TimeoutReturnsPollIdentityAndKeepsRunActive()
+        {
+            const string unityRunId = "66666666-6666-6666-6666-666666666666";
+            string artifactDirectory = PrepareArtifactDirectory(nameof(TimeoutReturnsPollIdentityAndKeepsRunActive));
+            try
+            {
+                var api = new FakeTestRunnerApi(unityRunId, ArtifactSaveBehavior.ValidXml);
+                var service = new TestRunnerService(
+                    api,
+                    new InMemoryTestRunRegistry(),
+                    artifactDirectory,
+                    _ => Task.CompletedTask);
+
+                JObject response = await service.ExecuteTestsAsync(
+                    TestMode.EditMode,
+                    false,
+                    false,
+                    "SlowRun");
+                JObject polled = service.GetTestRun(unityRunId);
+
+                Assert.IsFalse(response.Value<bool>("success"));
+                Assert.AreEqual("test_run_still_running", response.Value<string>("error_code"));
+                Assert.AreEqual(unityRunId, response.Value<string>("runId"));
+                Assert.IsNull(response["artifactPath"]);
+                Assert.AreEqual(
+                    Path.Combine(artifactDirectory, $"{unityRunId}.xml"),
+                    response.Value<string>("expectedArtifactPath"));
+                Assert.IsFalse(response.Value<bool>("artifactExists"));
+                Assert.That(response.Value<string>("message"), Does.Contain("75%"));
+                Assert.That(response.Value<string>("message"), Does.Contain("get_test_run"));
+                Assert.AreEqual("running", polled.Value<string>("status"));
+                Assert.IsNull(polled["artifactPath"]);
+                Assert.AreEqual(
+                    response.Value<string>("expectedArtifactPath"),
+                    polled.Value<string>("expectedArtifactPath"));
+                Assert.AreEqual(1, api.ExecuteCalls);
+            }
+            finally
+            {
+                DeleteArtifactDirectory(artifactDirectory);
+            }
+        }
+
+        [Test]
+        public async Task TimedOutRunCompletionDoesNotPolluteNextRunRecord()
+        {
+            const string firstRunId = "88888888-8888-8888-8888-888888888888";
+            const string secondRunId = "99999999-9999-9999-9999-999999999999";
+            string artifactDirectory = PrepareArtifactDirectory(
+                nameof(TimedOutRunCompletionDoesNotPolluteNextRunRecord));
+            try
+            {
+                var api = new FakeTestRunnerApi(firstRunId, ArtifactSaveBehavior.ValidXml);
+                var registry = new InMemoryTestRunRegistry();
+                var service = new TestRunnerService(
+                    api,
+                    registry,
+                    artifactDirectory,
+                    _ => Task.CompletedTask);
+
+                JObject firstTimeout = await service.ExecuteTestsAsync(
+                    TestMode.EditMode,
+                    false,
+                    false,
+                    "RunA");
+                Assert.AreEqual(
+                    "test_run_still_running",
+                    firstTimeout.Value<string>("error_code"));
+
+                api.CompleteSuccessfulRun("RunA.Test");
+                api.RunId = secondRunId;
+                JObject secondTimeout = await service.ExecuteTestsAsync(
+                    TestMode.PlayMode,
+                    false,
+                    false,
+                    "RunB");
+                JObject secondRecord = service.GetTestRun(secondRunId);
+
+                Assert.AreEqual(
+                    "test_run_still_running",
+                    secondTimeout.Value<string>("error_code"));
+                Assert.AreEqual("running", secondRecord.Value<string>("status"));
+                Assert.AreEqual(
+                    "RunB",
+                    secondRecord["filter"]?.Value<string>("testFilter"));
+                Assert.That(secondRecord.ToString(), Does.Not.Contain("RunA.Test"));
+            }
+            finally
+            {
+                DeleteArtifactDirectory(artifactDirectory);
+            }
+        }
+
+        [Test]
+        public async Task RestoredAndOriginalServicesUseEquivalentAdditiveResultTrees()
+        {
+            const string originalRunId = "55555555-5555-5555-5555-555555555555";
+            const string restoredRunId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+            string artifactDirectory = PrepareArtifactDirectory(
+                nameof(RestoredAndOriginalServicesUseEquivalentAdditiveResultTrees));
+            string registryKey = CreateRegistryKey(
+                nameof(RestoredAndOriginalServicesUseEquivalentAdditiveResultTrees));
+            try
+            {
+                var originalApi = new FakeTestRunnerApi(
+                    originalRunId,
+                    ArtifactSaveBehavior.ValidXml);
+                var originalService = new TestRunnerService(
+                    originalApi,
+                    new InMemoryTestRunRegistry(),
+                    artifactDirectory,
+                    _ => new TaskCompletionSource<bool>().Task);
+                Task<JObject> originalPending = originalService.ExecuteTestsAsync(
+                    TestMode.PlayMode,
+                    false,
+                    false,
+                    "OriginalRun");
+                originalApi.CompleteSuccessfulRun("OriginalRun.Test", sendTestFinished: true);
+                JObject original = await originalPending;
+
+                var sessionRegistry = new SessionStateTestRunRegistry(registryKey);
+                var preReloadApi = new FakeTestRunnerApi(
+                    restoredRunId,
+                    ArtifactSaveBehavior.ValidXml);
+                var preReloadService = new TestRunnerService(
+                    preReloadApi,
+                    sessionRegistry,
+                    artifactDirectory,
+                    _ => Task.CompletedTask);
+                await preReloadService.ExecuteTestsAsync(
+                    TestMode.PlayMode,
+                    false,
+                    false,
+                    "RestoredRun");
+
+                var resumedApi = new FakeTestRunnerApi(
+                    restoredRunId,
+                    ArtifactSaveBehavior.ValidXml);
+                var resumedService = new TestRunnerService(
+                    resumedApi,
+                    new SessionStateTestRunRegistry(registryKey),
+                    artifactDirectory,
+                    _ => Task.CompletedTask);
+                resumedApi.CompleteSuccessfulRun(
+                    "RestoredRun.Test",
+                    sendTestFinished: false);
+
+                JObject polled = resumedService.GetTestRun();
+                Assert.AreEqual(restoredRunId, polled.Value<string>("runId"));
+                Assert.AreEqual("completed", polled.Value<string>("status"));
+                Assert.AreEqual(
+                    "RestoredRun",
+                    polled["filter"]?.Value<string>("testFilter"));
+                Assert.AreEqual(
+                    "RestoredRun.Test",
+                    polled["results"]?[0]?.Value<string>("fullName"));
+                Assert.AreEqual(1, polled["results"]?.Count());
+                Assert.AreEqual(1, original["results"]?.Count());
+                Assert.AreEqual(
+                    original.Value<int>("treeNodeCount"),
+                    polled.Value<int>("treeNodeCount"));
+            }
+            finally
+            {
+                SessionState.EraseString(registryKey);
+                DeleteArtifactDirectory(artifactDirectory);
+            }
+        }
+
+        [Test]
+        public async Task RestoredEmptyRunDoesNotSerializeRunRootAsTestResult()
+        {
+            const string runId = "abababab-abab-abab-abab-abababababab";
+            string artifactDirectory = PrepareArtifactDirectory(
+                nameof(RestoredEmptyRunDoesNotSerializeRunRootAsTestResult));
+            string registryKey = CreateRegistryKey(
+                nameof(RestoredEmptyRunDoesNotSerializeRunRootAsTestResult));
+            try
+            {
+                var registry = new SessionStateTestRunRegistry(registryKey);
+                var originalService = new TestRunnerService(
+                    new FakeTestRunnerApi(runId, ArtifactSaveBehavior.ValidXml),
+                    registry,
+                    artifactDirectory,
+                    _ => Task.CompletedTask);
+                await originalService.ExecuteTestsAsync(
+                    TestMode.PlayMode,
+                    false,
+                    false,
+                    "NoMatches");
+
+                var resumedApi = new FakeTestRunnerApi(runId, ArtifactSaveBehavior.ValidXml);
+                var resumedService = new TestRunnerService(
+                    resumedApi,
+                    new SessionStateTestRunRegistry(registryKey),
+                    artifactDirectory,
+                    _ => Task.CompletedTask);
+                resumedApi.CompleteEmptyRun();
+                JObject polled = resumedService.GetTestRun(runId);
+
+                Assert.AreEqual(0, polled.Value<int>("treeNodeCount"));
+                Assert.AreEqual(0, polled["results"]?.Count());
+                Assert.AreEqual("no_tests_matched", polled.Value<string>("error_code"));
+            }
+            finally
+            {
+                SessionState.EraseString(registryKey);
+                DeleteArtifactDirectory(artifactDirectory);
+            }
+        }
+
+        [Test]
+        public void SessionRegistryRoundTripsActiveRecentAndPlayModeFilterMetadata()
+        {
+            string registryKey = CreateRegistryKey(
+                nameof(SessionRegistryRoundTripsActiveRecentAndPlayModeFilterMetadata));
+            try
+            {
+                var registry = new SessionStateTestRunRegistry(registryKey);
+                var record = new TestRunRecord
+                {
+                    RunId = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+                    Status = TestRunStatus.Running,
+                    Filter = new JObject
+                    {
+                        ["testMode"] = "PlayMode",
+                        ["testFilter"] = "My.PlayMode.Tests",
+                        ["assemblyNames"] = new JArray("Tests.One", "!Tests.Two")
+                    },
+                    ArtifactPath = "/project/Library/McpUnity/TestResults/" +
+                        "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb.xml",
+                    StartedAt = "2026-09-02T00:00:00.0000000Z",
+                    ReturnOnlyFailures = false,
+                    ReturnWithLogs = true,
+                    RunStartedObserved = true
+                };
+
+                registry.Upsert(record);
+                TestRunRecord byId = registry.Get(record.RunId);
+                TestRunRecord mostRecent = registry.GetMostRecent();
+                TestRunRecord active = registry.GetActive();
+
+                Assert.AreNotSame(record, byId);
+                Assert.AreEqual(record.RunId, byId.RunId);
+                Assert.AreEqual("PlayMode", byId.Filter.Value<string>("testMode"));
+                CollectionAssert.AreEqual(
+                    new[] { "Tests.One", "!Tests.Two" },
+                    byId.Filter["assemblyNames"].ToObject<string[]>());
+                Assert.IsTrue(byId.RunStartedObserved);
+                Assert.AreEqual(record.RunId, mostRecent.RunId);
+                Assert.AreEqual(record.RunId, active.RunId);
+            }
+            finally
+            {
+                SessionState.EraseString(registryKey);
+            }
+        }
+
+        [Test]
+        public void SessionRegistryPreservesDateLikeStringsExactly()
+        {
+            const string expectedStartedAt = "2026-09-02T00:00:00.0000000Z";
+            const string expectedTestFilter = "2026-09-02T00:00:00Z";
+            string registryKey = CreateRegistryKey(
+                nameof(SessionRegistryPreservesDateLikeStringsExactly));
+            try
+            {
+                var registry = new SessionStateTestRunRegistry(registryKey);
+                registry.Upsert(new TestRunRecord
+                {
+                    RunId = "abababab-abab-abab-abab-abababababab",
+                    Status = TestRunStatus.Running,
+                    Filter = new JObject
+                    {
+                        ["testMode"] = "EditMode",
+                        ["testFilter"] = expectedTestFilter
+                    },
+                    StartedAt = expectedStartedAt
+                });
+
+                TestRunRecord restored = registry.Get(
+                    "abababab-abab-abab-abab-abababababab");
+
+                Assert.AreEqual(expectedStartedAt, restored.StartedAt);
+                Assert.AreEqual(
+                    expectedTestFilter,
+                    restored.Filter.Value<string>("testFilter"));
+            }
+            finally
+            {
+                SessionState.EraseString(registryKey);
+            }
+        }
+
+        [Test]
+        public void SessionRegistryRetainsOnlyMostRecentTwentyRecords()
+        {
+            string registryKey = CreateRegistryKey(
+                nameof(SessionRegistryRetainsOnlyMostRecentTwentyRecords));
+            try
+            {
+                var registry = new SessionStateTestRunRegistry(registryKey);
+                var runIds = Enumerable.Range(1, SessionStateTestRunRegistry.MaxRecords + 1)
+                    .Select(value => $"00000000-0000-0000-0000-{value:000000000000}")
+                    .ToArray();
+                foreach (string runId in runIds)
+                {
+                    registry.Upsert(new TestRunRecord
+                    {
+                        RunId = runId,
+                        Status = TestRunStatus.Completed,
+                        StartedAt = "2026-09-02T00:00:00.0000000Z"
+                    });
+                }
+
+                Assert.IsNull(registry.Get(runIds[0]));
+                Assert.AreEqual(
+                    runIds[runIds.Length - 1],
+                    registry.GetMostRecent().RunId);
+                Assert.AreEqual(
+                    SessionStateTestRunRegistry.MaxRecords,
+                    JArray.Parse(SessionState.GetString(registryKey, string.Empty)).Count);
+            }
+            finally
+            {
+                SessionState.EraseString(registryKey);
+            }
+        }
+
+        [Test]
+        public void SessionRegistryMalformedJsonReturnsEmptyRegistry()
+        {
+            string registryKey = CreateRegistryKey(
+                nameof(SessionRegistryMalformedJsonReturnsEmptyRegistry));
+            try
+            {
+                SessionState.SetString(registryKey, "[not valid json");
+                var registry = new SessionStateTestRunRegistry(registryKey);
+
+                Assert.IsNull(registry.GetMostRecent());
+                Assert.IsNull(registry.GetActive());
+                Assert.IsNull(
+                    registry.Get("cccccccc-cccc-cccc-cccc-cccccccccccc"));
+            }
+            finally
+            {
+                SessionState.EraseString(registryKey);
+            }
+        }
+
+        [Test]
+        public void SessionRegistryPersistsMetadataWithoutResultsOrLogs()
+        {
+            string registryKey = CreateRegistryKey(
+                nameof(SessionRegistryPersistsMetadataWithoutResultsOrLogs));
+            try
+            {
+                var registry = new SessionStateTestRunRegistry(registryKey);
+                registry.Upsert(new TestRunRecord
+                {
+                    RunId = "dddddddd-dddd-dddd-dddd-dddddddddddd",
+                    Status = TestRunStatus.Completed,
+                    StartedAt = "2026-09-02T00:00:00.0000000Z",
+                    Success = true,
+                    Message = "1/1 passed",
+                    TestCount = 1,
+                    PassCount = 1
+                });
+
+                string serialized = SessionState.GetString(registryKey, string.Empty);
+                Assert.That(serialized, Does.Not.Contain("\"results\""));
+                Assert.That(serialized, Does.Not.Contain("\"logs\""));
+                Assert.AreEqual(1, registry.GetMostRecent().TestCount);
+            }
+            finally
+            {
+                SessionState.EraseString(registryKey);
+            }
+        }
+
+        [Test]
+        public void PruneArtifactsDeletesOnlyOwnedFilesBeyondRetentionAndOwnedTemps()
+        {
+            string artifactDirectory = PrepareArtifactDirectory(
+                nameof(PruneArtifactsDeletesOnlyOwnedFilesBeyondRetentionAndOwnedTemps));
+            try
+            {
+                Directory.CreateDirectory(artifactDirectory);
+                string[] ownedArtifacts = Enumerable.Range(1, 21)
+                    .Select(value => Path.Combine(
+                        artifactDirectory,
+                        $"10000000-0000-0000-0000-{value:000000000000}.xml"))
+                    .ToArray();
+                for (int index = 0; index < ownedArtifacts.Length; index++)
+                {
+                    File.WriteAllText(ownedArtifacts[index], "<test-run />");
+                    File.SetLastWriteTimeUtc(
+                        ownedArtifacts[index],
+                        new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
+                            .AddMinutes(index));
+                }
+
+                string unownedArtifact = Path.Combine(artifactDirectory, "external.xml");
+                string ownedTemp = Path.Combine(
+                    artifactDirectory,
+                    "20000000-0000-0000-0000-000000000001.xml.tmp");
+                File.WriteAllText(unownedArtifact, "external");
+                File.WriteAllText(ownedTemp, "partial");
+
+                var service = new TestRunnerService(
+                    new FakeTestRunnerApi(
+                        "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee",
+                        ArtifactSaveBehavior.ValidXml),
+                    new InMemoryTestRunRegistry(),
+                    artifactDirectory);
+                service.PruneArtifacts();
+
+                Assert.AreEqual(
+                    20,
+                    ownedArtifacts.Count(File.Exists));
+                Assert.IsFalse(File.Exists(ownedArtifacts[0]));
+                Assert.IsTrue(File.Exists(ownedArtifacts[20]));
+                Assert.IsTrue(File.Exists(unownedArtifact));
+                Assert.IsFalse(File.Exists(ownedTemp));
+            }
+            finally
+            {
+                DeleteArtifactDirectory(artifactDirectory);
+            }
+        }
+
+        [Test]
+        public async Task StaleActiveRunReleasesLockAndDisclosesRetry()
+        {
+            const string staleRunId = "ffffffff-ffff-ffff-ffff-ffffffffffff";
+            string artifactDirectory = PrepareArtifactDirectory(
+                nameof(StaleActiveRunReleasesLockAndDisclosesRetry));
+            DateTime now = new DateTime(2026, 9, 2, 12, 0, 0, DateTimeKind.Utc);
+            try
+            {
+                var registry = new InMemoryTestRunRegistry();
+                registry.Upsert(new TestRunRecord
+                {
+                    RunId = staleRunId,
+                    Status = TestRunStatus.Running,
+                    StartedAt = now.Subtract(TestRunnerService.ActiveRunTtl)
+                        .AddSeconds(-1)
+                        .ToString("o")
+                });
+                var api = new FakeTestRunnerApi(
+                    "12121212-1212-1212-1212-121212121212",
+                    ArtifactSaveBehavior.ValidXml);
+                var service = new TestRunnerService(
+                    api,
+                    registry,
+                    artifactDirectory,
+                    _ => Task.CompletedTask,
+                    () => now);
+
+                JObject released = await service.ExecuteTestsAsync(
+                    TestMode.EditMode,
+                    false,
+                    false,
+                    "RetryMe");
+                JObject retry = await service.ExecuteTestsAsync(
+                    TestMode.EditMode,
+                    false,
+                    false,
+                    "Replacement");
+
+                Assert.AreEqual(
+                    "test_run_in_progress",
+                    released.Value<string>("error_code"));
+                Assert.AreEqual("stale", released.Value<string>("status"));
+                Assert.IsTrue(released.Value<bool>("lockReleased"));
+                Assert.That(released.Value<string>("message"), Does.Contain("retry run_tests"));
+                Assert.AreEqual(
+                    "test_run_still_running",
+                    retry.Value<string>("error_code"));
+                Assert.AreEqual(1, api.ExecuteCalls);
+            }
+            finally
+            {
+                DeleteArtifactDirectory(artifactDirectory);
+            }
+        }
+
+        [Test]
+        public async Task SecondRunStartedInvalidatesRecordWithoutAttributingResult()
+        {
+            const string unityRunId = "13131313-1313-1313-1313-131313131313";
+            string artifactDirectory = PrepareArtifactDirectory(
+                nameof(SecondRunStartedInvalidatesRecordWithoutAttributingResult));
+            try
+            {
+                var api = new FakeTestRunnerApi(unityRunId, ArtifactSaveBehavior.ValidXml);
+                var pendingDelay = new TaskCompletionSource<bool>();
+                var service = new TestRunnerService(
+                    api,
+                    new InMemoryTestRunRegistry(),
+                    artifactDirectory,
+                    _ => pendingDelay.Task);
+                Task<JObject> pending = service.ExecuteTestsAsync(
+                    TestMode.EditMode,
+                    false,
+                    false,
+                    "OwnedRun");
+
+                api.StartRun("OwnedRun");
+                api.StartRun("Test Runner Window Run");
+                JObject invalidated = await pending;
+                api.CompleteSuccessfulRun("Foreign.Test");
+                JObject polled = service.GetTestRun(unityRunId);
+
+                Assert.AreEqual("untrusted", invalidated.Value<string>("status"));
+                Assert.IsNull(invalidated["runId"]);
+                Assert.AreEqual(
+                    unityRunId,
+                    invalidated.Value<string>("invalidatedRunId"));
+                Assert.IsNull(invalidated["results"]);
+                Assert.AreEqual("untrusted", polled.Value<string>("status"));
+                Assert.IsNull(polled["runId"]);
+                Assert.AreEqual(
+                    unityRunId,
+                    polled.Value<string>("requestedRunId"));
+                Assert.IsFalse(File.Exists(
+                    Path.Combine(artifactDirectory, $"{unityRunId}.xml")));
+            }
+            finally
+            {
+                DeleteArtifactDirectory(artifactDirectory);
+            }
+        }
+
+        [Test]
+        public async Task InvalidUnityRunIdNeverBuildsArtifactPath()
+        {
+            string artifactDirectory = PrepareArtifactDirectory(
+                nameof(InvalidUnityRunIdNeverBuildsArtifactPath));
+            try
+            {
+                var api = new FakeTestRunnerApi("../escape", ArtifactSaveBehavior.ValidXml);
+                var service = new TestRunnerService(
+                    api,
+                    new InMemoryTestRunRegistry(),
+                    artifactDirectory);
+
+                JObject response = await service.ExecuteTestsAsync(
+                    TestMode.EditMode,
+                    false,
+                    false,
+                    "InvalidGuid");
+
+                Assert.AreEqual(
+                    "test_run_start_failed",
+                    response["error"]?["type"]?.ToString());
+                Assert.IsFalse(Directory.Exists(artifactDirectory));
+            }
+            finally
+            {
+                DeleteArtifactDirectory(artifactDirectory);
+            }
+        }
+
+        [Test]
+        public void InvalidGetRunIdUsesExistingValidationEnvelope()
+        {
+            var service = new TestRunnerService(
+                new FakeTestRunnerApi(
+                    "14141414-1414-1414-1414-141414141414",
+                    ArtifactSaveBehavior.ValidXml),
+                new InMemoryTestRunRegistry(),
+                Path.GetTempPath());
+
+            JObject response = service.GetTestRun("../escape");
+
+            Assert.AreEqual(
+                "validation_error",
+                response["error"]?["type"]?.ToString());
+        }
+
+        [Test]
+        public async Task ReentrantRunBeforeGuidAssignmentReturnsStateErrorWithoutNre()
+        {
+            const string unityRunId = "15151515-1515-1515-1515-151515151515";
+            string artifactDirectory = PrepareArtifactDirectory(
+                nameof(ReentrantRunBeforeGuidAssignmentReturnsStateErrorWithoutNre));
+            try
+            {
+                var api = new FakeTestRunnerApi(unityRunId, ArtifactSaveBehavior.ValidXml);
+                var service = new TestRunnerService(
+                    api,
+                    new InMemoryTestRunRegistry(),
+                    artifactDirectory,
+                    _ => Task.CompletedTask);
+                Task<JObject> reentrant = null;
+                api.OnExecute = () =>
+                {
+                    api.OnExecute = null;
+                    reentrant = service.ExecuteTestsAsync(
+                        TestMode.PlayMode,
+                        false,
+                        false,
+                        "Reentrant");
+                };
+
+                await service.ExecuteTestsAsync(
+                    TestMode.EditMode,
+                    false,
+                    false,
+                    "Original");
+                JObject response = await reentrant;
+
+                Assert.AreEqual(
+                    "test_run_state_invalid",
+                    response["error"]?["type"]?.ToString());
+                Assert.AreEqual(1, api.ExecuteCalls);
+            }
+            finally
+            {
+                DeleteArtifactDirectory(artifactDirectory);
+            }
         }
 
         private static JObject BuildResponse(
@@ -469,6 +1473,7 @@ namespace McpUnity.Tests
             private readonly int _failCount;
             private readonly int _skipCount;
             private readonly int _inconclusiveCount;
+            private readonly IReadOnlyList<ITestResultAdaptor> _children;
 
             public FakeSummaryResultAdaptor(
                 string runName,
@@ -477,7 +1482,8 @@ namespace McpUnity.Tests
                 int passCount,
                 int failCount,
                 int skipCount,
-                int inconclusiveCount)
+                int inconclusiveCount,
+                IReadOnlyList<ITestResultAdaptor> children = null)
             {
                 _test = new FakeTestAdaptor(runName);
                 _resultState = resultState;
@@ -486,6 +1492,7 @@ namespace McpUnity.Tests
                 _failCount = failCount;
                 _skipCount = skipCount;
                 _inconclusiveCount = inconclusiveCount;
+                _children = children;
             }
 
             public override ITestAdaptor Test => _test;
@@ -495,6 +1502,217 @@ namespace McpUnity.Tests
             public override int FailCount => _failCount;
             public override int SkipCount => _skipCount;
             public override int InconclusiveCount => _inconclusiveCount;
+            public override bool HasChildren => _children != null && _children.Count > 0;
+            public override IEnumerable<ITestResultAdaptor> Children =>
+                _children ?? Enumerable.Empty<ITestResultAdaptor>();
+        }
+
+        public enum ArtifactSaveBehavior
+        {
+            ValidXml,
+            Throws,
+            WritesNothing,
+            WritesMalformedXml,
+            WritesWrongRootXml
+        }
+
+        private sealed class FakeTestRunnerApi : ITestRunnerApi
+        {
+            private readonly ArtifactSaveBehavior _saveBehavior;
+            private ICallbacks _callbacks;
+            private string _lastCompletedFullName;
+            private bool _lastRunWasEmpty;
+
+            public int ExecuteCalls { get; private set; }
+            public string RunId { get; set; }
+            public Action OnExecute { get; set; }
+
+            public FakeTestRunnerApi(string runId, ArtifactSaveBehavior saveBehavior)
+            {
+                RunId = runId;
+                _saveBehavior = saveBehavior;
+            }
+
+            public string Execute(ExecutionSettings executionSettings)
+            {
+                ExecuteCalls++;
+                OnExecute?.Invoke();
+                return RunId;
+            }
+
+            public void RegisterCallbacks(ICallbacks callbacks)
+            {
+                _callbacks = callbacks;
+            }
+
+            public void RetrieveTestList(TestMode testMode, Action<ITestAdaptor> callback)
+            {
+                throw new NotImplementedException();
+            }
+
+            public void SaveResultToFile(ITestResultAdaptor results, string xmlFilePath)
+            {
+                if (_saveBehavior == ArtifactSaveBehavior.Throws)
+                {
+                    throw new IOException("simulated artifact failure");
+                }
+                if (_saveBehavior == ArtifactSaveBehavior.ValidXml)
+                {
+                    var root = new XElement("test-run");
+                    if (!_lastRunWasEmpty)
+                    {
+                        root.Add(new XElement(
+                            "test-suite",
+                            new XElement(
+                                "test-case",
+                                new XAttribute("name", "Test"),
+                                new XAttribute(
+                                    "fullname",
+                                    _lastCompletedFullName ?? "Fake.Test"),
+                                new XAttribute("result", "Passed"),
+                                new XAttribute("duration", "0.1"))));
+                    }
+                    var document = new XDocument(root);
+                    document.Save(xmlFilePath);
+                }
+                if (_saveBehavior == ArtifactSaveBehavior.WritesMalformedXml)
+                {
+                    File.WriteAllText(xmlFilePath, "<test-run>");
+                }
+                if (_saveBehavior == ArtifactSaveBehavior.WritesWrongRootXml)
+                {
+                    var document = new XDocument(new XElement("not-test-run"));
+                    document.Save(xmlFilePath);
+                }
+            }
+
+            public void StartRun(string name)
+            {
+                _callbacks.RunStarted(new FakeTestAdaptor(name));
+            }
+
+            public void CompleteSuccessfulRun(
+                string fullName,
+                bool sendTestFinished = true)
+            {
+                _lastCompletedFullName = fullName;
+                _lastRunWasEmpty = false;
+                var leaf = new FakeLeafResultAdaptor(
+                    "Test",
+                    fullName,
+                    "Passed",
+                    null,
+                    0.1,
+                    null,
+                    null);
+                if (sendTestFinished)
+                {
+                    _callbacks.TestFinished(leaf);
+                }
+                _callbacks.RunFinished(new FakeSummaryResultAdaptor(
+                    "FakeRun",
+                    "Passed",
+                    0.1,
+                    1,
+                    0,
+                    0,
+                    0,
+                    new[] { leaf }));
+            }
+
+            public void CompleteEmptyRun()
+            {
+                _lastCompletedFullName = null;
+                _lastRunWasEmpty = true;
+                _callbacks.RunFinished(new FakeSummaryResultAdaptor(
+                    "FakeRun",
+                    "Passed",
+                    0.01,
+                    0,
+                    0,
+                    0,
+                    0));
+            }
+        }
+
+        private sealed class InMemoryTestRunRegistry : ITestRunRegistry
+        {
+            private readonly List<TestRunRecord> _records = new List<TestRunRecord>();
+
+            public TestRunRecord Get(string runId)
+            {
+                return Clone(_records.LastOrDefault(record => record.RunId == runId));
+            }
+
+            public TestRunRecord GetMostRecent()
+            {
+                return Clone(_records.LastOrDefault());
+            }
+
+            public TestRunRecord GetActive()
+            {
+                return Clone(_records.LastOrDefault(
+                    record => record.Status == TestRunStatus.Running));
+            }
+
+            public void Upsert(TestRunRecord record)
+            {
+                _records.RemoveAll(existing => existing.RunId == record.RunId);
+                _records.Add(Clone(record));
+            }
+
+            private static TestRunRecord Clone(TestRunRecord record)
+            {
+                return record == null
+                    ? null
+                    : TestRunRecord.FromJson(record.ToJson());
+            }
+        }
+
+        private static string CreateRegistryKey(string testName)
+        {
+            return $"McpUnity.Tests.TestRunnerResultTests.{testName}.{Guid.NewGuid():N}";
+        }
+
+        private static int CountDirectCalls(MethodInfo caller, MethodInfo expectedCallee)
+        {
+            Assert.IsNotNull(caller, "Expected caller method to exist.");
+            Assert.IsNotNull(expectedCallee, "Expected callee method to exist.");
+            Assert.AreEqual(
+                caller.Module,
+                expectedCallee.Module,
+                "Direct-call count requires caller and callee to share one module.");
+            byte[] il = caller.GetMethodBody()?.GetILAsByteArray();
+            Assert.IsNotNull(il, $"Method '{caller.Name}' has no readable IL body.");
+
+            int count = 0;
+            for (int index = 0; index + sizeof(int) < il.Length; index++)
+            {
+                if ((il[index] == 0x28 || il[index] == 0x6f)
+                    && BitConverter.ToInt32(il, index + 1) == expectedCallee.MetadataToken)
+                {
+                    count++;
+                }
+            }
+            return count;
+        }
+
+        private static string PrepareArtifactDirectory(string testName)
+        {
+            string path = Path.Combine(
+                Path.GetTempPath(),
+                "McpUnity-TestRunnerServiceTests",
+                testName);
+            DeleteArtifactDirectory(path);
+            return path;
+        }
+
+        private static void DeleteArtifactDirectory(string path)
+        {
+            if (Directory.Exists(path))
+            {
+                Directory.Delete(path, true);
+            }
         }
 
         private sealed class FakeTestAdaptor : ITestAdaptor
@@ -551,6 +1769,11 @@ namespace McpUnity.Tests
                 ExecuteCalls++;
                 LastTestMode = testMode;
                 return Task.FromResult(new JObject { ["success"] = true });
+            }
+
+            public JObject GetTestRun(string runId = null)
+            {
+                return new JObject { ["success"] = false };
             }
         }
     }

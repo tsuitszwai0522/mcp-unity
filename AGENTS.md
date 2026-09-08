@@ -127,10 +127,16 @@ Node reads config from `../ProjectSettings/McpUnitySettings.json` relative to **
 - `update_component` — Update or add components on GameObjects
 - `remove_component` — Remove components from GameObjects
 - `add_package` — Install packages via Package Manager
+- `batch_execute` — Execute multiple Unity tools as a batch
+- `create_scriptable_object` — Create ScriptableObject assets
+- `get_selection` — Get the current Unity Editor selection
+- `manage_asset` — Create, move, copy, rename, or delete assets
 - `run_tests` — Run Unity Test Runner tests
+- `get_test_run` — Poll a Unity test run by GUID or get the most recent run
 - `send_console_log` — Send logs to Unity console
 - `add_asset_to_scene` — Add assets to scene
 - `create_prefab` — Create prefabs with optional scripts
+- `save_as_prefab` — Save a scene GameObject as a Prefab asset
 - `create_scene` — Create and save new scenes
 - `load_scene` — Load scenes (single or additive)
 - `delete_scene` — Delete scenes and remove from Build Settings
@@ -148,6 +154,8 @@ Node reads config from `../ProjectSettings/McpUnitySettings.json` relative to **
 - `assign_material` — Assign materials to Renderer components
 - `modify_material` — Modify material properties (colors, floats, textures)
 - `get_material_info` — Get material details including all properties
+- `update_scriptable_object` — Update serialized ScriptableObject fields
+- `wire_unity_event` — Wire a serialized UnityEvent listener
 
 #### Addressables tools (optional package — requires `com.unity.addressables`)
 - `addr_init_settings` — Initialize AddressableAssetSettings if not present

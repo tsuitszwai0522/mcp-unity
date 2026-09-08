@@ -34,6 +34,8 @@ describe('run_tests result forwarding', () => {
       success: true,
       type: 'text',
       message: '3/3 passed',
+      runId: '11111111-1111-1111-1111-111111111111',
+      artifactPath: '/Project/Library/McpUnity/TestResults/11111111-1111-1111-1111-111111111111.xml',
       resultState: 'Passed',
       durationSeconds: 0.42,
       testCount: 3,
@@ -55,6 +57,8 @@ describe('run_tests result forwarding', () => {
       skipCount: 0,
       inconclusiveCount: 0,
       results: [{ fullName: 'McpUnity.Tests.RecompileScriptsToolTests.TestA' }],
+      runId: '11111111-1111-1111-1111-111111111111',
+      artifactPath: '/Project/Library/McpUnity/TestResults/11111111-1111-1111-1111-111111111111.xml',
       resultState: 'Passed',
       durationSeconds: 0.42,
       treeNodeCount: 8,
@@ -73,6 +77,8 @@ describe('run_tests result forwarding', () => {
       error_code: 'no_tests_matched',
       type: 'text',
       message: 'No tests matched.',
+      runId: '20202020-2020-2020-2020-202020202020',
+      artifactPath: '/Project/Library/McpUnity/TestResults/20202020-2020-2020-2020-202020202020.xml',
       resultState: 'Passed',
       durationSeconds: 0.0014,
       testCount: 0,
@@ -98,6 +104,8 @@ describe('run_tests result forwarding', () => {
       skipCount: 0,
       inconclusiveCount: 0,
       results: [],
+      runId: '20202020-2020-2020-2020-202020202020',
+      artifactPath: '/Project/Library/McpUnity/TestResults/20202020-2020-2020-2020-202020202020.xml',
       resultState: 'Passed',
       durationSeconds: 0.0014,
       treeNodeCount: 1,
@@ -121,5 +129,47 @@ describe('run_tests result forwarding', () => {
     const result = await getToolHandler()({});
 
     expect(result.isError).toBeUndefined();
+  });
+
+  it('preserves poll identity without claiming the expected artifact exists', async () => {
+    mockSendRequest.mockResolvedValue({
+      success: false,
+      error_code: 'test_run_still_running',
+      message: 'Still running; use get_test_run to poll.',
+      runId: '22222222-2222-2222-2222-222222222222',
+      status: 'running',
+      expectedArtifactPath: '/Project/Library/McpUnity/TestResults/22222222-2222-2222-2222-222222222222.xml',
+      artifactExists: false,
+    });
+
+    const result = await getToolHandler()({});
+    const payload = JSON.parse(result.content[1].text);
+
+    expect(result.isError).toBe(true);
+    expect(payload).toEqual({
+      runId: '22222222-2222-2222-2222-222222222222',
+      status: 'running',
+      expectedArtifactPath: '/Project/Library/McpUnity/TestResults/22222222-2222-2222-2222-222222222222.xml',
+      artifactExists: false,
+      error_code: 'test_run_still_running',
+    });
+    expect(payload).not.toHaveProperty('artifactPath');
+  });
+
+  it('preserves activeRunId when Unity rejects a concurrent run', async () => {
+    mockSendRequest.mockResolvedValue({
+      success: false,
+      error_code: 'test_run_in_progress',
+      message: 'A test run is already in progress.',
+      activeRunId: '33333333-3333-3333-3333-333333333333',
+    });
+
+    const result = await getToolHandler()({ testFilter: 'RunB' });
+
+    expect(result.isError).toBe(true);
+    expect(JSON.parse(result.content[1].text)).toMatchObject({
+      activeRunId: '33333333-3333-3333-3333-333333333333',
+      error_code: 'test_run_in_progress',
+    });
   });
 });

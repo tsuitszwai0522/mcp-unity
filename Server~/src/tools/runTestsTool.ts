@@ -6,7 +6,7 @@ import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 
 // Constants for the tool
 const toolName = 'run_tests';
-const toolDescription = 'Runs Unity\'s Test Runner tests';
+const toolDescription = 'Runs Unity\'s Test Runner tests. Unity returns a test_run_still_running receipt at 75% of the configured Node transport timeout so runId reaches the caller; running responses expose expectedArtifactPath with artifactExists:false, and artifactPath is published only after validated XML exists. Polling does not cancel the run. Only one run can be tracked because Unity callbacks have no run GUID: a second RunStarted (for example from the Test Runner window) invalidates the MCP record and discards its result. The lock ends on RunFinished or is released as stale after 24 hours, after which the caller is told to retry. Only the 20 most recent owned artifacts under Library/McpUnity/TestResults are retained.';
 const paramsSchema = z.object({
   testMode: z.string().optional().default('EditMode').describe('The test mode to run (EditMode or PlayMode) - defaults to EditMode (optional)'),
   testFilter: z.string().optional().default('').describe('The specific test filter to run (e.g. specific test name or class name, must include namespace) (optional)'),
@@ -73,29 +73,31 @@ async function toolHandler(mcpUnity: McpUnity, params: any = {}): Promise<CallTo
     }
   });
   
-  // Extract test results
-  const testResults = response.results || [];
-  const testCount = response.testCount || 0;
-  const passCount = response.passCount || 0;
-  const failCount = response.failCount || 0;
-  const skipCount = response.skipCount || 0;
-  const inconclusiveCount = response.inconclusiveCount || 0;
-
-  const payload: Record<string, unknown> = {
-    testCount,
-    passCount,
-    failCount,
-    skipCount,
-    inconclusiveCount,
-    results: testResults
-  };
-
+  const payload: Record<string, unknown> = {};
   for (const field of [
+    'testCount',
+    'passCount',
+    'failCount',
+    'skipCount',
+    'inconclusiveCount',
+    'results',
+    'runId',
+    'artifactPath',
+    'expectedArtifactPath',
+    'artifactExists',
+    'activeRunId',
+    'invalidatedRunId',
+    'requestedRunId',
+    'status',
+    'startedAt',
+    'lockReleased',
+    'staleAfterSeconds',
     'resultState',
     'durationSeconds',
     'treeNodeCount',
     'filter',
-    'error_code'
+    'error_code',
+    'artifactError'
   ] as const) {
     if (response[field] !== undefined) {
       payload[field] = response[field];

@@ -4,6 +4,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { registerWireUnityEventTool } from '../tools/wireUnityEventTool.js';
+import { registerGetTestRunTool } from '../tools/getTestRunTool.js';
 import { jsonSchemaToZodShape } from '../utils/schemaConverter.js';
 import {
   getRegisteredToolNames,
@@ -59,6 +60,7 @@ const registerRepresentativeTools = (server: McpServer) => {
     error: jest.fn(),
   } as any;
   registerWireUnityEventTool(server, { sendRequest: jest.fn() } as any, logger);
+  registerGetTestRunTool(server, { sendRequest: jest.fn() } as any, logger);
 
   const dynamicShape = jsonSchemaToZodShape({
     type: 'object',
@@ -87,6 +89,7 @@ describe('strict tool schema seam', () => {
         'static_tool',
         'zero_param_tool',
         'wire_unity_event',
+        'get_test_run',
         'dynamic_tool',
       ]);
       for (const tool of listed.tools) {
@@ -103,6 +106,7 @@ describe('strict tool schema seam', () => {
           methodName: 'Receive',
           bogus: true,
         }],
+        ['get_test_run', { runId: '44444444-4444-4444-4444-444444444444', bogus: true }],
         ['dynamic_tool', { count: '7', bogus: true }],
       ] as const;
       for (const [name, args] of invalidCalls) {

@@ -27,5 +27,11 @@ namespace McpUnity.Services
         /// <param name="assemblyNames">Optional assembly-name filter forwarded to <see cref="Filter.assemblyNames"/>. Each entry may be prefixed with <c>!</c> to exclude that assembly (e.g. <c>!Unity.Multiplayer.Tools.Adapters.Tests</c>) — useful for working around third-party test assemblies that are broken in EditMode.</param>
         /// <returns>Task that resolves with test results when tests are complete</returns>
         Task<JObject> ExecuteTestsAsync(TestMode testMode, bool returnOnlyFailures, bool returnWithLogs, string testFilter, string[] assemblyNames = null);
+
+        /// <summary>
+        /// Gets the latest known state for a Unity test run.
+        /// </summary>
+        /// <param name="runId">Optional Unity TestRunnerApi run GUID. When omitted, returns the most recent run.</param>
+        JObject GetTestRun(string runId = null);
     }
 }

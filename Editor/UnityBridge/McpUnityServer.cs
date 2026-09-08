@@ -121,8 +121,8 @@ namespace McpUnity.Unity
             EditorApplication.playModeStateChanged -= OnPlayModeStateChanged;
             EditorApplication.playModeStateChanged += OnPlayModeStateChanged;
 
-            InstallServer();
             InitializeServices();
+            InstallServer();
             RegisterResources();
             RegisterTools();
 
@@ -334,6 +334,10 @@ namespace McpUnity.Unity
             // Register RunTestsTool
             RunTestsTool runTestsTool = new RunTestsTool(_testRunnerService);
             _tools.Add(runTestsTool.Name, runTestsTool);
+
+            // Register GetTestRunTool
+            GetTestRunTool getTestRunTool = new GetTestRunTool(_testRunnerService);
+            _tools.Add(getTestRunTool.Name, getTestRunTool);
             
             // Register SendConsoleLogTool
             SendConsoleLogTool sendConsoleLogTool = new SendConsoleLogTool();
