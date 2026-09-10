@@ -14,7 +14,7 @@
 - **C# 側**：`McpUnityServer.RegisterTools()` 手動 `new` 每個 tool class 並加到 `_tools` dictionary
 - **Node.js 側**：每個 tool 有獨立的 `.ts` 檔案，用 Zod 定義參數 schema，在 `index.ts` 中逐一呼叫 `register*Tool()`
 
-外部專案（如 ProjectT）若想新增 MCP tool，必須 fork mcp-unity 或修改 package 原始碼，**無法以 plugin 形式擴展**。
+外部專案若想新增 MCP tool，必須 fork mcp-unity 或修改 package 原始碼，**無法以 plugin 形式擴展**。
 
 ### 目標
 
@@ -478,22 +478,22 @@ public class PingTool : McpToolBase
 ### 4.2 帶參數範例
 
 ```csharp
-// Assets/ProjectT/Editor/AIQAMCP/CBStartBattleTool.cs
+// Assets/{YourProject}/Editor/McpTools/StartBattleTool.cs
 using McpUnity.Tools;
 using Newtonsoft.Json.Linq;
 
-public class CBStartBattleTool : McpToolBase
+public class StartBattleTool : McpToolBase
 {
-    public CBStartBattleTool()
+    public StartBattleTool()
     {
-        Name = "cb_start_battle";
-        Description = "Start a new CardBattle with specified config";
+        Name = "start_battle";
+        Description = "Start a new battle with specified config";
     }
 
     public override JObject ParameterSchema => JObject.Parse(@"{
         ""type"": ""object"",
         ""properties"": {
-            ""config_name"": { ""type"": ""string"", ""description"": ""CBBattleConfigSO asset name"" },
+            ""config_name"": { ""type"": ""string"", ""description"": ""BattleConfigSO asset name"" },
             ""rng_seed"":    { ""type"": ""integer"", ""description"": ""Optional RNG seed for deterministic replay"" }
         },
         ""required"": [""config_name""]
@@ -504,7 +504,7 @@ public class CBStartBattleTool : McpToolBase
         string configName = parameters["config_name"]?.ToString();
         int? rngSeed = parameters["rng_seed"]?.ToObject<int?>();
 
-        // ProjectT 專屬邏輯...
+        // 專案專屬邏輯...
 
         return new JObject
         {
@@ -518,7 +518,7 @@ public class CBStartBattleTool : McpToolBase
 ### 4.3 非同步範例
 
 ```csharp
-// Assets/ProjectT/Editor/AIQAMCP/WaitForBattleEndTool.cs
+// Assets/{YourProject}/Editor/McpTools/WaitForBattleEndTool.cs
 using System.Collections;
 using System.Threading.Tasks;
 using McpUnity.Tools;
@@ -579,8 +579,8 @@ MCP Client          Node.js Server          Unity Editor
     │←── (built-in + dynamic tools) ─────────────│
     │                    │                       │
     │── tools/call ─────→│                       │
-    │   "cb_start_battle"│── sendRequest() ────→│
-    │                    │                       │── CBStartBattleTool.Execute()
+    │   "start_battle"   │── sendRequest() ────→│
+    │                    │                       │── StartBattleTool.Execute()
     │                    │←── result ────────────│
     │←── result ─────────│                       │
 ```
@@ -639,7 +639,7 @@ MCP Client          Node.js Server          Unity Editor
 ```csharp
 [McpParameter("config_name", type: "string", required: true, description: "Config asset name")]
 [McpParameter("rng_seed", type: "integer", description: "Optional RNG seed")]
-public class CBStartBattleTool : McpToolBase { ... }
+public class StartBattleTool : McpToolBase { ... }
 ```
 
 自動從 attribute 生成 `ParameterSchema`。但增加了 mcp-unity package 的 API surface，需謹慎評估。

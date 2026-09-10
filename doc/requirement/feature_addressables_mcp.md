@@ -534,7 +534,7 @@ Server~/src/index.ts                      # 在 Localization 後 import + regist
 
 ### 背景 / 動機
 
-v1 打通了 entries 層級（create group / add entries / labels），但 **group schema 層級的設定**仍然要回 Unity Addressables Groups Window 手動調。下游 ProjectT（Unity 2022.3.62f3）在用 `addr_*` 工具接線 5 個 TMP 字型 group 時實戰發現三個缺口：
+v1 打通了 entries 層級（create group / add entries / labels），但 **group schema 層級的設定**仍然要回 Unity Addressables Groups Window 手動調。下游專案（Unity 2022.3.62f3）在用 `addr_*` 工具接線 5 個 TMP 字型 group 時實戰發現三個缺口：
 
 1. **`BundledAssetGroupSchema` 欄位無法更新** — `addr_create_group` 建完之後，compression / include_in_build / bundle naming / packed_mode / runtime 載入行為都改不了。
 2. **`BuildPath` / `LoadPath` 切換不了** — 這是 Local vs Remote 的關鍵 switch，對 Small Client Strategy（font / character / UI 走 CDN）完全不夠用。
@@ -819,5 +819,5 @@ Live MCP 測試（2026-04-15，在 TestUnityMcp consumer project）全數通過�
 ### v1.1 不做
 
 - **`addr_create_profile`** — 用戶用得唔多，而且建 profile 常常要人為想個名，agent 難自動化。Profile 本身仍然要喺 Unity GUI 建；`addr_set_profile_variable` 嘅 `create_if_missing` 只會喺 profile-settings 層建新**變數**（affects all profiles），唔係建新 **profile**。
-- **快捷 wrapper `addr_set_group_build_remote` / `_local`** — 原本 ProjectT 嘅需求單有呢兩個 P2 shortcut（一次把 build_path + load_path 切到 Remote / Local profile variables），但因為 `addr_set_group_schema` 一個 call 已經可以同時傳 `build_path` + `load_path`，再加 shortcut 係 over-engineering。用 batch_execute 包兩個 call 都得。
+- **快捷 wrapper `addr_set_group_build_remote` / `_local`** — 原本下游專案嘅需求單有呢兩個 P2 shortcut（一次把 build_path + load_path 切到 Remote / Local profile variables），但因為 `addr_set_group_schema` 一個 call 已經可以同時傳 `build_path` + `load_path`，再加 shortcut 係 over-engineering。用 batch_execute 包兩個 call 都得。
 - **批量版 `addr_set_group_schemas`** — 同上理由 + `batch_execute` 已經覆蓋。

@@ -33,7 +33,7 @@
 
 ```bash
 # 進入 Server 目錄
-cd /Users/cyrus/Git/Personal/UnityMCP/mcp-unity/Server~
+cd <path-to>/mcp-unity/Server~
 
 # 安裝依賴 (若尚未安裝)
 npm install
@@ -49,7 +49,7 @@ npm run build
 ### 方式 A：MCP Inspector (推薦用於開發測試)
 
 ```bash
-cd /Users/cyrus/Git/Personal/UnityMCP/mcp-unity/Server~
+cd <path-to>/mcp-unity/Server~
 npm run inspector
 ```
 
@@ -58,7 +58,7 @@ npm run inspector
 ### 方式 B：直接執行 Server + MCP Client
 
 ```bash
-cd /Users/cyrus/Git/Personal/UnityMCP/mcp-unity/Server~
+cd <path-to>/mcp-unity/Server~
 npm start
 ```
 

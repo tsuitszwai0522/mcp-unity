@@ -2,13 +2,13 @@
 
 > **狀態**：Phase 1-3 已完成
 > **建立日期**：2026-02-15
-> **相關模組**：`shared-ai-sop~/skills/`
+> **相關模組**：AI agent skills（由外部管線維護）
 
 ## 1. 需求描述
 
 ### 背景
 
-`shared-ai-sop~` submodule 目前有 2 個 Unity 專用 skill：
+當時使用嘅 AI agent skill 集合有 2 個 Unity 專用 skill：
 
 | Skill | 覆蓋範圍 |
 |-------|---------|

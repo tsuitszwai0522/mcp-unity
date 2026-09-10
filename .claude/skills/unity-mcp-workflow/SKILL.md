@@ -64,7 +64,7 @@ description: Guide for using Unity MCP tools to manipulate Unity Editor. Use whe
 6. **設定 Platform Override**：手動編輯 `.spriteatlasv2.meta`，加入 Android/iOS `platformSettings`（MCP 不支援此操作）
 7. **最終 Refresh**：`execute_menu_item("Assets/Refresh")`
 
-參考範本：`Assets/ProjectT/AddressablesAssets/Env/Battlefield/Forest2/SpriteAtlas/Forest2Atlas.spriteatlasv2`
+參考範本：`Assets/{YourProject}/AddressablesAssets/Env/{Area}/SpriteAtlas/{Area}Atlas.spriteatlasv2`
 
 ## Material 工作流
 

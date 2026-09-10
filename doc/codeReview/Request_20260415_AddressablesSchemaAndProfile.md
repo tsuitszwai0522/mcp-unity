@@ -11,7 +11,7 @@
 
 ### 起源
 
-v1 Addressables 工具（已於 2026-04-13 落地 15 個工具）打通了 **entries 層級**的操作：create group、add entries、labels、find。但下游 ProjectT（Unity 2022.3.62f3）實戰接線 5 個 TMP 字型 group 時發現三個缺口：
+v1 Addressables 工具（已於 2026-04-13 落地 15 個工具）打通了 **entries 層級**的操作：create group、add entries、labels、find。但下游專案（Unity 2022.3.62f3）實戰接線 5 個 TMP 字型 group 時發現三個缺口：
 
 1. **`BundledAssetGroupSchema` 欄位無法更新** — `addr_create_group` 建完之後，compression / include_in_build / bundle naming / packed_mode / runtime 載入行為都改不了
 2. **`BuildPath` / `LoadPath` 切換不了** — Small Client Strategy（font / character / UI 走 CDN）需要把 group 切到 Remote profile 變數，v1 沒有路徑

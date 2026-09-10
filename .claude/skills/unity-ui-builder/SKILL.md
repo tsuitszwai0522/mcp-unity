@@ -104,8 +104,8 @@ Hex → Unity RGB (0-1)：每通道除以 255。`#426B1F` → `(0.259, 0.420, 0.
 
 1. 列出所有需要下載的圖片 node。
 2. **建議下載路徑並向使用者確認**：
-   - 已知 Feature → `Assets/ProjectT/AddressablesAssets/UI/{Feature}/Sprites/{SubFolder}/`
-   - 探索/測試 → `Assets/ProjectT/Placeholder/figma_{design_name}/`
+   - 已知 Feature → `Assets/{YourProject}/AddressablesAssets/UI/{Feature}/Sprites/{SubFolder}/`
+   - 探索/測試 → `Assets/{YourProject}/Placeholder/figma_{design_name}/`
    - 向使用者確認：「圖片將下載至 `{path}`，OK？」
 3. 使用者確認後，用 `download_figma_images` 下載所有圖片。
 4. 用 `batch_execute` + `import_texture_as_sprite` 匯入為 Sprite（預設 `spriteMode: "Single"`, `meshType: "FullRect"`, `compression: "None"`）。

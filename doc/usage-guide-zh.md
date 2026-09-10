@@ -149,7 +149,7 @@ Claude Code 使用 `.mcp.json` 檔案配置 MCP Server。
   "mcpServers": {
     "mcp-unity": {
       "command": "node",
-      "args": ["/Users/cyrus/Git/Personal/UnityMCP/mcp-unity/Server~/build/index.js"],
+      "args": ["<ABSOLUTE_PATH_TO>/mcp-unity/Server~/build/index.js"],
       "env": {
         "UNITY_PORT": "8090"
       }
@@ -167,7 +167,7 @@ Claude Code 使用 `.mcp.json` 檔案配置 MCP Server。
   "mcpServers": {
     "mcp-unity": {
       "command": "node",
-      "args": ["/Users/cyrus/Git/Personal/UnityMCP/mcp-unity/Server~/build/index.js"],
+      "args": ["<ABSOLUTE_PATH_TO>/mcp-unity/Server~/build/index.js"],
       "env": {
         "UNITY_PORT": "8090"
       }
@@ -202,7 +202,7 @@ Google Antigravity 支援 MCP 協議。配置步驟：
   "mcpServers": {
     "mcp-unity": {
       "command": "node",
-      "args": ["/Users/cyrus/Git/Personal/UnityMCP/mcp-unity/Server~/build/index.js"],
+      "args": ["<ABSOLUTE_PATH_TO>/mcp-unity/Server~/build/index.js"],
       "env": {
         "UNITY_PORT": "8090"
       }

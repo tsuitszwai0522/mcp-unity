@@ -11,7 +11,7 @@
 
 ## 1. 背景與目標
 
-需求文件原本只描述 6 支 tools 給 ProjectT 下游專案使用（plugin 路徑），但討論後決定**升級為本體 first-party 功能**，理由是 Unity Localization 是官方解決方案，採用率高，AI workflow（寫 tooltip / 文案 / 敘事）受益巨大。
+需求文件原本只描述 6 支 tools 給下游專案使用（plugin 路徑），但討論後決定**升級為本體 first-party 功能**，理由是 Unity Localization 是官方解決方案，採用率高，AI workflow（寫 tooltip / 文案 / 敘事）受益巨大。
 
 關鍵約束：
 - **不可硬依賴** `com.unity.localization` package — 沒裝該 package 的使用者必須零影響

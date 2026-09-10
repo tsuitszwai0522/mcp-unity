@@ -139,7 +139,7 @@
 {
   "created": true,
   "name": "UI_Common",
-  "path": "Assets/ProjectT/Localization/Tables/UI_Common Shared Data.asset"
+  "path": "Assets/{YourProject}/Localization/Tables/UI_Common Shared Data.asset"
 }
 ```
 
@@ -199,7 +199,7 @@
 
 ## 實作規範
 
-- 繼承 `McpToolBase`，放在 `Assets/ProjectT/Editor/AIQAMCP/` 目錄
+- 繼承 `McpToolBase`，放在 `Assets/{YourProject}/Editor/McpTools/` 目錄
 - 命名前綴 `loc_`，與現有 `cb_` / `gf_` 區分
 - 每次修改後自動呼叫 `EditorUtility.SetDirty()` + `AssetDatabase.SaveAssets()`
 - 錯誤處理：table 不存在、locale 不存在、key 格式不合法等

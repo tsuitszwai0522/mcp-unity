@@ -55,7 +55,7 @@
 | 錯誤處理：locale 不存在 | ✅ | `locale_not_found` + 列出 available |
 | 錯誤處理：key 格式不合法 | ✅ | `validation_error`（空白/前後空白） |
 
-> 📍 **路徑差異**：spec 要求放在 `Assets/ProjectT/Editor/AIQAMCP/`（plugin 路徑），實作放在 `Editor/Tools/Localization/`（main package）。Request §1 已說明此為討論後決定的範圍升級，**符合「升級為 first-party」的修訂後共識**。
+> 📍 **路徑差異**：spec 要求放在 `Assets/{YourProject}/Editor/McpTools/`（plugin 路徑），實作放在 `Editor/Tools/Localization/`（main package）。Request §1 已說明此為討論後決定的範圍升級，**符合「升級為 first-party」的修訂後共識**。
 
 ### 1.3 遺漏清單
 
