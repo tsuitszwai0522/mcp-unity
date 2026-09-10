@@ -252,4 +252,203 @@ describe('Connection timeout handling', () => {
 
     connection.disconnect();
   });
+
+  it('rejects a failed attempt after onclose changes state and keeps background reconnecting', async () => {
+    const testLogger = createTestLogger();
+    const connection = new UnityConnection(testLogger, {
+      host: 'localhost',
+      port: 8090,
+      requestTimeout: 5000,
+      connectTimeout: 1000,
+      minReconnectDelay: 100,
+      maxReconnectDelay: 100,
+      heartbeatInterval: 0
+    });
+
+    const connectPromise = connection.connect();
+    const rejection = expect(connectPromise).rejects.toMatchObject({
+      type: ErrorType.CONNECTION,
+      message: 'connection refused'
+    });
+
+    mockWebSocketInstances[0].onclose({ code: 1006, reason: 'connection refused' });
+
+    await rejection;
+    expect(connection.connectionState).toBe(ConnectionState.Reconnecting);
+
+    await jest.advanceTimersByTimeAsync(100);
+    expect(mockWebSocketConstructor).toHaveBeenCalledTimes(2);
+
+    connection.disconnect();
+  });
+
+  it('rejects the active attempt when disconnect closes its socket', async () => {
+    const testLogger = createTestLogger();
+    const connection = new UnityConnection(testLogger, {
+      host: 'localhost',
+      port: 8090,
+      requestTimeout: 5000,
+      connectTimeout: 1000,
+      heartbeatInterval: 0
+    });
+    const connectPromise = connection.connect();
+
+    connection.disconnect('shutdown during connect');
+
+    await expect(connectPromise).rejects.toMatchObject({
+      type: ErrorType.CONNECTION,
+      message: 'shutdown during connect'
+    });
+  });
+
+  it('rejects on onerror immediately and preserves that first error through onclose', async () => {
+    const testLogger = createTestLogger();
+    const connection = new UnityConnection(testLogger, {
+      host: 'localhost',
+      port: 8090,
+      requestTimeout: 5000,
+      connectTimeout: 1000,
+      minReconnectDelay: 100,
+      maxReconnectDelay: 100,
+      heartbeatInterval: 0
+    });
+    connection.on('error', () => {});
+    let observedError: InstanceType<typeof McpUnityError> | undefined;
+    const rejected = connection.connect().catch((error) => {
+      observedError = error;
+    });
+
+    mockWebSocketInstances[0].onerror({ message: 'socket error' });
+    await rejected;
+    expect(observedError).toMatchObject({
+      type: ErrorType.CONNECTION,
+      message: 'Connection failed: socket error'
+    });
+
+    mockWebSocketInstances[0].onclose({ code: 1006, reason: 'socket closed' });
+
+    expect(observedError).toMatchObject({
+      message: 'Connection failed: socket error'
+    });
+    expect(connection.connectionState).toBe(ConnectionState.Reconnecting);
+
+    connection.disconnect();
+  });
+
+  it('rejects the attempt before an unhandled error event can throw', async () => {
+    const testLogger = createTestLogger();
+    const connection = new UnityConnection(testLogger, {
+      host: 'localhost',
+      port: 8090,
+      requestTimeout: 5000,
+      connectTimeout: 1000,
+      heartbeatInterval: 0
+    });
+    const connectPromise = connection.connect();
+
+    expect(() => {
+      mockWebSocketInstances[0].onerror({ message: 'unhandled socket error' });
+    }).toThrow('Connection failed: unhandled socket error');
+
+    await expect(connectPromise).rejects.toMatchObject({
+      type: ErrorType.CONNECTION,
+      message: 'Connection failed: unhandled socket error'
+    });
+    connection.disconnect();
+  });
+
+  it('rejects a synchronous WebSocket constructor failure and keeps reconnecting', async () => {
+    mockWebSocketConstructor.mockImplementationOnce(() => {
+      throw new Error('constructor exploded');
+    });
+    const testLogger = createTestLogger();
+    const connection = new UnityConnection(testLogger, {
+      host: 'localhost',
+      port: 8090,
+      requestTimeout: 5000,
+      connectTimeout: 1000,
+      minReconnectDelay: 100,
+      maxReconnectDelay: 100,
+      heartbeatInterval: 0
+    });
+
+    const rejection = expect(connection.connect()).rejects.toMatchObject({
+      type: ErrorType.CONNECTION,
+      message: 'Connection failed: constructor exploded'
+    });
+    await rejection;
+
+    expect(connection.connectionState).toBe(ConnectionState.Reconnecting);
+    await jest.advanceTimersByTimeAsync(100);
+    expect(mockWebSocketConstructor).toHaveBeenCalledTimes(2);
+    connection.disconnect();
+  });
+
+  it('settles an opened attempt before a throwing state observer runs', async () => {
+    const testLogger = createTestLogger();
+    const connection = new UnityConnection(testLogger, {
+      host: 'localhost',
+      port: 8090,
+      requestTimeout: 5000,
+      connectTimeout: 1000,
+      heartbeatInterval: 0
+    });
+    const connectPromise = connection.connect();
+    connection.on('stateChange', (change: ConnectionStateChange) => {
+      if (change.currentState === ConnectionState.Connected) {
+        throw new Error('observer exploded');
+      }
+    });
+
+    expect(() => mockWebSocketInstances[0].onopen()).toThrow('observer exploded');
+
+    await expect(connectPromise).resolves.toBeUndefined();
+    connection.disconnect();
+  });
+
+  it('cancels the stable reset when heartbeat marks the connection stale', async () => {
+    const testLogger = createTestLogger();
+    const connection = new UnityConnection(testLogger, {
+      host: 'localhost',
+      port: 8090,
+      requestTimeout: 5000,
+      connectTimeout: 1000,
+      minReconnectDelay: 10000,
+      maxReconnectDelay: 10000,
+      heartbeatInterval: 0
+    });
+    (connection as any).reconnectAttempt = 3;
+    const connectPromise = connection.connect();
+    mockWebSocketInstances[0].onopen();
+    await connectPromise;
+
+    (connection as any).handleStaleConnection();
+    expect(connection.getStats().reconnectAttempt).toBe(4);
+    await jest.advanceTimersByTimeAsync(5000);
+
+    expect(connection.getStats().reconnectAttempt).toBe(4);
+    connection.disconnect();
+  });
+
+  it('resets reconnect attempts after a stable connection even with heartbeat disabled', async () => {
+    const testLogger = createTestLogger();
+    const connection = new UnityConnection(testLogger, {
+      host: 'localhost',
+      port: 8090,
+      requestTimeout: 5000,
+      connectTimeout: 1000,
+      heartbeatInterval: 0
+    });
+    (connection as any).reconnectAttempt = 3;
+
+    const connectPromise = connection.connect();
+    mockWebSocketInstances[0].onopen();
+    await connectPromise;
+
+    expect(connection.getStats().reconnectAttempt).toBe(3);
+    await jest.advanceTimersByTimeAsync(5000);
+    expect(connection.getStats().reconnectAttempt).toBe(0);
+
+    connection.disconnect();
+  });
 });

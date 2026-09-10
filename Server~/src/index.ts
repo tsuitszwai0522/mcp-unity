@@ -1,8 +1,10 @@
 // Import MCP SDK components
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { McpUnity } from './unity/mcpUnity.js';
-import { Logger, LogLevel } from './utils/logger.js';
+import { McpUnity, ConnectionState } from './unity/mcpUnity.js';
+import { Logger, LogLevel, writeProcessDiagnostic } from './utils/logger.js';
+import { createShutdownHandler } from './utils/processDiagnostics.js';
+import { installDynamicToolRegistration } from './utils/dynamicToolRegistration.js';
 import { installStructuredContentSeam } from './utils/structuredContentSeam.js';
 import { registerCreateSceneTool } from './tools/createSceneTool.js';
 import { registerMenuItemTool } from './tools/menuItemTool.js';
@@ -109,8 +111,33 @@ const server = new McpServer (
 
 installStructuredContentSeam(server);
 
+// Observe SDK-reported errors without intentionally transforming them.
+server.server.onerror = (error) => {
+  writeProcessDiagnostic('MCP SDK server error', error);
+};
+
 // Initialize MCP HTTP bridge with Unity editor
 const mcpUnity = new McpUnity(unityLogger);
+
+const dynamicToolRegistration = installDynamicToolRegistration({
+  isUnityConnected: () => mcpUnity.isConnected,
+  subscribeToConnected: listener => {
+    mcpUnity.onConnectionStateChange(change => {
+      if (change.currentState === ConnectionState.Connected) {
+        listener();
+      }
+    });
+  },
+  registerTools: () => registerDynamicTools(server, mcpUnity, toolLogger),
+  // McpServer exposes this as a public, connection-aware SDK operation.
+  notifyToolListChanged: () => server.sendToolListChanged(),
+  reportRetryFailure: error => {
+    writeProcessDiagnostic(
+      'Unity connected, but dynamic tool registration failed; the MCP tool list is still incomplete',
+      error
+    );
+  }
+});
 
 // Register all tools into the MCP server
 registerMenuItemTool(server, mcpUnity, toolLogger);
@@ -243,20 +270,24 @@ async function startServer() {
     //    start() handles connection failure gracefully (warns + continues).
     await mcpUnity.start();
 
-    // 2. Discover and register external tools from Unity (if connected)
+    // 2. Discover and register external tools from Unity (if connected).
+    //    A connection listener retries this once Unity later becomes available.
     if (mcpUnity.isConnected) {
       try {
-        const dynamicCount = await registerDynamicTools(server, mcpUnity, toolLogger);
+        const dynamicCount = await dynamicToolRegistration.registerNow();
         if (dynamicCount > 0) {
           serverLogger.info(`Registered ${dynamicCount} external tool(s) from Unity`);
         }
       } catch (error) {
-        serverLogger.warn('Failed to register dynamic tools (non-fatal)', error);
+        writeProcessDiagnostic(
+          'Dynamic tool registration failed during startup; the MCP tool list is incomplete',
+          error
+        );
       }
     } else {
-      // NOTE: dynamic tools are registered exactly once, here, at startup. There is no
-      // connection-event listener, so if Unity is not up yet they are NOT registered later.
-      serverLogger.info('Unity not connected — dynamic tools were NOT registered (no retry on later connect; restart the server after Unity is up)');
+      writeProcessDiagnostic(
+        'Unity was not connected at startup; the MCP tool list is incomplete until the first successful Unity connection'
+      );
     }
 
     // 3. NOW connect the MCP server to the transport
@@ -272,53 +303,49 @@ async function startServer() {
     serverLogger.info(`Connected MCP client: ${clientName}`);
 
   } catch (error) {
-    serverLogger.error('Failed to start server', error);
+    writeProcessDiagnostic('Failed to start server', error);
     process.exit(1);
   }
 }
 
 // Graceful shutdown handler
-let isShuttingDown = false;
-async function shutdown() {
-  if (isShuttingDown) return;
-  isShuttingDown = true;
-
-  try {
+const shutdown = createShutdownHandler(
+  async () => {
     serverLogger.info('Shutting down...');
     await mcpUnity.stop();
-    await server.close();
-  } catch (error) {
-    // Ignore errors during shutdown
-  }
-  process.exit(0);
-}
+  },
+  () => server.close()
+);
 
 // Start the server
 startServer();
 
 // Handle shutdown signals
-process.on('SIGINT', shutdown);
-process.on('SIGTERM', shutdown);
-process.on('SIGHUP', shutdown);
+process.on('SIGINT', () => { void shutdown(); });
+process.on('SIGTERM', () => { void shutdown(); });
+process.on('SIGHUP', () => { void shutdown(); });
 
 // Handle stdin close (when MCP client disconnects)
-process.stdin.on('close', shutdown);
-process.stdin.on('end', shutdown);
-process.stdin.on('error', shutdown);
+process.stdin.on('close', () => { void shutdown(); });
+process.stdin.on('end', () => { void shutdown(); });
+process.stdin.on('error', (error) => {
+  void shutdown({ reason: error, exitCode: 1 });
+});
 
 // Handle uncaught exceptions - exit cleanly if it's just a closed pipe
 process.on('uncaughtException', (error: NodeJS.ErrnoException) => {
+  writeProcessDiagnostic('Uncaught exception', error);
+
   // EPIPE/EOF errors are expected when the MCP client disconnects
   if (error.code === 'EPIPE' || error.code === 'EOF' || error.code === 'ERR_USE_AFTER_CLOSE') {
-    shutdown();
+    void shutdown();
     return;
   }
-  serverLogger.error('Uncaught exception', error);
   process.exit(1);
 });
 
 // Handle unhandled promise rejections
 process.on('unhandledRejection', (reason) => {
-  serverLogger.error('Unhandled rejection', reason);
+  writeProcessDiagnostic('Unhandled rejection', reason);
   process.exit(1);
 });

@@ -4,6 +4,52 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed — BREAKING
+
+- Each newly created Unity WebSocket attempt now rejects its own `connect()` promise on that
+  attempt's error, close, constructor failure, or timeout; automatic background reconnection
+  continues independently. A `connect()` call made while another connection attempt is already in
+  progress retains its existing immediate-return behavior; callers that need to await availability
+  should use the connection-state APIs.
+- Queue deadlines now govern only whether a queued command may be sent. They are checked again with
+  a fresh, clamped wall-clock sample immediately before the socket send, while a sent command gets
+  its full configured transport timeout. The default queue window is the greater of 60 seconds and
+  `RequestTimeoutSeconds`; an explicit `queue.defaultTimeout` remains authoritative.
+- The fork's default `RequestTimeoutSeconds` is now 60 seconds on both Unity and Node, while its
+  minimum remains 10 seconds. Existing serialized project settings continue to override the default.
+- `LOGGING=true` writes only to stderr, never the MCP stdout transport. `LOGGING_FILE=true` now writes
+  to the absolute OS-temp path `mcp-unity-server.log` by default; set `MCP_UNITY_LOG_FILE` to choose an
+  absolute path, or a path relative to the OS temp directory. Logging environment variables are read
+  on every call, so runtime changes take effect immediately; missing parent directories are created.
+- Unexpected stdin errors now produce an ungated stderr diagnostic and exit non-zero. Normal signals,
+  stdin close, and stdin end remain graceful zero-exit shutdowns; shutdown cleanup failures are now
+  diagnosed and exit non-zero.
+
+### Fixed
+
+- Stable Unity connections now reset the reconnect-attempt counter after five seconds even when
+  heartbeat monitoring is disabled; closing before stability still cancels that reset.
+- Unity `internal_error` WebSocket frames raised after a valid request ID has been parsed now include
+  that originating ID, allowing Node to settle the matching pending request instead of timing out.
+- Post-await failures in `run_tests` and `unity://tests/{testMode}` now complete their request with a
+  typed `tool_execution_error` or `resource_fetch_error`; their completion writes use defensive
+  `TrySetResult` calls.
+- A synchronous `RequestScriptCompilation` failure now removes its pending `recompile_scripts`
+  request and stops compilation tracking before propagating the existing error, so the next request
+  can start normally.
+- Requests already sent on a socket are now rejected immediately with
+  `connection_lost_during_request` details when that connected socket enters reconnection; they are
+  not incorrectly held for replay on a new session.
+- If Unity is absent at Node startup, an ungated diagnostic now states that the tool list is
+  incomplete. Dynamic tools are registered on the first later Unity connection and the MCP client is
+  sent a tool-list-changed notification.
+- Process-level startup failures, uncaught exceptions, unhandled rejections, and MCP SDK `onerror`
+  events now always emit diagnostics to stderr independently of optional logging settings and are
+  also persisted when file logging is enabled. The added SDK hook records diagnostics and does not
+  intentionally transform errors delivered by the SDK.
+
 ## [fork-1.18.0] - 2026-09-08
 
 ### Added

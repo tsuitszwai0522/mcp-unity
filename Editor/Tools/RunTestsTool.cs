@@ -33,52 +33,62 @@ namespace McpUnity.Tools
         /// <param name="tcs">TaskCompletionSource to set the result or exception.</param>
         public override async void ExecuteAsync(JObject parameters, TaskCompletionSource<JObject> tcs)
         {
-            // Parse parameters
-            string testModeStr = parameters?["testMode"]?.ToObject<string>() ?? "EditMode";
-            string testFilter = parameters?["testFilter"]?.ToObject<string>(); // Optional
-            bool returnOnlyFailures = parameters?["returnOnlyFailures"]?.ToObject<bool>() ?? false; // Optional
-            bool returnWithLogs = parameters?["returnWithLogs"]?.ToObject<bool>() ?? false; // Optional
-
-            // Optional assembly-name filter; supports NUnit "!" exclusion prefix per entry
-            // (e.g. "!Unity.Multiplayer.Tools.Adapters.Tests" to skip a broken third-party test assembly).
-            string[] assemblyNames = null;
-            JArray assemblyNamesArr = parameters?["assemblyNames"] as JArray;
-            if (assemblyNamesArr != null && assemblyNamesArr.Count > 0)
+            try
             {
-                var list = new List<string>(assemblyNamesArr.Count);
-                foreach (var token in assemblyNamesArr)
+                // Parse parameters
+                string testModeStr = parameters?["testMode"]?.ToObject<string>() ?? "EditMode";
+                string testFilter = parameters?["testFilter"]?.ToObject<string>(); // Optional
+                bool returnOnlyFailures = parameters?["returnOnlyFailures"]?.ToObject<bool>() ?? false; // Optional
+                bool returnWithLogs = parameters?["returnWithLogs"]?.ToObject<bool>() ?? false; // Optional
+
+                // Optional assembly-name filter; supports NUnit "!" exclusion prefix per entry
+                // (e.g. "!Unity.Multiplayer.Tools.Adapters.Tests" to skip a broken third-party test assembly).
+                string[] assemblyNames = null;
+                JArray assemblyNamesArr = parameters?["assemblyNames"] as JArray;
+                if (assemblyNamesArr != null && assemblyNamesArr.Count > 0)
                 {
-                    var name = token?.ToObject<string>();
-                    if (!string.IsNullOrEmpty(name))
+                    var list = new List<string>(assemblyNamesArr.Count);
+                    foreach (var token in assemblyNamesArr)
                     {
-                        list.Add(name);
+                        var name = token?.ToObject<string>();
+                        if (!string.IsNullOrEmpty(name))
+                        {
+                            list.Add(name);
+                        }
+                    }
+                    if (list.Count > 0)
+                    {
+                        assemblyNames = list.ToArray();
                     }
                 }
-                if (list.Count > 0)
+
+                bool isNumericMode = int.TryParse(testModeStr, out _);
+                if (string.IsNullOrWhiteSpace(testModeStr)
+                    || isNumericMode
+                    || !Enum.TryParse(testModeStr, true, out TestMode testMode)
+                    || !Enum.IsDefined(typeof(TestMode), testMode))
                 {
-                    assemblyNames = list.ToArray();
+                    string validModes = string.Join(", ", Enum.GetNames(typeof(TestMode)));
+                    tcs.TrySetResult(McpUnitySocketHandler.CreateErrorResponse(
+                        $"Invalid testMode '{testModeStr}'. Valid values: {validModes}.",
+                        "validation_error"));
+                    return;
                 }
-            }
 
-            bool isNumericMode = int.TryParse(testModeStr, out _);
-            if (string.IsNullOrWhiteSpace(testModeStr)
-                || isNumericMode
-                || !Enum.TryParse(testModeStr, true, out TestMode testMode)
-                || !Enum.IsDefined(typeof(TestMode), testMode))
+                string assemblyLog = assemblyNames != null ? string.Join(",", assemblyNames) : "(none)";
+                McpLogger.LogInfo($"Executing RunTestsTool: Mode={testMode}, Filter={testFilter ?? "(none)"}, Assemblies={assemblyLog}");
+
+                // Call the service to run tests
+                JObject result = await _testRunnerService.ExecuteTestsAsync(testMode, returnOnlyFailures, returnWithLogs, testFilter, assemblyNames);
+                tcs.TrySetResult(result);
+            }
+            catch (Exception ex)
             {
-                string validModes = string.Join(", ", Enum.GetNames(typeof(TestMode)));
-                tcs.SetResult(McpUnitySocketHandler.CreateErrorResponse(
-                    $"Invalid testMode '{testModeStr}'. Valid values: {validModes}.",
-                    "validation_error"));
-                return;
+                McpLogger.LogError($"Failed to execute tool {Name}: {ex.Message}\n{ex.StackTrace}");
+                tcs.TrySetResult(McpUnitySocketHandler.CreateErrorResponse(
+                    $"Failed to execute tool {Name}: {ex.Message}",
+                    "tool_execution_error"));
             }
-
-            string assemblyLog = assemblyNames != null ? string.Join(",", assemblyNames) : "(none)";
-            McpLogger.LogInfo($"Executing RunTestsTool: Mode={testMode}, Filter={testFilter ?? "(none)"}, Assemblies={assemblyLog}");
-
-            // Call the service to run tests
-            JObject result = await _testRunnerService.ExecuteTestsAsync(testMode, returnOnlyFailures, returnWithLogs, testFilter, assemblyNames);
-            tcs.SetResult(result);
         }
     }
 }

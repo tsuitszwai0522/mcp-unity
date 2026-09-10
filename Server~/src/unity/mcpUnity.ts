@@ -15,6 +15,11 @@ interface PendingRequest {
   timeout: NodeJS.Timeout;
 }
 
+type BeforeSendCheck = () => McpUnityError | null;
+
+const DEFAULT_REQUEST_TIMEOUT_MS = 60000;
+const DEFAULT_QUEUE_TIMEOUT_MS = 60000;
+
 interface UnityRequest {
   id?: string;
   method: string;
@@ -65,7 +70,7 @@ export class McpUnity {
   private logger: Logger;
   private port: number = 8090;
   private host: string = 'localhost';
-  private requestTimeout = 10000;
+  private requestTimeout = DEFAULT_REQUEST_TIMEOUT_MS;
 
   private connection: UnityConnection | null = null;
   private pendingRequests: Map<string, PendingRequest> = new Map<string, PendingRequest>();
@@ -77,6 +82,7 @@ export class McpUnity {
   // Command queue for handling commands during disconnection
   private commandQueue: CommandQueue;
   private queueingEnabled: boolean;
+  private readonly hasExplicitQueueTimeout: boolean;
 
   // Flag to track if we're currently replaying queued commands
   private isReplayingQueue: boolean = false;
@@ -85,6 +91,7 @@ export class McpUnity {
     this.logger = logger;
     this.commandQueue = new CommandQueue(logger, config?.queue);
     this.queueingEnabled = config?.queueingEnabled ?? true;
+    this.hasExplicitQueueTimeout = config?.queue?.defaultTimeout !== undefined;
   }
 
   /**
@@ -149,8 +156,13 @@ export class McpUnity {
 
       this.connection.on('error', (error: McpUnityError) => {
         this.logger.error(`Connection error: ${error.message}`);
-        // Reject pending requests on connection error
-        this.rejectAllPendingRequests(error);
+        // A socket error can precede its close event while state is still
+        // Connected. Reject in-flight work with the same retryable typed cause.
+        this.rejectAllPendingRequests(
+          this.connection?.connectionState === ConnectionState.Connected
+            ? this.createConnectionLostDuringRequestError(error.message)
+            : error
+        );
       });
 
       this.logger.info('Attempting to connect to Unity WebSocket...');
@@ -182,9 +194,17 @@ export class McpUnity {
     const configHost = process.env.UNITY_HOST || config.Host;
     this.host = configHost || 'localhost';
 
-    // Initialize timeout from environment variable (in seconds; it is the same as Cline) or use default (10 seconds)
+    // Use the persisted Unity setting when present. Existing projects retain
+    // their saved value; only projects without a setting use the fork default.
     const configTimeout = config.RequestTimeoutSeconds;
-    this.requestTimeout = configTimeout ? parseInt(configTimeout, 10) * 1000 : 10000;
+    this.requestTimeout = configTimeout
+      ? parseInt(configTimeout, 10) * 1000
+      : DEFAULT_REQUEST_TIMEOUT_MS;
+    if (!this.hasExplicitQueueTimeout) {
+      this.commandQueue.updateConfig({
+        defaultTimeout: Math.max(DEFAULT_QUEUE_TIMEOUT_MS, this.requestTimeout)
+      });
+    }
     this.logger.info(`Using request timeout: ${this.requestTimeout / 1000} seconds`);
   }
 
@@ -208,7 +228,14 @@ export class McpUnity {
         (change.previousState === ConnectionState.Reconnecting ||
          change.previousState === ConnectionState.Connecting)) {
       // Connection restored - replay queued commands
-      this.replayQueuedCommands();
+      void this.replayQueuedCommands();
+    } else if (change.currentState === ConnectionState.Reconnecting &&
+               change.previousState === ConnectionState.Connected) {
+      // The old socket is gone. Requests already sent on it cannot receive a
+      // response on the replacement connection and are never queue-replayed.
+      this.rejectAllPendingRequests(
+        this.createConnectionLostDuringRequestError(change.reason)
+      );
     } else if (change.currentState === ConnectionState.Disconnected) {
       // Clear the queue when we're fully disconnected (not reconnecting)
       // This happens when max reconnection attempts are reached
@@ -238,21 +265,30 @@ export class McpUnity {
     }
 
     this.isReplayingQueue = true;
-    this.logger.info(`Replaying ${commands.length} queued commands`);
+    try {
+      this.logger.info(`Replaying ${commands.length} queued commands`);
 
-    for (const command of commands) {
-      try {
-        // Send the command directly using internal method
-        const result = await this.sendRequestInternal(command.request, command.timeout);
-        command.resolve(result);
-        this.commandQueue.recordReplaySuccess();
-      } catch (error) {
-        command.reject(error);
+      for (const command of commands) {
+        try {
+          // Queue expiry is checked with a fresh wall-clock sample immediately
+          // before the actual send. Transport receives its complete timeout so
+          // Unity-side timeout ratios remain valid.
+          const transportTimeout = command.timeout ?? this.requestTimeout;
+          const result = await this.sendRequestInternal(
+            command.request,
+            transportTimeout,
+            () => this.commandQueue.getExpirationError(command, Date.now())
+          );
+          command.resolve(result);
+          this.commandQueue.recordReplaySuccess();
+        } catch (error) {
+          command.reject(error);
+        }
       }
+    } finally {
+      this.isReplayingQueue = false;
+      this.logger.info(`Finished replaying queued commands (${this.commandQueue.getStats().replayedCount} successful)`);
     }
-
-    this.isReplayingQueue = false;
-    this.logger.info(`Finished replaying queued commands (${this.commandQueue.getStats().replayedCount} successful)`);
   }
 
   /**
@@ -297,6 +333,18 @@ export class McpUnity {
       request.reject(error);
       this.pendingRequests.delete(id);
     }
+  }
+
+  private createConnectionLostDuringRequestError(reason?: string): McpUnityError {
+    const cause = reason || 'connection closed';
+    return new McpUnityError(
+      ErrorType.CONNECTION,
+      `Unity connection lost while request was in flight: ${cause}`,
+      {
+        connectionErrorType: 'connection_lost_during_request',
+        reason
+      }
+    );
   }
 
   /**
@@ -383,8 +431,9 @@ export class McpUnity {
 
     try {
       await this.connection.connect();
-      // Connection successful, send the request
-      return this.sendRequestInternal(message, timeout);
+      // connect() may resolve because another attempt is already in progress;
+      // await the send rejection here so the queue fallback still runs.
+      return await this.sendRequestInternal(message, timeout);
     } catch (error) {
       // Connection failed - if queuing is enabled, queue the command
       if (queueIfDisconnected) {
@@ -416,13 +465,28 @@ export class McpUnity {
    * Internal method to send a request directly to Unity
    * Bypasses queuing logic - assumes connection is already established
    */
-  private sendRequestInternal(request: UnityRequest, customTimeout?: number): Promise<any> {
+  private sendRequestInternal(
+    request: UnityRequest,
+    customTimeout?: number,
+    beforeSend?: BeforeSendCheck
+  ): Promise<any> {
     const requestId = request.id as string;
     const timeoutMs = customTimeout ?? this.requestTimeout;
 
     return new Promise((resolve, reject) => {
       if (!this.connection || !this.isConnected) {
         reject(new McpUnityError(ErrorType.CONNECTION, 'Not connected to Unity'));
+        return;
+      }
+
+      let serializedRequest: string;
+      try {
+        serializedRequest = JSON.stringify(request);
+      } catch (err) {
+        reject(new McpUnityError(
+          ErrorType.INTERNAL,
+          `Failed to serialize request: ${err instanceof Error ? err.message : String(err)}`
+        ));
         return;
       }
 
@@ -443,7 +507,15 @@ export class McpUnity {
       });
 
       try {
-        this.connection.send(JSON.stringify(request));
+        const preSendError = beforeSend?.();
+        if (preSendError) {
+          clearTimeout(timeout);
+          this.pendingRequests.delete(requestId);
+          reject(preSendError);
+          return;
+        }
+
+        this.connection.send(serializedRequest);
         this.logger.debug(`Request sent: ${requestId}`);
       } catch (err) {
         clearTimeout(timeout);

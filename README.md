@@ -506,7 +506,7 @@ By default, the WebSocket server runs on port '8090'. You can change this port i
 
 ## Optional: Set Timeout
 
-By default, the timeout between the MCP server and the WebSocket is 10 seconds.
+By default, the timeout between the MCP server and the WebSocket is 60 seconds (the minimum configurable value remains 10 seconds).
 You can change depending on the OS you are using:
 
 1. Open the Unity Editor
@@ -590,7 +590,7 @@ Don't forget to shutdown the server with `Ctrl + C` before closing the terminal 
 <details>
 <summary><span style="font-size: 1.1em; font-weight: bold;">Enable Console Logs</span></summary>
 
-1. Enable logging on your terminal or into a log.txt file:
+1. Enable stderr logging and/or file logging. File logging writes `mcp-unity-server.log` in the OS temp directory by default; set `MCP_UNITY_LOG_FILE` to an absolute path or a path relative to the OS temp directory (parent directories are created automatically):
    - Powershell
    ```powershell
    $env:LOGGING = "true"

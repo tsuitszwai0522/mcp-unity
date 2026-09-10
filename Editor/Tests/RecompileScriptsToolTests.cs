@@ -23,6 +23,8 @@ namespace McpUnity.Tests
             GetPrivateStaticField<Func<bool>>("_isCompiling");
 
         private RecompileScriptsTool _tool;
+        private bool _restoreIgnoreFailingMessages;
+        private bool _previousIgnoreFailingMessages;
 
         [SetUp]
         public void SetUp()
@@ -34,13 +36,20 @@ namespace McpUnity.Tests
         [TearDown]
         public void TearDown()
         {
-            if (_tool != null)
+            try
             {
-                InvokePrivateInstanceMethod(_tool, "StopCompilationTracking", null);
-                GetPrivateInstanceField<IList>(_tool, "_pendingRequests").Clear();
-            }
+                if (_tool != null)
+                {
+                    InvokePrivateInstanceMethod(_tool, "StopCompilationTracking", null);
+                    GetPrivateInstanceField<IList>(_tool, "_pendingRequests").Clear();
+                }
 
-            RestoreProductionSeams();
+                RestoreProductionSeams();
+            }
+            finally
+            {
+                RestoreLogAssertState();
+            }
         }
 
         [Test]
@@ -334,6 +343,68 @@ namespace McpUnity.Tests
             StringAssert.Contains("refresh exploded", response["message"]?.ToString());
             Assert.IsTrue(response["refreshed"]?.ToObject<bool>() ?? false);
             Assert.GreaterOrEqual(response["refreshDurationMs"]?.ToObject<int>(), 0);
+        }
+
+        [Test]
+        public void ExecuteAsync_RequestCompilationFailureRemovesPoisonedPendingRequest()
+        {
+            IgnoreAmbientEditorLogsForThisTest();
+            int requestCompilationCount = 0;
+            SetPrivateStaticField<Action>("_refreshAssets", () => { });
+            SetPrivateStaticField<Func<bool>>("_isCompiling", () => false);
+            SetPrivateStaticField<Action>(
+                "_requestScriptCompilation",
+                () =>
+                {
+                    requestCompilationCount++;
+                    if (requestCompilationCount == 1)
+                    {
+                        throw new InvalidOperationException("request compilation exploded");
+                    }
+                });
+
+            var failedCompletion = new TaskCompletionSource<JObject>();
+            Assert.Throws<InvalidOperationException>(() => _tool.ExecuteAsync(
+                new JObject { ["refreshAssets"] = false },
+                failedCompletion));
+            Assert.AreEqual(
+                0,
+                GetPrivateInstanceField<IList>(_tool, "_pendingRequests").Count);
+            Assert.IsFalse(
+                GetPrivateInstanceField<bool>(_tool, "_isTrackingCompilation"),
+                "A failed compilation request must unsubscribe both compilation callbacks.");
+
+            var nextCompletion = new TaskCompletionSource<JObject>();
+            Assert.DoesNotThrow(() => _tool.ExecuteAsync(
+                new JObject { ["refreshAssets"] = false },
+                nextCompletion));
+            Assert.AreEqual(2, requestCompilationCount);
+
+            CompleteCompilation(_tool);
+            Assert.IsTrue(nextCompletion.Task.IsCompleted);
+            StringAssert.StartsWith(
+                "Successfully recompiled all scripts",
+                nextCompletion.Task.Result["message"]?.ToString());
+        }
+
+        private void IgnoreAmbientEditorLogsForThisTest()
+        {
+            if (!_restoreIgnoreFailingMessages)
+            {
+                _previousIgnoreFailingMessages = LogAssert.ignoreFailingMessages;
+                _restoreIgnoreFailingMessages = true;
+            }
+
+            LogAssert.ignoreFailingMessages = true;
+        }
+
+        private void RestoreLogAssertState()
+        {
+            if (!_restoreIgnoreFailingMessages)
+                return;
+
+            LogAssert.ignoreFailingMessages = _previousIgnoreFailingMessages;
+            _restoreIgnoreFailingMessages = false;
         }
 
         private static void CompleteCompilation(RecompileScriptsTool tool)

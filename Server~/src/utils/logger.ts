@@ -1,4 +1,6 @@
-import { appendFileSync } from 'fs';
+import { appendFileSync, mkdirSync, writeSync } from 'fs';
+import path from 'path';
+import { tmpdir } from 'os';
 
 export enum LogLevel {
   DEBUG = 0,
@@ -7,11 +9,60 @@ export enum LogLevel {
   ERROR = 3
 }
 
-// Check environment variable for logging
-const isLoggingEnabled = process.env.LOGGING === 'true';
+export function resolveLogFilePath(configuredPath: string | undefined = process.env.MCP_UNITY_LOG_FILE): string {
+  if (!configuredPath) {
+    return path.join(tmpdir(), 'mcp-unity-server.log');
+  }
 
-// Check environment variable for logging in a file
-const isLoggingFileEnabled = process.env.LOGGING_FILE === 'true';
+  return path.isAbsolute(configuredPath)
+    ? configuredPath
+    : path.resolve(tmpdir(), configuredPath);
+}
+
+function formatDiagnosticData(data: unknown): string {
+  if (data instanceof Error) {
+    return data.stack || `${data.name}: ${data.message}`;
+  }
+  if (typeof data === 'string') {
+    return data;
+  }
+
+  try {
+    return JSON.stringify(data, null, 2);
+  } catch {
+    return String(data);
+  }
+}
+
+function appendToConfiguredLogFile(output: string): void {
+  const logFilePath = resolveLogFilePath();
+  mkdirSync(path.dirname(logFilePath), { recursive: true });
+  appendFileSync(logFilePath, output);
+}
+
+/** Write process-level diagnostics independently of optional logger settings. */
+export function writeProcessDiagnostic(
+  message: string,
+  data?: unknown,
+  writeToStderr: (output: string) => void = output => writeSync(process.stderr.fd, output)
+): void {
+  const timestamp = new Date().toISOString();
+  const suffix = data === undefined ? '' : `\n${formatDiagnosticData(data)}`;
+  const output = `[${timestamp}] [FATAL] [Process] ${message}${suffix}\n`;
+  try {
+    writeToStderr(output);
+  } catch {
+    console.error(output.trimEnd());
+  }
+
+  if (process.env.LOGGING_FILE === 'true') {
+    try {
+      appendToConfiguredLogFile(output);
+    } catch (error) {
+      console.error('Failed to write process diagnostic to log file:', error);
+    }
+  }
+}
 
 export class Logger {
   private level: LogLevel;
@@ -39,11 +90,11 @@ export class Logger {
   }
   
   isLoggingEnabled(): boolean {
-    return isLoggingEnabled;
+    return process.env.LOGGING === 'true';
   }
   
   isLoggingFileEnabled(): boolean {
-    return isLoggingFileEnabled;
+    return process.env.LOGGING_FILE === 'true';
   }
   
   private log(level: LogLevel, message: string, data?: any) {
@@ -56,9 +107,9 @@ export class Logger {
     // Write to file if file logging is enabled
     if (this.isLoggingFileEnabled()) {
       try {
-          appendFileSync('log.txt', logMessage + '\n');
+          appendToConfiguredLogFile(logMessage + '\n');
           if (data) {
-              appendFileSync('log.txt', JSON.stringify(data, null, 2) + '\n');
+              appendToConfiguredLogFile(JSON.stringify(data, null, 2) + '\n');
           }
       } catch (error) {
           console.error('Failed to write to log file:', error);
@@ -68,9 +119,9 @@ export class Logger {
     // Write to console if logging is enabled
     if (this.isLoggingEnabled()) {
       if (data) {
-        console.log(logMessage, data);
+        console.error(logMessage, data);
       } else {
-        console.log(logMessage);
+        console.error(logMessage);
       }
     }
   }

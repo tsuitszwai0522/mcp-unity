@@ -366,7 +366,7 @@ MCP Unity 通过将 Unity `Library/PackedCache` 文件夹添加到您的工作�
 
 ## 可选：设置超时
 
-默认情况下，MCP 服务器与 WebSocket 之间的超时时间为 10 秒。
+默认情况下，MCP 服务器与 WebSocket 之间的超时时间为 60 秒（可配置的最小值仍为 10 秒）。
 您可以根据您使用的操作系统进行更改：
 
 1. 打开 Unity 编辑器
@@ -451,7 +451,7 @@ MCP Unity 服务器使用 Node.js 构建。它需要将 TypeScript 代码编译�
 <details>
 <summary><span style="font-size: 1.1em; font-weight: bold;">启用控制台日志</span></summary>
 
-1. 启用终端或 log.txt 文件中的日志记录：
+1. 启用 stderr 和/或文件日志。文件日志默认写入操作系统临时目录中的 `mcp-unity-server.log`；可用 `MCP_UNITY_LOG_FILE` 指定绝对路径或相对于操作系统临时目录的路径（父目录会自动创建）：
    - Powershell
    ```powershell
    $env:LOGGING = "true"

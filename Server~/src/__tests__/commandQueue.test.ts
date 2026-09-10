@@ -409,4 +409,45 @@ describe('CommandQueue', () => {
       shortTimeoutQueue.dispose();
     });
   });
+
+  describe('absolute deadline arithmetic', () => {
+    it('clamps wall-clock differences to the original queue window', () => {
+      queue.enqueue({
+        id: 'clamped',
+        request: { method: 'test', params: {} },
+        resolve: jest.fn(),
+        reject: jest.fn(),
+        timeout: 100
+      });
+      const command = queue.peek()!;
+
+      expect(queue.getRemainingTimeout(
+        command,
+        command.queuedAt - 3600000,
+        command.queuedAtMonotonic
+      )).toBe(100);
+      expect(queue.getRemainingTimeout(command, command.deadline)).toBe(0);
+      expect(queue.getRemainingTimeout(command, command.deadline + 3600000)).toBe(0);
+      expect(queue.getRemainingTimeout(
+        command,
+        command.queuedAt - 3600000,
+        command.monotonicDeadline
+      )).toBe(0);
+    });
+
+    it('counts one expired command only once across repeated checks', () => {
+      queue.enqueue({
+        id: 'one-expiry',
+        request: { method: 'test', params: {} },
+        resolve: jest.fn(),
+        reject: jest.fn(),
+        timeout: 100
+      });
+      const command = queue.peek()!;
+
+      expect(queue.getExpirationError(command, command.deadline)).toBeInstanceOf(McpUnityError);
+      expect(queue.getExpirationError(command, command.deadline + 1)).toBeInstanceOf(McpUnityError);
+      expect(queue.getStats().expiredCount).toBe(1);
+    });
+  });
 });

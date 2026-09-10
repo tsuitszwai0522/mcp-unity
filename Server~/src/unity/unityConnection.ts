@@ -56,6 +56,11 @@ export interface UnityConnectionConfig {
   playModePollingInterval?: number; // Default: 3000ms (3 seconds) - used instead of backoff during Play mode
 }
 
+interface ActiveConnectionAttempt {
+  socket: WebSocket;
+  reject: (error: McpUnityError) => void;
+}
+
 /**
  * Default configuration values
  */
@@ -98,6 +103,7 @@ export class UnityConnection extends EventEmitter {
   private reconnectAttempt: number = 0;
   private reconnectTimer: NodeJS.Timeout | null = null;
   private connectionTimeoutTimer: NodeJS.Timeout | null = null;
+  private activeConnectionAttempt: ActiveConnectionAttempt | null = null;
   private isManualDisconnect: boolean = false;
   private isPlayModeReconnect: boolean = false;  // True when reconnecting due to Unity Play mode
 
@@ -223,6 +229,28 @@ export class UnityConnection extends EventEmitter {
     return new Promise<void>((resolve, reject) => {
       const wsUrl = `ws://${this.config.host}:${this.config.port}/McpUnity`;
       this.logger.debug(`Connecting to ${wsUrl}...`);
+      let settled = false;
+      let socket: WebSocket | undefined;
+
+      const clearAttempt = () => {
+        if (socket && this.activeConnectionAttempt?.socket === socket) {
+          this.activeConnectionAttempt = null;
+        }
+      };
+
+      const resolveAttempt = () => {
+        if (settled) return;
+        settled = true;
+        clearAttempt();
+        resolve();
+      };
+
+      const rejectAttempt = (error: McpUnityError) => {
+        if (settled) return;
+        settled = true;
+        clearAttempt();
+        reject(error);
+      };
 
       // Create connection options with headers for client identification
       const options: WebSocket.ClientOptions = {
@@ -236,22 +264,36 @@ export class UnityConnection extends EventEmitter {
       this.closeWebSocket('Preparing new connection');
 
       // Create new WebSocket
-      this.ws = new WebSocket(wsUrl, options);
+      try {
+        socket = new WebSocket(wsUrl, options);
+      } catch (err) {
+        const error = new McpUnityError(
+          ErrorType.CONNECTION,
+          `Connection failed: ${err instanceof Error ? err.message : String(err)}`
+        );
+        rejectAttempt(error);
+        this.handleConnectionFailure(error);
+        return;
+      }
+      this.ws = socket;
+      this.activeConnectionAttempt = { socket, reject: rejectAttempt };
 
       // Connection timeout
       this.clearConnectionTimeout();
       this.connectionTimeoutTimer = setTimeout(() => {
-        if (this.ws && this.ws.readyState === WebSocket.CONNECTING) {
-          this.logger.warn('Connection timeout');
-          this.closeWebSocket('Connection timeout');
+        if (settled) return;
 
-          const error = new McpUnityError(ErrorType.CONNECTION, 'Connection timeout');
-          this.handleConnectionFailure(error);
-          reject(error);
+        this.logger.warn('Connection timeout');
+        const error = new McpUnityError(ErrorType.CONNECTION, 'Connection timeout');
+        if (this.ws === socket && socket.readyState === WebSocket.CONNECTING) {
+          this.closeWebSocket('Connection timeout');
         }
+        this.handleConnectionFailure(error);
+        rejectAttempt(error);
       }, this.config.connectTimeout);
 
-      this.ws.onopen = () => {
+      socket.onopen = () => {
+        if (settled) return;
         this.clearConnectionTimeout();
         this.logger.info('WebSocket connected to Unity');
 
@@ -262,27 +304,28 @@ export class UnityConnection extends EventEmitter {
         this.isPlayModeReconnect = false;  // Clear Play mode flag
         this.lastPongTime = Date.now();
 
-        this.setState(ConnectionState.Connected, 'Connection established');
         this.startHeartbeat();
-        resolve();
+        resolveAttempt();
+        this.setState(ConnectionState.Connected, 'Connection established');
       };
 
-      this.ws.onerror = (err) => {
+      socket.onerror = (err) => {
         this.clearConnectionTimeout();
         const errorMessage = err.message || 'Unknown error';
         this.logger.error(`WebSocket error: ${errorMessage}`);
 
         const error = new McpUnityError(ErrorType.CONNECTION, `Connection failed: ${errorMessage}`);
-        this.emit('error', error);
+        rejectAttempt(error);
 
-        // Don't reject here - let onclose handle cleanup and reconnection
+        // onclose still owns cleanup and reconnection, but this attempt has failed.
+        this.emit('error', error);
       };
 
-      this.ws.onmessage = (event) => {
+      socket.onmessage = (event) => {
         this.emit('message', event.data.toString());
       };
 
-      this.ws.onclose = (event) => {
+      socket.onclose = (event) => {
         this.clearConnectionTimeout();
         this.stopHeartbeat();
 
@@ -296,23 +339,23 @@ export class UnityConnection extends EventEmitter {
         }
 
         // Clear WebSocket reference
-        this.ws = null;
+        if (this.ws === socket) {
+          this.ws = null;
+        }
+
+        const error = new McpUnityError(ErrorType.CONNECTION, reason);
+        rejectAttempt(error);
 
         // Handle reconnection if not manual disconnect
         if (!this.isManualDisconnect) {
-          this.handleConnectionFailure(new McpUnityError(ErrorType.CONNECTION, reason));
+          this.handleConnectionFailure(error);
         } else {
           this.setState(ConnectionState.Disconnected, reason);
-        }
-
-        // Reject if we were in initial connection
-        if (this.state === ConnectionState.Connecting) {
-          reject(new McpUnityError(ErrorType.CONNECTION, reason));
         }
       };
 
       // Handle WebSocket ping/pong for heartbeat
-      this.ws.on('pong', () => {
+      socket.on('pong', () => {
         this.handlePong();
       });
     });
@@ -414,7 +457,7 @@ export class UnityConnection extends EventEmitter {
    * Start heartbeat monitoring
    */
   private startHeartbeat(): void {
-    this.stopHeartbeat();
+    this.stopHeartbeat(false);
 
     if (this.config.heartbeatInterval <= 0) {
       this.logger.debug('Heartbeat disabled');
@@ -431,7 +474,7 @@ export class UnityConnection extends EventEmitter {
   /**
    * Stop heartbeat monitoring
    */
-  private stopHeartbeat(): void {
+  private stopHeartbeat(cancelReconnectReset: boolean = true): void {
     if (this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = null;
@@ -441,7 +484,9 @@ export class UnityConnection extends EventEmitter {
       this.heartbeatTimeoutTimer = null;
     }
     this.awaitingPong = false;
-    this.cancelReconnectReset();
+    if (cancelReconnectReset) {
+      this.cancelReconnectReset();
+    }
   }
 
   /**
@@ -497,7 +542,7 @@ export class UnityConnection extends EventEmitter {
    */
   private handleStaleConnection(): void {
     this.logger.warn('Stale connection detected, forcing reconnection');
-    this.awaitingPong = false;
+    this.stopHeartbeat();
 
     // Force close and trigger reconnection
     this.closeWebSocket('Stale connection detected');
@@ -525,6 +570,9 @@ export class UnityConnection extends EventEmitter {
     // event handler from seeing a stale socket during teardown
     const socket = this.ws;
     this.ws = null;
+    const activeAttempt = this.activeConnectionAttempt?.socket === socket
+      ? this.activeConnectionAttempt
+      : null;
 
     // Remove all event handlers before terminating
     socket.onopen = null;
@@ -532,6 +580,11 @@ export class UnityConnection extends EventEmitter {
     socket.onerror = null;
     socket.onclose = null;
     socket.removeAllListeners('pong');
+
+    activeAttempt?.reject(new McpUnityError(
+      ErrorType.CONNECTION,
+      reason || 'Connection closed'
+    ));
 
     try {
       // Always terminate immediately — no graceful close handshake.
@@ -576,6 +629,7 @@ export class UnityConnection extends EventEmitter {
     this.logger.info('Forcing reconnection...');
     this.isManualDisconnect = false;
     this.stopReconnectTimer();
+    this.stopHeartbeat();
     this.closeWebSocket('Force reconnect');
     this.reconnectAttempt = 0;  // Reset attempts for fresh reconnect
 

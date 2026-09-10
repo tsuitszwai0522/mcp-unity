@@ -1,22 +1,313 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Xml.Linq;
+using McpUnity.Resources;
 using McpUnity.Services;
 using McpUnity.Tools;
+using McpUnity.Unity;
 using Newtonsoft.Json.Linq;
 using NUnit.Framework;
 using NUnit.Framework.Interfaces;
 using UnityEditor;
 using UnityEditor.TestTools.TestRunner.Api;
+using UnityEngine;
+using UnityEngine.TestTools;
 
 namespace McpUnity.Tests
 {
     public class TestRunnerResultTests
     {
+        private bool _restoreIgnoreFailingMessages;
+        private bool _previousIgnoreFailingMessages;
+
+        [TearDown]
+        public void RestoreLogAssertState()
+        {
+            if (!_restoreIgnoreFailingMessages)
+                return;
+
+            LogAssert.ignoreFailingMessages = _previousIgnoreFailingMessages;
+            _restoreIgnoreFailingMessages = false;
+        }
+
+        [Test]
+        public async Task SocketHandlerCatchCarriesParsedRequestIdAndTypedError()
+        {
+            IgnoreAmbientEditorLogsForThisTest();
+            LogAssert.Expect(
+                LogType.Error,
+                new Regex("Error processing message:"));
+            string sent = null;
+            var handler = new McpUnitySocketHandler(null);
+
+            await handler.ProcessMessageAsync(
+                "{\"id\":\"request-rc5\",\"method\":\"force-handler-catch\",\"params\":{}}",
+                response => sent = response);
+
+            JObject response = JObject.Parse(sent);
+
+            Assert.AreEqual("request-rc5", response["id"]?.ToString());
+            Assert.AreEqual("internal_error", response["error"]?["type"]?.ToString());
+            StringAssert.Contains(
+                "Internal server error",
+                response["error"]?["message"]?.ToString());
+            Assert.IsNull(response["result"]);
+        }
+
+        [Test, Timeout(1000)]
+        public async Task RunTestsToolAsyncFailureCompletesTypedError()
+        {
+            IgnoreAmbientEditorLogsForThisTest();
+            LogAssert.Expect(
+                LogType.Error,
+                new Regex("Failed to execute tool run_tests: run tests exploded"));
+            var completionSource = new TaskCompletionSource<JObject>();
+
+            new RunTestsTool(new ThrowingTestRunnerService()).ExecuteAsync(
+                new JObject(),
+                completionSource);
+            JObject response = await completionSource.Task;
+
+            Assert.AreEqual("tool_execution_error", response["error"]?["type"]?.ToString());
+            StringAssert.Contains(
+                "run tests exploded",
+                response["error"]?["message"]?.ToString());
+        }
+
+        [Test, Timeout(1000)]
+        public async Task GetTestsResourceAsyncFailureCompletesTypedError()
+        {
+            IgnoreAmbientEditorLogsForThisTest();
+            LogAssert.Expect(
+                LogType.Error,
+                new Regex("Failed to fetch resource get_tests: get tests exploded"));
+            var completionSource = new TaskCompletionSource<JObject>();
+
+            new GetTestsResource(new ThrowingTestRunnerService()).FetchAsync(
+                new JObject(),
+                completionSource);
+            JObject response = await completionSource.Task;
+
+            Assert.AreEqual("resource_fetch_error", response["error"]?["type"]?.ToString());
+            StringAssert.Contains(
+                "get tests exploded",
+                response["error"]?["message"]?.ToString());
+        }
+
+        [Test, Timeout(1000)]
+        public async Task RunTestsToolCatchIgnoresCompletionThatAlreadyWon()
+        {
+            IgnoreAmbientEditorLogsForThisTest();
+            LogAssert.Expect(
+                LogType.Error,
+                new Regex("Failed to execute tool run_tests: run tests exploded"));
+            var completionSource = new TaskCompletionSource<JObject>();
+            var earlierResult = new JObject { ["source"] = "earlier callback" };
+            completionSource.SetResult(earlierResult);
+            var completionErrors = new List<string>();
+            Application.LogCallback captureCompletionErrors = (condition, stackTrace, type) =>
+            {
+                if (IsCompletionStateError(condition, stackTrace, type, "RunTestsTool"))
+                {
+                    completionErrors.Add(condition);
+                }
+            };
+
+            Application.logMessageReceived += captureCompletionErrors;
+            try
+            {
+                new RunTestsTool(new ThrowingTestRunnerService()).ExecuteAsync(
+                    new JObject(),
+                    completionSource);
+                await Task.Delay(20);
+
+                Assert.AreSame(earlierResult, completionSource.Task.Result);
+                CollectionAssert.IsEmpty(completionErrors);
+            }
+            finally
+            {
+                Application.logMessageReceived -= captureCompletionErrors;
+            }
+        }
+
+        [Test, Timeout(1000)]
+        public async Task GetTestsResourceCatchIgnoresCompletionThatAlreadyWon()
+        {
+            IgnoreAmbientEditorLogsForThisTest();
+            LogAssert.Expect(
+                LogType.Error,
+                new Regex("Failed to fetch resource get_tests: get tests exploded"));
+            var completionSource = new TaskCompletionSource<JObject>();
+            var earlierResult = new JObject { ["source"] = "earlier callback" };
+            completionSource.SetResult(earlierResult);
+            var completionErrors = new List<string>();
+            Application.LogCallback captureCompletionErrors = (condition, stackTrace, type) =>
+            {
+                if (IsCompletionStateError(condition, stackTrace, type, "GetTestsResource"))
+                {
+                    completionErrors.Add(condition);
+                }
+            };
+
+            Application.logMessageReceived += captureCompletionErrors;
+            try
+            {
+                new GetTestsResource(new ThrowingTestRunnerService()).FetchAsync(
+                    new JObject(),
+                    completionSource);
+                await Task.Delay(20);
+
+                Assert.AreSame(earlierResult, completionSource.Task.Result);
+                CollectionAssert.IsEmpty(completionErrors);
+            }
+            finally
+            {
+                Application.logMessageReceived -= captureCompletionErrors;
+            }
+        }
+
+        [Test]
+        public void SocketToolCatchIgnoresCompletionThatAlreadyWon()
+        {
+            IgnoreAmbientEditorLogsForThisTest();
+            LogAssert.Expect(
+                LogType.Error,
+                new Regex("Error executing tool completion_then_throw: after completion"));
+            LogAssert.Expect(
+                LogType.Warning,
+                new Regex("Ignored late tool failure completion for completion_then_throw"));
+            var completionSource = new TaskCompletionSource<JObject>();
+            IEnumerator execution = InvokeSocketCoroutine(
+                "ExecuteTool",
+                new CompletingThenThrowingTool(),
+                completionSource);
+
+            Assert.DoesNotThrow(() => execution.MoveNext());
+            Assert.AreEqual("first", completionSource.Task.Result["source"]?.ToString());
+        }
+
+        [Test]
+        public void SocketResourceCatchIgnoresCompletionThatAlreadyWon()
+        {
+            IgnoreAmbientEditorLogsForThisTest();
+            LogAssert.Expect(
+                LogType.Error,
+                new Regex("Error fetching resource completion_then_throw: after completion"));
+            LogAssert.Expect(
+                LogType.Warning,
+                new Regex("Ignored late resource failure completion for completion_then_throw"));
+            var completionSource = new TaskCompletionSource<JObject>();
+            IEnumerator execution = InvokeSocketCoroutine(
+                "FetchResourceCoroutine",
+                new CompletingThenThrowingResource(),
+                completionSource);
+
+            Assert.DoesNotThrow(() => execution.MoveNext());
+            Assert.AreEqual("first", completionSource.Task.Result["source"]?.ToString());
+        }
+
+        [Test, Timeout(1000)]
+        public async Task RunTestsToolLateCompletionUsesTrySetResult()
+        {
+            IgnoreAmbientEditorLogsForThisTest();
+            var service = new ControllableTestRunnerService();
+            var completionSource = new TaskCompletionSource<JObject>();
+            var earlierResult = new JObject { ["source"] = "earlier callback" };
+            var errorLogs = new List<string>();
+            Application.LogCallback captureErrors = (condition, _, type) =>
+            {
+                if ((type == LogType.Error || type == LogType.Exception)
+                    && condition != null
+                    && condition.Contains("Failed to execute tool run_tests:"))
+                {
+                    errorLogs.Add(condition);
+                }
+            };
+
+            Application.logMessageReceived += captureErrors;
+            try
+            {
+                new RunTestsTool(service).ExecuteAsync(new JObject(), completionSource);
+                Assert.IsTrue(completionSource.TrySetResult(earlierResult));
+
+                service.CompleteRun(new JObject { ["success"] = true });
+                await Task.Delay(20);
+
+                Assert.AreSame(earlierResult, completionSource.Task.Result);
+                CollectionAssert.IsEmpty(errorLogs);
+            }
+            finally
+            {
+                Application.logMessageReceived -= captureErrors;
+            }
+        }
+
+        [Test, Timeout(1000)]
+        public async Task GetTestsResourceLateCompletionUsesTrySetResult()
+        {
+            IgnoreAmbientEditorLogsForThisTest();
+            var service = new ControllableTestRunnerService();
+            var completionSource = new TaskCompletionSource<JObject>();
+            var earlierResult = new JObject { ["source"] = "earlier callback" };
+            var errorLogs = new List<string>();
+            Application.LogCallback captureErrors = (condition, _, type) =>
+            {
+                if ((type == LogType.Error || type == LogType.Exception)
+                    && condition != null
+                    && condition.Contains("Failed to fetch resource get_tests:"))
+                {
+                    errorLogs.Add(condition);
+                }
+            };
+
+            Application.logMessageReceived += captureErrors;
+            try
+            {
+                new GetTestsResource(service).FetchAsync(new JObject(), completionSource);
+                Assert.IsTrue(completionSource.TrySetResult(earlierResult));
+
+                service.CompleteGetTests(new List<ITestAdaptor>());
+                await Task.Delay(20);
+
+                Assert.AreSame(earlierResult, completionSource.Task.Result);
+                CollectionAssert.IsEmpty(errorLogs);
+            }
+            finally
+            {
+                Application.logMessageReceived -= captureErrors;
+            }
+        }
+
+        private void IgnoreAmbientEditorLogsForThisTest()
+        {
+            if (!_restoreIgnoreFailingMessages)
+            {
+                _previousIgnoreFailingMessages = LogAssert.ignoreFailingMessages;
+                _restoreIgnoreFailingMessages = true;
+            }
+
+            LogAssert.ignoreFailingMessages = true;
+        }
+
+        private static bool IsCompletionStateError(
+            string condition,
+            string stackTrace,
+            LogType type,
+            string ownerType)
+        {
+            return (type == LogType.Error || type == LogType.Exception)
+                && condition != null
+                && condition.Contains("InvalidOperationException")
+                && stackTrace != null
+                && stackTrace.Contains(ownerType);
+        }
+
         [Test]
         public void ZeroExecutionFromTestFilterFailsLoud()
         {
@@ -1749,6 +2040,54 @@ namespace McpUnity.Tests
             public TestMode TestMode => throw new System.NotImplementedException();
         }
 
+        private static IEnumerator InvokeSocketCoroutine(
+            string methodName,
+            object executable,
+            TaskCompletionSource<JObject> completionSource)
+        {
+            MethodInfo method = typeof(McpUnitySocketHandler).GetMethod(
+                methodName,
+                BindingFlags.NonPublic | BindingFlags.Instance);
+            Assert.IsNotNull(method, $"Expected McpUnitySocketHandler.{methodName} to exist.");
+            return (IEnumerator)method.Invoke(
+                new McpUnitySocketHandler(null),
+                new[] { executable, new JObject(), completionSource });
+        }
+
+        private sealed class CompletingThenThrowingTool : McpToolBase
+        {
+            public CompletingThenThrowingTool()
+            {
+                Name = "completion_then_throw";
+                IsAsync = true;
+            }
+
+            public override void ExecuteAsync(
+                JObject parameters,
+                TaskCompletionSource<JObject> completionSource)
+            {
+                completionSource.SetResult(new JObject { ["source"] = "first" });
+                throw new InvalidOperationException("after completion");
+            }
+        }
+
+        private sealed class CompletingThenThrowingResource : McpResourceBase
+        {
+            public CompletingThenThrowingResource()
+            {
+                Name = "completion_then_throw";
+                IsAsync = true;
+            }
+
+            public override void FetchAsync(
+                JObject parameters,
+                TaskCompletionSource<JObject> completionSource)
+            {
+                completionSource.SetResult(new JObject { ["source"] = "first" });
+                throw new InvalidOperationException("after completion");
+            }
+        }
+
         private sealed class RecordingTestRunnerService : ITestRunnerService
         {
             public int ExecuteCalls { get; private set; }
@@ -1774,6 +2113,69 @@ namespace McpUnity.Tests
             public JObject GetTestRun(string runId = null)
             {
                 return new JObject { ["success"] = false };
+            }
+        }
+
+        private sealed class ThrowingTestRunnerService : ITestRunnerService
+        {
+            public async Task<List<ITestAdaptor>> GetAllTestsAsync(string testModeFilter = "")
+            {
+                await Task.Yield();
+                throw new InvalidOperationException("get tests exploded");
+            }
+
+            public async Task<JObject> ExecuteTestsAsync(
+                TestMode testMode,
+                bool returnOnlyFailures,
+                bool returnWithLogs,
+                string testFilter,
+                string[] assemblyNames = null)
+            {
+                await Task.Yield();
+                throw new InvalidOperationException("run tests exploded");
+            }
+
+            public JObject GetTestRun(string runId = null)
+            {
+                return new JObject { ["success"] = false };
+            }
+        }
+
+        private sealed class ControllableTestRunnerService : ITestRunnerService
+        {
+            private readonly TaskCompletionSource<List<ITestAdaptor>> _getTests =
+                new TaskCompletionSource<List<ITestAdaptor>>();
+            private readonly TaskCompletionSource<JObject> _run =
+                new TaskCompletionSource<JObject>();
+
+            public Task<List<ITestAdaptor>> GetAllTestsAsync(string testModeFilter = "")
+            {
+                return _getTests.Task;
+            }
+
+            public Task<JObject> ExecuteTestsAsync(
+                TestMode testMode,
+                bool returnOnlyFailures,
+                bool returnWithLogs,
+                string testFilter,
+                string[] assemblyNames = null)
+            {
+                return _run.Task;
+            }
+
+            public JObject GetTestRun(string runId = null)
+            {
+                return new JObject { ["success"] = false };
+            }
+
+            public void CompleteGetTests(List<ITestAdaptor> tests)
+            {
+                _getTests.SetResult(tests);
+            }
+
+            public void CompleteRun(JObject result)
+            {
+                _run.SetResult(result);
             }
         }
     }

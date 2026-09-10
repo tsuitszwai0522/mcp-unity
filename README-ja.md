@@ -367,7 +367,7 @@ AIクライアントのMCP設定ファイル（例：Claude Desktopのclaude_des
 
 ## オプション: タイムアウト設定
 
-デフォルトでは、MCPサーバーとWebSocket間のタイムアウトは 10 秒です。
+デフォルトでは、MCPサーバーとWebSocket間のタイムアウトは 60 秒です（設定可能な最小値は 10 秒のままです）。
 お使いの環境に応じて以下の手順で変更できます：
 
 1. Unityエディターを開く  
@@ -447,7 +447,7 @@ MCP Unity サーバーは Node.js で構築されています。TypeScript コ�
 <details>
 <summary><span style="font-size: 1.1em; font-weight: bold;">コンソールログを有効化</span></summary>
 
-1. ターミナルまたは log.txt ファイルにログ出力を有効化：
+1. stderr および／またはファイルへのログ出力を有効化します。ファイルログはデフォルトで OS の一時ディレクトリ内の `mcp-unity-server.log` に書き込まれます。`MCP_UNITY_LOG_FILE` で絶対パス、または OS の一時ディレクトリからの相対パスを指定できます（親ディレクトリは自動作成されます）：
    - Powershell
    ```powershell
    $env:LOGGING = "true"

@@ -110,7 +110,11 @@ namespace McpUnity.Unity
             
             // Test timeout setting
             EditorGUILayout.BeginHorizontal();
-            int newTimeout = EditorGUILayout.IntField(new GUIContent("Request Timeout (seconds)", "Timeout in seconds for tool request"), settings.RequestTimeoutSeconds);
+            int newTimeout = EditorGUILayout.IntField(
+                new GUIContent(
+                    "Request Timeout (seconds)",
+                    $"Timeout in seconds for tool requests (default {McpUnitySettings.RequestTimeoutDefault}, minimum {McpUnitySettings.RequestTimeoutMinimum})"),
+                settings.RequestTimeoutSeconds);
             if (newTimeout < McpUnitySettings.RequestTimeoutMinimum)
             {
                 newTimeout = McpUnitySettings.RequestTimeoutMinimum;

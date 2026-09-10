@@ -1,6 +1,9 @@
+using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using McpUnity.Services;
+using McpUnity.Unity;
+using McpUnity.Utils;
 using Newtonsoft.Json.Linq;
 using UnityEditor.TestTools.TestRunner.Api;
 
@@ -32,28 +35,38 @@ namespace McpUnity.Resources
         /// <param name="tcs">TaskCompletionSource to set the result or exception</param>
         public override async void FetchAsync(JObject parameters, TaskCompletionSource<JObject> tcs)
         {
-            // Get filter parameters
-            string testModeFilter = parameters["testMode"]?.ToObject<string>();
-            List<ITestAdaptor> allTests = await _testRunnerService.GetAllTestsAsync(testModeFilter);
-            var results = new JArray();
-            
-            foreach (ITestAdaptor test in allTests)
+            try
             {
-                results.Add(new JObject
+                // Get filter parameters
+                string testModeFilter = parameters["testMode"]?.ToObject<string>();
+                List<ITestAdaptor> allTests = await _testRunnerService.GetAllTestsAsync(testModeFilter);
+                var results = new JArray();
+
+                foreach (ITestAdaptor test in allTests)
                 {
-                    ["name"] = test.Name,
-                    ["fullName"] = test.FullName,
-                    ["testMode"] = test.TestMode.ToString(),
-                    ["runState"] = test.RunState.ToString()
+                    results.Add(new JObject
+                    {
+                        ["name"] = test.Name,
+                        ["fullName"] = test.FullName,
+                        ["testMode"] = test.TestMode.ToString(),
+                        ["runState"] = test.RunState.ToString()
+                    });
+                }
+
+                tcs.TrySetResult(new JObject
+                {
+                    ["success"] = true,
+                    ["message"] = $"Retrieved {allTests.Count} tests",
+                    ["tests"] = results
                 });
             }
-            
-            tcs.SetResult(new JObject
+            catch (Exception ex)
             {
-                ["success"] = true,
-                ["message"] = $"Retrieved {allTests.Count} tests",
-                ["tests"] = results
-            });
+                McpLogger.LogError($"Failed to fetch resource {Name}: {ex.Message}\n{ex.StackTrace}");
+                tcs.TrySetResult(McpUnitySocketHandler.CreateErrorResponse(
+                    $"Failed to fetch resource {Name}: {ex.Message}",
+                    "resource_fetch_error"));
+            }
         }
     }
 }

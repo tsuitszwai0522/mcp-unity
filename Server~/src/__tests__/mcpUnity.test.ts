@@ -2,6 +2,7 @@ import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals
 import { Logger, LogLevel } from '../utils/logger.js';
 import { McpUnityError, ErrorType } from '../utils/errors.js';
 import { McpUnity, ConnectionState } from '../unity/mcpUnity.js';
+import { UnityConnection } from '../unity/unityConnection.js';
 import { registerTransformTools } from '../tools/transformTools.js';
 import path from 'path';
 import { z } from 'zod';
@@ -175,6 +176,401 @@ describe('Request timeout handling', () => {
     expect(unity.connectionState).toBe(ConnectionState.Connected);
 
     await unity.stop();
+  });
+
+  it('rejects an in-flight request immediately when its connected socket is lost', async () => {
+    const unity = new McpUnity(new Logger('Test', LogLevel.ERROR), {
+      queueingEnabled: false
+    });
+    const connection = {
+      isConnected: true,
+      isConnecting: false,
+      connectionState: ConnectionState.Connected,
+      send: jest.fn(),
+      connect: jest.fn(),
+      disconnect: jest.fn(),
+      removeAllListeners: jest.fn(),
+      forceReconnect: jest.fn(),
+      getStats: jest.fn(() => ({
+        state: ConnectionState.Connected,
+        reconnectAttempt: 0,
+        timeSinceLastPong: 0
+      }))
+    };
+    (unity as any).connection = connection;
+
+    const pending = unity.sendRequest({
+      id: 'lost-in-flight',
+      method: 'set_editor_state',
+      params: { action: 'play' }
+    }, { timeout: 180000, queueIfDisconnected: false });
+    const rejection = expect(pending).rejects.toMatchObject({
+      type: ErrorType.CONNECTION,
+      details: {
+        connectionErrorType: 'connection_lost_during_request',
+        reason: 'Unity entered play mode'
+      }
+    });
+
+    (unity as any).handleStateChange({
+      previousState: ConnectionState.Connected,
+      currentState: ConnectionState.Reconnecting,
+      reason: 'Unity entered play mode'
+    });
+
+    await rejection;
+    expect(unity.getConnectionStats().pendingRequests).toBe(0);
+    await unity.stop();
+  });
+});
+
+describe('Queued request deadlines', () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  const createConnectedTransport = () => ({
+    isConnected: true,
+    isConnecting: false,
+    connectionState: ConnectionState.Connected,
+    send: jest.fn(),
+    connect: jest.fn(),
+    disconnect: jest.fn(),
+    removeAllListeners: jest.fn(),
+    forceReconnect: jest.fn(),
+    getStats: jest.fn(() => ({
+      state: ConnectionState.Connected,
+      reconnectAttempt: 0,
+      timeSinceLastPong: 0
+    }))
+  });
+
+  it('uses RequestTimeoutSeconds as the default queue deadline when it exceeds 60 seconds', async () => {
+    const unity = new McpUnity(new Logger('Test', LogLevel.ERROR));
+    (unity as any).readConfigFileAsJson = jest.fn(async () => ({
+      RequestTimeoutSeconds: '180'
+    }));
+
+    await (unity as any).parseAndSetConfig();
+    (unity as any).commandQueue.enqueue({
+      id: 'configured-timeout',
+      request: { id: 'configured-timeout', method: 'run_tests', params: {} },
+      resolve: jest.fn(),
+      reject: jest.fn()
+    });
+
+    const queued = (unity as any).commandQueue.peek();
+    expect(queued.timeout).toBeUndefined();
+    expect(queued.queueTimeout).toBe(180000);
+    expect(queued.deadline - queued.queuedAt).toBe(180000);
+
+    await unity.stop();
+  });
+
+  it('uses the full per-command transport timeout after queue waiting', async () => {
+    const unity = new McpUnity(new Logger('Test', LogLevel.ERROR));
+    const connection = createConnectedTransport();
+    (unity as any).connection = connection;
+
+    let resolveFirst!: (value: unknown) => void;
+    let rejectFirst!: (reason: unknown) => void;
+    const firstResult = new Promise((resolve, reject) => {
+      resolveFirst = resolve;
+      rejectFirst = reject;
+    });
+    let resolveSecond!: (value: unknown) => void;
+    let rejectSecond!: (reason: unknown) => void;
+    const secondResult = new Promise((resolve, reject) => {
+      resolveSecond = resolve;
+      rejectSecond = reject;
+    });
+
+    (unity as any).commandQueue.enqueue({
+      id: 'first',
+      request: { id: 'first', method: 'first', params: {} },
+      resolve: resolveFirst,
+      reject: rejectFirst,
+      timeout: 100
+    });
+    (unity as any).commandQueue.enqueue({
+      id: 'second',
+      request: { id: 'second', method: 'second', params: {} },
+      resolve: resolveSecond,
+      reject: rejectSecond,
+      timeout: 100
+    });
+
+    await jest.advanceTimersByTimeAsync(60);
+    const replay = (unity as any).replayQueuedCommands();
+    expect(connection.send).toHaveBeenCalledTimes(1);
+
+    await jest.advanceTimersByTimeAsync(30);
+    (unity as any).handleMessage(JSON.stringify({
+      jsonrpc: '2.0',
+      id: 'first',
+      result: { success: true }
+    }));
+    await Promise.resolve();
+    expect(connection.send).toHaveBeenCalledTimes(2);
+
+    let secondSettled = false;
+    void secondResult.finally(() => { secondSettled = true; });
+    await jest.advanceTimersByTimeAsync(11);
+
+    await expect(firstResult).resolves.toEqual({ success: true });
+    expect(secondSettled).toBe(false);
+    (unity as any).handleMessage(JSON.stringify({
+      jsonrpc: '2.0',
+      id: 'second',
+      result: { success: true }
+    }));
+    await expect(secondResult).resolves.toEqual({ success: true });
+    await replay;
+    await unity.stop();
+  });
+
+  it('clamps a backward wall-clock jump and still arms a bounded transport timeout', async () => {
+    jest.setSystemTime(1000);
+    const unity = new McpUnity(new Logger('Test', LogLevel.ERROR));
+    const connection = createConnectedTransport();
+    (unity as any).connection = connection;
+
+    const result = new Promise((resolve, reject) => {
+      (unity as any).commandQueue.enqueue({
+        id: 'clock-went-backward',
+        request: { id: 'clock-went-backward', method: 'run_tests', params: {} },
+        resolve,
+        reject,
+        timeout: 100
+      });
+    });
+    const rejection = expect(result).rejects.toMatchObject({
+      type: ErrorType.TIMEOUT,
+      message: 'Request timed out'
+    });
+
+    jest.setSystemTime(0);
+    const replay = (unity as any).replayQueuedCommands();
+    expect(connection.send).toHaveBeenCalledTimes(1);
+    await jest.advanceTimersByTimeAsync(100);
+
+    await rejection;
+    await replay;
+    await unity.stop();
+  });
+
+  it('rechecks the queue deadline after serialization and immediately before send', async () => {
+    jest.setSystemTime(0);
+    const unity = new McpUnity(new Logger('Test', LogLevel.ERROR));
+    const connection = createConnectedTransport();
+    (unity as any).connection = connection;
+    const params = {
+      toJSON: () => {
+        jest.setSystemTime(50);
+        return { serialized: true };
+      }
+    };
+    const result = new Promise((resolve, reject) => {
+      (unity as any).commandQueue.enqueue({
+        id: 'expires-during-serialization',
+        request: { id: 'expires-during-serialization', method: 'large_payload', params },
+        resolve,
+        reject,
+        timeout: 50
+      });
+    });
+    const rejection = expect(result).rejects.toMatchObject({
+      type: ErrorType.TIMEOUT,
+      message: 'Command expired after 50ms in queue'
+    });
+
+    await (unity as any).replayQueuedCommands();
+
+    await rejection;
+    expect(connection.send).not.toHaveBeenCalled();
+    expect(unity.getQueueStats().expiredCount).toBe(1);
+    await unity.stop();
+  });
+
+  it('does not send a drained command that expires behind an earlier replay', async () => {
+    const unity = new McpUnity(new Logger('Test', LogLevel.ERROR));
+    const connection = createConnectedTransport();
+    (unity as any).connection = connection;
+
+    const firstResult = new Promise((resolve, reject) => {
+      (unity as any).commandQueue.enqueue({
+        id: 'slow-first',
+        request: { id: 'slow-first', method: 'slow_first', params: {} },
+        resolve,
+        reject,
+        timeout: 100
+      });
+    });
+    const expiredResult = new Promise((resolve, reject) => {
+      (unity as any).commandQueue.enqueue({
+        id: 'expires-second',
+        request: { id: 'expires-second', method: 'expires_second', params: {} },
+        resolve,
+        reject,
+        timeout: 50
+      });
+    });
+    const expiredRejection = expect(expiredResult).rejects.toMatchObject({
+      type: ErrorType.TIMEOUT,
+      message: 'Command expired after 50ms in queue'
+    });
+
+    const replay = (unity as any).replayQueuedCommands();
+    expect(connection.send).toHaveBeenCalledTimes(1);
+
+    await jest.advanceTimersByTimeAsync(60);
+    (unity as any).handleMessage(JSON.stringify({
+      jsonrpc: '2.0',
+      id: 'slow-first',
+      result: { success: true }
+    }));
+
+    await expect(firstResult).resolves.toEqual({ success: true });
+    await expiredRejection;
+    await replay;
+    expect(connection.send).toHaveBeenCalledTimes(1);
+
+    await unity.stop();
+  });
+
+  it('restores the replay guard when a drained command callback throws', async () => {
+    const unity = new McpUnity(new Logger('Test', LogLevel.ERROR));
+    const connection = createConnectedTransport();
+    connection.send.mockImplementationOnce(() => {
+      throw new Error('transport send failed');
+    });
+    (unity as any).connection = connection;
+    (unity as any).commandQueue.enqueue({
+      id: 'throwing-reject',
+      request: { id: 'throwing-reject', method: 'test', params: {} },
+      resolve: jest.fn(),
+      reject: () => { throw new Error('consumer rejection callback failed'); },
+      timeout: 100
+    });
+
+    await expect((unity as any).replayQueuedCommands()).rejects.toThrow(
+      'consumer rejection callback failed'
+    );
+
+    expect((unity as any).isReplayingQueue).toBe(false);
+    await unity.stop();
+  });
+});
+
+describe('Queue configuration precedence', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('preserves an explicit queue default after start reads Unity timeout settings', async () => {
+    jest.spyOn(UnityConnection.prototype, 'connect').mockRejectedValue(
+      new McpUnityError(ErrorType.CONNECTION, 'offline for test')
+    );
+    const unity = new McpUnity(new Logger('Test', LogLevel.ERROR), {
+      queue: { defaultTimeout: 120000 }
+    });
+    (unity as any).readConfigFileAsJson = jest.fn(async () => ({
+      RequestTimeoutSeconds: '180'
+    }));
+
+    await unity.start();
+    (unity as any).commandQueue.enqueue({
+      id: 'explicit-queue-timeout',
+      request: { id: 'explicit-queue-timeout', method: 'test', params: {} },
+      resolve: jest.fn(),
+      reject: jest.fn()
+    });
+
+    const queued = (unity as any).commandQueue.peek();
+    expect(queued.queueTimeout).toBe(120000);
+    expect(queued.deadline - queued.queuedAt).toBe(120000);
+    await unity.stop();
+  });
+
+  it('uses the 60-second request fallback when settings omit RequestTimeoutSeconds', async () => {
+    jest.spyOn(UnityConnection.prototype, 'connect').mockRejectedValue(
+      new McpUnityError(ErrorType.CONNECTION, 'offline for test')
+    );
+    const unity = new McpUnity(new Logger('Test', LogLevel.ERROR));
+    (unity as any).readConfigFileAsJson = jest.fn(async () => ({}));
+
+    await unity.start();
+    expect((unity as any).requestTimeout).toBe(60000);
+    await unity.stop();
+  });
+
+  it.each([10, 30])(
+    'keeps the 60-second queue floor when RequestTimeoutSeconds is %i',
+    async (requestTimeoutSeconds) => {
+      jest.spyOn(UnityConnection.prototype, 'connect').mockRejectedValue(
+        new McpUnityError(ErrorType.CONNECTION, 'offline for test')
+      );
+      const unity = new McpUnity(new Logger('Test', LogLevel.ERROR));
+      (unity as any).readConfigFileAsJson = jest.fn(async () => ({
+        RequestTimeoutSeconds: String(requestTimeoutSeconds)
+      }));
+
+      await unity.start();
+      (unity as any).commandQueue.enqueue({
+        id: `queue-floor-${requestTimeoutSeconds}`,
+        request: {
+          id: `queue-floor-${requestTimeoutSeconds}`,
+          method: 'test',
+          params: {}
+        },
+        resolve: jest.fn(),
+        reject: jest.fn()
+      });
+
+      const queued = (unity as any).commandQueue.peek();
+      expect((unity as any).requestTimeout).toBe(requestTimeoutSeconds * 1000);
+      expect(queued.queueTimeout).toBe(60000);
+      await unity.stop();
+    }
+  );
+
+  it('queues when the connect-first send rejects after connect resolves', async () => {
+    const unity = new McpUnity(new Logger('Test', LogLevel.ERROR));
+    const connection = {
+      isConnected: false,
+      isConnecting: false,
+      connectionState: ConnectionState.Disconnected,
+      send: jest.fn(),
+      connect: jest.fn(async () => {}),
+      disconnect: jest.fn(),
+      removeAllListeners: jest.fn(),
+      forceReconnect: jest.fn(),
+      getStats: jest.fn(() => ({
+        state: ConnectionState.Disconnected,
+        reconnectAttempt: 0,
+        timeSinceLastPong: 0
+      }))
+    };
+    (unity as any).connection = connection;
+
+    const pending = unity.sendRequest({
+      id: 'connect-first-send-failure',
+      method: 'test',
+      params: {}
+    });
+    const eventualRejection = expect(pending).rejects.toMatchObject({
+      type: ErrorType.CONNECTION
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(unity.queuedCommandCount).toBe(1);
+    await unity.stop();
+    await eventualRejection;
   });
 });
 

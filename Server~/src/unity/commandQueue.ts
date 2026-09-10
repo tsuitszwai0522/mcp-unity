@@ -19,7 +19,17 @@ export interface QueuedCommand {
   reject: (reason: any) => void;
   /** Timestamp when the command was queued */
   queuedAt: number;
-  /** Optional custom timeout for this specific command (in ms) */
+  /** Monotonic timestamp when the command was queued */
+  queuedAtMonotonic: number;
+  /** Absolute timestamp after which the command must not be sent */
+  deadline: number;
+  /** Monotonic deadline that keeps the queue bounded across wall-clock changes */
+  monotonicDeadline: number;
+  /** Queue lifetime used to calculate and clamp the deadline (in ms) */
+  queueTimeout: number;
+  /** Whether this command has already contributed to expiredCount */
+  expiryRecorded: boolean;
+  /** Optional custom transport timeout for this specific command (in ms) */
   timeout?: number;
 }
 
@@ -103,7 +113,7 @@ export class CommandQueue {
    * @param command The command to queue (without queuedAt, which will be added automatically)
    * @returns Result indicating whether the command was queued successfully
    */
-  public enqueue(command: Omit<QueuedCommand, 'queuedAt'>): EnqueueResult {
+  public enqueue(command: Omit<QueuedCommand, 'queuedAt' | 'queuedAtMonotonic' | 'deadline' | 'monotonicDeadline' | 'queueTimeout' | 'expiryRecorded'>): EnqueueResult {
     // Check if queue is full
     if (this.queue.length >= this.config.maxSize) {
       this.droppedCount++;
@@ -121,10 +131,17 @@ export class CommandQueue {
       };
     }
 
+    const queuedAt = Date.now();
+    const queuedAtMonotonic = performance.now();
+    const queueTimeout = command.timeout ?? this.config.defaultTimeout;
     const queuedCommand: QueuedCommand = {
       ...command,
-      queuedAt: Date.now(),
-      timeout: command.timeout ?? this.config.defaultTimeout
+      queuedAt,
+      queuedAtMonotonic,
+      deadline: queuedAt + queueTimeout,
+      monotonicDeadline: queuedAtMonotonic + queueTimeout,
+      queueTimeout,
+      expiryRecorded: false
     };
 
     this.queue.push(queuedCommand);
@@ -217,22 +234,7 @@ export class CommandQueue {
     const initialSize = this.queue.length;
 
     this.queue = this.queue.filter(command => {
-      const timeout = command.timeout ?? this.config.defaultTimeout;
-      const isExpired = (now - command.queuedAt) > timeout;
-
-      if (isExpired) {
-        this.expiredCount++;
-        this.logger.debug(`Command ${command.id} (${command.request.method}) expired after ${timeout}ms`);
-
-        command.reject(new McpUnityError(
-          ErrorType.TIMEOUT,
-          `Command expired after ${timeout}ms in queue`
-        ));
-
-        return false;
-      }
-
-      return true;
+      return !this.rejectIfExpired(command, now);
     });
 
     const expiredCount = initialSize - this.queue.length;
@@ -241,6 +243,61 @@ export class CommandQueue {
     }
 
     return expiredCount;
+  }
+
+  /**
+   * Return the queue lifetime left for a drained command.
+   */
+  public getRemainingTimeout(
+    command: QueuedCommand,
+    now: number = Date.now(),
+    monotonicNow: number = performance.now()
+  ): number {
+    const wallClockRemaining = Math.max(0, command.deadline - now);
+    const monotonicRemaining = Math.max(0, command.monotonicDeadline - monotonicNow);
+
+    // Date.now() is checked freshly at send time as part of the persisted
+    // deadline contract. The monotonic deadline prevents a backward clock
+    // correction from extending the actual queue lifetime. Every difference
+    // is clamped to the original queue window.
+    return Math.min(command.queueTimeout, wallClockRemaining, monotonicRemaining);
+  }
+
+  /**
+   * Record and return a timeout error when a command's queue window elapsed.
+   * This is separate from transport timeout handling: the queue deadline only
+   * decides whether the command may be sent.
+   */
+  public getExpirationError(
+    command: QueuedCommand,
+    now: number = Date.now()
+  ): McpUnityError | null {
+    if (this.getRemainingTimeout(command, now) > 0) {
+      return null;
+    }
+
+    if (!command.expiryRecorded) {
+      command.expiryRecorded = true;
+      this.expiredCount++;
+      this.logger.debug(`Command ${command.id} (${command.request.method}) expired after ${command.queueTimeout}ms`);
+    }
+    return new McpUnityError(
+      ErrorType.TIMEOUT,
+      `Command expired after ${command.queueTimeout}ms in queue`
+    );
+  }
+
+  /**
+   * Reject a command whose absolute queue deadline has elapsed.
+   */
+  public rejectIfExpired(command: QueuedCommand, now: number = Date.now()): boolean {
+    const error = this.getExpirationError(command, now);
+    if (!error) {
+      return false;
+    }
+
+    command.reject(error);
+    return true;
   }
 
   /**

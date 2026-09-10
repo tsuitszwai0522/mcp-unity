@@ -83,17 +83,11 @@ export async function registerDynamicTools(
 
     if (registered > 0) {
       logger.info(`Total external tools registered: ${registered}`);
-      try {
-        await server.server.sendToolListChanged();
-      } catch {
-        // sendToolListChanged may not be supported by all MCP SDK versions
-        logger.debug('sendToolListChanged not available or failed');
-      }
     }
 
     return registered;
   } catch (error) {
     logger.error('Failed to query external tools from Unity', error);
-    return 0;
+    throw error;
   }
 }

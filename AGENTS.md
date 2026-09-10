@@ -50,7 +50,7 @@ The Unity settings file is the shared contract:
 - **Path**: `ProjectSettings/McpUnitySettings.json`
 - **Fields**
   - **Port** (default **8090**): Unity WebSocket server port.
-  - **RequestTimeoutSeconds** (default **10**): Node request timeout (Node reads this if the settings file is discoverable).
+  - **RequestTimeoutSeconds** (default **60**, minimum **10**): Node request timeout (Node reads this if the settings file is discoverable).
   - **AllowRemoteConnections** (default **false**): Unity binds to `0.0.0.0` when enabled; otherwise `localhost`.
   - **EnableInfoLogs**: Unity console logging verbosity.
   - **NpmExecutablePath**: optional npm path for Unity-driven install/build.
@@ -58,7 +58,7 @@ The Unity settings file is the shared contract:
 Node reads config from `../ProjectSettings/McpUnitySettings.json` relative to **its current working directory**. If not found, Node falls back to:
 - **host**: `localhost`
 - **port**: `8090`
-- **timeout**: `10s`
+- **timeout**: `60s`
 
 **Remote connection note**:
 - If Unity is on another machine, set `AllowRemoteConnections=true` in Unity and set `UNITY_HOST=<unity_machine_ip_or_hostname>` for the Node process.
@@ -101,8 +101,9 @@ Node reads config from `../ProjectSettings/McpUnitySettings.json` relative to **
 
 - **Node**
   - Logging is controlled by env vars:
-    - `LOGGING=true` enables console logging.
-    - `LOGGING_FILE=true` writes `log.txt` in the Node process working directory.
+    - `LOGGING=true` enables stderr logging.
+    - `LOGGING_FILE=true` writes `mcp-unity-server.log` in the OS temp directory by default.
+    - `MCP_UNITY_LOG_FILE` selects an absolute path, or a path relative to the OS temp directory; parent directories are created automatically.
 
 ### Common pitfalls
 - **Port mismatch**: Unity default is **8090**; update docs/config if you change it.

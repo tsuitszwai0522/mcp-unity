@@ -189,13 +189,14 @@ Same pattern as tools:
 
 **McpUnitySettings.json** fields:
 - `Port` (default 8090): Unity WebSocket server port
-- `RequestTimeoutSeconds` (default 10): Node request timeout
+- `RequestTimeoutSeconds` (default 60, minimum 10): Node request timeout
 - `AllowRemoteConnections` (default false): Bind to 0.0.0.0 when true
 
 **Environment variables** (Node side):
 - `UNITY_HOST`: Override Unity host (for remote connections)
-- `LOGGING=true`: Enable console logging
-- `LOGGING_FILE=true`: Write logs to log.txt
+- `LOGGING=true`: Enable stderr logging
+- `LOGGING_FILE=true`: Write logs to `mcp-unity-server.log` in the OS temp directory
+- `MCP_UNITY_LOG_FILE`: Select an absolute log path, or one relative to the OS temp directory; parent directories are created automatically
 
 ## Debugging
 

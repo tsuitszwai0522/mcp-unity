@@ -89,6 +89,7 @@ namespace McpUnity.Tools {
         private readonly List<CompilationRequest> _pendingRequests = new List<CompilationRequest>();
         private readonly List<CompilerMessage> _compilationLogs = new List<CompilerMessage>();
         private int _processedAssemblies = 0;
+        private bool _isTrackingCompilation;
 
         // Test seams follow the same private static delegate pattern used by MenuItemTool.
         private static Action _refreshAssets = AssetDatabase.Refresh;
@@ -167,7 +168,19 @@ namespace McpUnity.Tools {
             if (_isCompiling() == false)
             {
                 McpLogger.LogInfo("Recompiling all scripts in the Unity project");
-                _requestScriptCompilation();
+                try
+                {
+                    _requestScriptCompilation();
+                }
+                catch
+                {
+                    StopCompilationTracking();
+                    lock (_pendingRequests)
+                    {
+                        _pendingRequests.Remove(request);
+                    }
+                    throw;
+                }
             }
         }
 
@@ -176,10 +189,16 @@ namespace McpUnity.Tools {
         /// </summary>
         private void StartCompilationTracking()
         {
+            if (_isTrackingCompilation)
+            {
+                return;
+            }
+
             _compilationLogs.Clear();
             _processedAssemblies = 0;
             CompilationPipeline.assemblyCompilationFinished += OnAssemblyCompilationFinished;
             CompilationPipeline.compilationFinished += OnCompilationFinished;
+            _isTrackingCompilation = true;
         }
         
         /// <summary>
@@ -187,8 +206,14 @@ namespace McpUnity.Tools {
         /// </summary>
         private void StopCompilationTracking()
         {
+            if (!_isTrackingCompilation)
+            {
+                return;
+            }
+
             CompilationPipeline.assemblyCompilationFinished -= OnAssemblyCompilationFinished;
             CompilationPipeline.compilationFinished -= OnCompilationFinished;
+            _isTrackingCompilation = false;
         }
 
         /// <summary>

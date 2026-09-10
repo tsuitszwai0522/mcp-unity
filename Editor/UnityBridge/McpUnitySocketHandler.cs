@@ -102,25 +102,35 @@ namespace McpUnity.Unity
         /// </summary>
         protected override async void OnMessage(MessageEventArgs e)
         {
+            await ProcessMessageAsync(e.Data, Send);
+        }
+
+        /// <summary>
+        /// Process one wire message. The send delegate keeps the real OnMessage
+        /// catch path directly testable without opening a WebSocket session.
+        /// </summary>
+        internal async Task ProcessMessageAsync(string data, Action<string> send)
+        {
+            string requestId = null;
             try
             {
-                McpLogger.LogInfo($"WebSocket message received: {e.Data}");
+                McpLogger.LogInfo($"WebSocket message received: {data}");
                 JObject requestJson;
                 try
                 {
-                    requestJson = JObject.Parse(e.Data);
+                    requestJson = JObject.Parse(data);
                 }
                 catch (JsonReaderException jre)
                 {
-                    McpLogger.LogError($"Invalid JSON received: {jre.Message}. Data: {e.Data}");
+                    McpLogger.LogError($"Invalid JSON received: {jre.Message}. Data: {data}");
                     // Attempt to send a parse error response. No requestId is available yet.
-                    Send(CreateResponse(null, CreateErrorResponse($"Invalid JSON format: {jre.Message}", "invalid_json")).ToString(Formatting.None));
+                    send(CreateResponse(null, CreateErrorResponse($"Invalid JSON format: {jre.Message}", "invalid_json")).ToString(Formatting.None));
                     return;
                 }
 
                 var method = requestJson["method"]?.ToString();
                 var parameters = requestJson["params"] as JObject ?? new JObject();
-                var requestId = requestJson["id"]?.ToString();
+                requestId = requestJson["id"]?.ToString();
 
                 // Track for OnError diagnostics. Cleared on the next OnMessage / OnClose.
                 _lastMethod = method;
@@ -164,14 +174,23 @@ namespace McpUnity.Unity
                 _lastSendAttempted = true;
 
                 // Send the response back to the client
-                Send(responseStr);
+                send(responseStr);
             }
             catch (Exception ex)
             {
                 McpLogger.LogError($"Error processing message: {ex.Message}");
-                
-                Send(CreateErrorResponse($"Internal server error: {ex.Message}", "internal_error").ToString(Formatting.None));
+
+                send(CreateInternalErrorResponse(requestId, ex).ToString(Formatting.None));
             }
+        }
+
+        internal static JObject CreateInternalErrorResponse(string requestId, Exception exception)
+        {
+            return CreateResponse(
+                requestId,
+                CreateErrorResponse(
+                    $"Internal server error: {exception.Message}",
+                    "internal_error"));
         }
         
         /// <summary>
@@ -320,10 +339,14 @@ namespace McpUnity.Unity
             catch (Exception ex)
             {
                 McpLogger.LogError($"Error executing tool {tool.Name}: {ex.Message}\n{ex.StackTrace}");
-                tcs.SetResult(CreateErrorResponse(
+                bool completed = tcs.TrySetResult(CreateErrorResponse(
                     $"Failed to execute tool {tool.Name}: {ex.Message}",
                     "tool_execution_error"
                 ));
+                if (!completed)
+                {
+                    McpLogger.LogWarning($"Ignored late tool failure completion for {tool.Name}");
+                }
             }
             
             yield return null;
@@ -349,10 +372,14 @@ namespace McpUnity.Unity
             catch (Exception ex)
             {
                 McpLogger.LogError($"Error fetching resource {resource.Name}: {ex.Message}\n{ex.StackTrace}");
-                tcs.SetResult(CreateErrorResponse(
+                bool completed = tcs.TrySetResult(CreateErrorResponse(
                     $"Failed to fetch resource {resource.Name}: {ex.Message}",
                     "resource_fetch_error"
                 ));
+                if (!completed)
+                {
+                    McpLogger.LogWarning($"Ignored late resource failure completion for {resource.Name}");
+                }
             }
             yield return null;
         }
@@ -363,7 +390,7 @@ namespace McpUnity.Unity
         /// <param name="requestId">Request ID</param>
         /// <param name="result">Result object</param>
         /// <returns>JSON-RPC 2.0 response</returns>
-        private JObject CreateResponse(string requestId, JObject result)
+        private static JObject CreateResponse(string requestId, JObject result)
         {
             // Format as JSON-RPC 2.0 response
             JObject jsonRpcResponse = new JObject
