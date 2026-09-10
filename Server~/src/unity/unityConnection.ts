@@ -581,6 +581,10 @@ export class UnityConnection extends EventEmitter {
     socket.onclose = null;
     socket.removeAllListeners('pong');
 
+    // ws defers an 'error' event when terminate() aborts a CONNECTING handshake.
+    // Keep a teardown-only listener so that next-tick event cannot crash Node.
+    socket.on('error', () => {});
+
     activeAttempt?.reject(new McpUnityError(
       ErrorType.CONNECTION,
       reason || 'Connection closed'

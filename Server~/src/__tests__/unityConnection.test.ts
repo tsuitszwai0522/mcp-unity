@@ -1,4 +1,5 @@
 import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
+import { EventEmitter } from 'events';
 
 // Mock WebSocket before importing modules that use it
 const mockWebSocketInstances: any[] = [];
@@ -250,6 +251,65 @@ describe('Connection timeout handling', () => {
     expect(mockWebSocketConstructor).toHaveBeenCalledTimes(1);
     expect(connection.connectionState).toBe(ConnectionState.Reconnecting);
 
+    connection.disconnect();
+  });
+
+  it('absorbs a deferred error when timing out a connecting socket', async () => {
+    const emitter = new EventEmitter();
+    let scheduleDeferredError!: () => void;
+    const deferredError = new Promise<void>((resolve, reject) => {
+      scheduleDeferredError = () => {
+        process.nextTick(() => {
+          try {
+            emitter.emit('error', new Error('WebSocket was closed before the connection was established'));
+            resolve();
+          } catch (error) {
+            reject(error);
+          }
+        });
+      };
+    });
+    const deferredErrorResult = expect(deferredError).resolves.toBeUndefined();
+    let socket: any;
+    socket = createMockWebSocket({
+      readyState: mockWebSocketModule.CONNECTING,
+      on: jest.fn((event: string, listener: (...args: any[]) => void) => {
+        emitter.on(event, listener);
+        return socket;
+      }),
+      removeAllListeners: jest.fn((event: string) => {
+        emitter.removeAllListeners(event);
+        return socket;
+      }),
+      terminate: jest.fn(() => {
+        scheduleDeferredError();
+      })
+    });
+    mockWebSocketConstructor.mockImplementationOnce(() => {
+      mockWebSocketInstances.push(socket);
+      return socket;
+    });
+    const testLogger = createTestLogger();
+    const connection = new UnityConnection(testLogger, {
+      host: 'localhost',
+      port: 8090,
+      requestTimeout: 60000,
+      connectTimeout: 250,
+      minReconnectDelay: 100,
+      maxReconnectDelay: 1000,
+      heartbeatInterval: 0
+    });
+
+    const connectResult = expect(connection.connect()).rejects.toMatchObject({
+      type: ErrorType.CONNECTION,
+      message: 'Connection timeout'
+    });
+    await jest.advanceTimersByTimeAsync(250);
+    jest.runAllTicks();
+
+    await connectResult;
+    expect(socket.terminate).toHaveBeenCalledTimes(1);
+    await deferredErrorResult;
     connection.disconnect();
   });
 

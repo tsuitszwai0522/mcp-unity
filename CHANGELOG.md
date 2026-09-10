@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Fixed
+
+- Terminating a WebSocket while its opening handshake is still in progress now retains a teardown-only
+  error listener, preventing ws's deferred handshake-abort error from reaching `uncaughtException` and
+  terminating the Node server.
+
+## [fork-1.19.0] - 2026-09-10
+
 ### Changed — BREAKING
 
 - Each newly created Unity WebSocket attempt now rejects its own `connect()` promise on that
