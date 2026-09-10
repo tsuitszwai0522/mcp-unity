@@ -1,10 +1,13 @@
 # MCP Unity Editor（游戏引擎）
 
+> 本仓库是 [CoderGamester/mcp-unity](https://github.com/CoderGamester/mcp-unity) 的 fork，独立维护。
+> 原作 © 2024-2025 CoderGamester，MIT 授权。
+
 [![](https://badge.mcpx.dev?status=on 'MCP Enabled')](https://modelcontextprotocol.io/introduction)
 [![](https://img.shields.io/badge/Unity-000000?style=flat&logo=unity&logoColor=white 'Unity')](https://unity.com/releases/editor/archive)
 [![](https://img.shields.io/badge/Node.js-339933?style=flat&logo=nodedotjs&logoColor=white 'Node.js')](https://nodejs.org/en/download/)
-[![](https://img.shields.io/github/stars/CoderGamester/mcp-unity 'Stars')](https://github.com/CoderGamester/mcp-unity/stargazers)
-[![](https://img.shields.io/github/last-commit/CoderGamester/mcp-unity 'Last Commit')](https://github.com/CoderGamester/mcp-unity/commits/main)
+[![](https://img.shields.io/github/stars/tsuitszwai0522/mcp-unity 'Stars')](https://github.com/tsuitszwai0522/mcp-unity/stargazers)
+[![](https://img.shields.io/github/last-commit/tsuitszwai0522/mcp-unity 'Last Commit')](https://github.com/tsuitszwai0522/mcp-unity/commits/main)
 [![](https://img.shields.io/badge/License-MIT-red.svg 'MIT License')](https://opensource.org/licenses/MIT)
 
 | [🇺🇸英文](README.md) | [🇨🇳简体中文](README_zh-CN.md) | [🇯🇵日本語](README-ja.md) |
@@ -300,7 +303,7 @@ MCP Unity 通过将 Unity `Library/PackedCache` 文件夹添加到您的工作�
 1. 打开 Unity 包管理器 (Window > Package Manager)
 2. 点击左上角的 "+" 按钮
 3. 选择 "Add package from git URL..."
-4. 输入: `https://github.com/CoderGamester/mcp-unity.git`
+4. 输入: `https://github.com/tsuitszwai0522/mcp-unity.git`
 5. 点击 "Add"
 
 ![package manager](https://github.com/user-attachments/assets/a72bfca4-ae52-48e7-a876-e99c701b0497)
@@ -619,10 +622,9 @@ wscat -c ws://$UNITY_HOST:8090/McpUnity
 
 ## 支持与反馈
 
-如有问题或需要支持，请在本仓库提交 [issue](https://github.com/CoderGamester/mcp-unity/issues)，或通过以下方式联系：
-- Linkedin: [![](https://img.shields.io/badge/LinkedIn-0077B5?style=flat&logo=linkedin&logoColor=white 'LinkedIn')](https://www.linkedin.com/in/miguel-tomas/)
-- Discord: gamester7178
-- Email: game.gamester@gmail.com
+如有问题或需要支持，请在本仓库提交 [issue](https://github.com/tsuitszwai0522/mcp-unity/issues)。
+
+关于原始上游项目的问题，请改用[它自己的 issue tracker](https://github.com/CoderGamester/mcp-unity/issues)。
 
 ## 贡献
 

@@ -507,7 +507,7 @@ namespace McpUnity.Unity
             
             EditorGUILayout.BeginVertical(_boxStyle);
             
-            WrappedLabel("Created by CoderGamester", EditorStyles.boldLabel);
+            WrappedLabel("Created by CoderGamester · fork maintained by tsuitszwai0522", EditorStyles.boldLabel);
             EditorGUILayout.Space();
             
             WrappedLabel("For issues, feedback, or contributions, please visit:");
@@ -515,14 +515,14 @@ namespace McpUnity.Unity
             // Begin horizontal layout for buttons
             EditorGUILayout.BeginHorizontal();
             
-            if (GUILayout.Button("GitHub: https://github.com/CoderGamester", GUILayout.Height(30)))
+            if (GUILayout.Button("This fork: github.com/tsuitszwai0522/mcp-unity", GUILayout.Height(30)))
             {
-                Application.OpenURL("https://github.com/CoderGamester");
+                Application.OpenURL("https://github.com/tsuitszwai0522/mcp-unity");
             }
             
-            if (GUILayout.Button("LinkedIn: Miguel Tomás", GUILayout.Height(30)))
+            if (GUILayout.Button("Upstream: github.com/CoderGamester/mcp-unity", GUILayout.Height(30)))
             {
-                Application.OpenURL("https://www.linkedin.com/in/miguel-tomas/");
+                Application.OpenURL("https://github.com/CoderGamester/mcp-unity");
             }
             
             // End horizontal layout

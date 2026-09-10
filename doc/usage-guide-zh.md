@@ -47,7 +47,7 @@ npm --version
 3. 選擇 **Add package from git URL...**
 4. 輸入：
    ```
-   https://github.com/CoderGamester/mcp-unity.git
+   https://github.com/tsuitszwai0522/mcp-unity.git
    ```
 5. 點擊 **Add**
 
