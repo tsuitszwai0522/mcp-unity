@@ -115,4 +115,23 @@ describe('read_serialized_fields recursive depth contract', () => {
     expect(payload.message).toBe(summary);
     expect(payload._droppedKeys).toEqual(expect.arrayContaining(['fields', 'arrayMetadata']));
   });
+  it('preserves full selected paths and missing values in readable and structured payloads', async () => {
+    const fields = {
+      'left.target': { instanceId: 11 },
+      'right.target': { instanceId: 22 },
+      'refs.Array.data[0]': { instanceId: 11 },
+      'refs.Array.data[1]': { instanceId: 22 },
+      'refs.Array.size': 2,
+      'left.absent': null,
+    };
+    sendRequest.mockResolvedValue({ success: true, message: 'Read 6 fields', fields } as never);
+    const [, description, , handler] = registration();
+    const fieldNames = Object.keys(fields);
+    const result = await handler({ instanceId: 1, componentName: 'Probe', fieldNames });
+    expect((sendRequest.mock.calls[0] as any)[0].params.fieldNames).toEqual(fieldNames);
+    expect(JSON.parse(result.content[1].text).fields).toEqual(fields);
+    for (const path of fieldNames) expect(result.content[0].text).toContain(`"${path}"`);
+    expect(description).toContain('canonical propertyPath');
+  });
+
 });

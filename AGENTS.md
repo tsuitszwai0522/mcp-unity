@@ -205,3 +205,6 @@ Node reads config from `../ProjectSettings/McpUnitySettings.json` relative to **
   - config shape or default ports/paths change,
   - the bridge protocol changes (request/response contract).
 - Keep it **high-signal**: where to edit code, how to run/build/debug, and the invariants that prevent subtle breakage.
+
+### Serialized reader response contract
+- `read_serialized_fields` selected fields use canonical `SerializedProperty.propertyPath` keys, including nested and array element/size paths. Missing fields preserve the requested key with null. Aliases resolve to canonical keys; whole-object reads retain recursive child shapes. Do not use leaf-only keys for selected nested fields.

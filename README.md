@@ -230,7 +230,7 @@ published under the MCP run's `runId`.
 - `set_sibling_index`: Sets the sibling index (render order) of a GameObject within its parent, useful for controlling UI element layering
   > **Example prompt:** "Move the StartButton to the first position among its siblings"
 
-- `read_serialized_fields`: Reads serialized fields from a component using Unity's SerializedProperty API. Accepts both serialized names (`m_Color`) and property names (`color`)
+- `read_serialized_fields`: Reads serialized fields from a component using Unity's SerializedProperty API. Accepts both serialized names (`m_Color`) and property names (`color`). Selected results use canonical property paths as keys, including nested fields and `Array.data[index]` / `Array.size`; missing paths keep their requested key with `null`. Nested selections previously returned leaf keys; consumers must now read the full path
   > **Example prompt:** "Read the color and raycastTarget fields from the Image component on MyButton"
 
 - `write_serialized_fields`: Writes serialized fields on a component using Unity's SerializedProperty API. Best for Unity built-in component fields (`m_Color`, `m_Sprite`, etc.)

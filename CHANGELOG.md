@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [fork-1.19.2] - 2026-09-11
+
+### Fixed
+
+- Selected serialized fields now use canonical `SerializedProperty.propertyPath` keys, preventing
+  nested fields, array elements and array sizes with the same leaf name from overwriting each other.
+- Added six Unity reader regression cases and a Node response-forwarding regression test.
+
+### Compatibility
+
+- Callers reading selected nested fields must use full path keys instead of leaf-only keys.
+  Unresolved fields retain their requested key with null; aliases resolve to canonical keys.
+  Whole-object recursive responses retain their existing shape.
+
+## [fork-1.19.1] - 2026-09-10
+
 ### Fixed
 
 - Terminating a WebSocket while its opening handshake is still in progress now retains a teardown-only

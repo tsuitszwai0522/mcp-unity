@@ -14,7 +14,7 @@ const readToolName = 'read_serialized_fields';
 const readToolDescription = `Reads serialized fields from a component using Unity's SerializedProperty API.
 More reliable than get_gameobject for reading specific component fields.
 Accepts both serialized names (m_Color, m_Sprite) and property names (color, sprite).
-If fieldNames is omitted, returns all visible serialized fields.
+Requested fields are keyed by canonical propertyPath, including nested fields and Array.data[index]/Array.size. Unresolved fields keep the requested key with null. If fieldNames is omitted, returns all visible serialized fields.
 Ambiguous short or partial component names require exactly one exact candidate type on the target; otherwise use a fully-qualified name.
 For enums, value is the underlying enum value and index is the enumValueIndex.
 Generic fields and arrays are expanded recursively. maxDepth defaults to 8 and can only be lowered (0-8); depth-truncated branches are reported in arrayMetadata or with an explicit _truncated marker.

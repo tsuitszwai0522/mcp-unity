@@ -27,7 +27,8 @@ namespace McpUnity.Tools
             Name = "read_serialized_fields";
             Description = "Reads serialized fields from a component using Unity's SerializedProperty API. " +
                 "Supports both serialized names (m_Color) and property names (color). Returns field names, " +
-                "types, and current values. For enums, 'value' is the underlying enum value and 'index' " +
+                "types, and current values. Requested fields are keyed by canonical propertyPath (including nested and array paths); " +
+                "unresolved fields retain the requested key with null. For enums, 'value' is the underlying enum value and 'index' " +
                 "is the enumValueIndex. Generic fields and arrays are expanded recursively up to maxDepth " +
                 $"(default {DefaultMaxDepth}, range 0-{MaximumMaxDepth}); lower maxDepth to reduce payload size. " +
                 $"maxElements is one global returned-element budget across all arrays (default {DefaultMaxElements}, " +
@@ -111,7 +112,7 @@ namespace McpUnity.Tools
                     SerializedProperty prop = SerializedPropertyHelper.FindProperty(serializedObject, fieldName);
                     if (prop != null)
                     {
-                        fields[prop.name] = SerializeProperty(
+                        fields[prop.propertyPath] = SerializeProperty(
                             prop,
                             0,
                             maxDepth,
