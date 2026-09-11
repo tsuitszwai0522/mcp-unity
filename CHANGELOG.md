@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [fork-1.19.3] - 2026-09-11
+
+### Fixed
+
+- Reject writes touching missing object references before staging, preserving unresolved GUID/fileID
+  data, including explicit null clears and affected array resizes.
+- Preserve conflicting current references during rollback and report conflicts instead of overwriting
+  another writer's different value. Legacy missing snapshots now disclose that identity was not restored.
+
+### Compatibility
+
+- Missing references must be repaired explicitly in the Editor before retrying. Composite reflection
+  assignments reject missing references anywhere in the assigned subtree; use serialized child paths
+  for unrelated edits.
+- Rollback compares values, not writer ownership: ABA and same-value rewrites are not protected.
+  Non-reference values, array shape and other successful fields remain nontransactional.
+
+### Validation
+
+- Verified fix: 11 owned prefab scenarios, 49 Unity writer regressions and 13 related Node tests.
+  This release changes version metadata and release notes only after the verified fix commit.
+
 ## [fork-1.19.2] - 2026-09-11
 
 ### Fixed
