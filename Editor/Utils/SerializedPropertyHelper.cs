@@ -153,6 +153,11 @@ namespace McpUnity.Utils
             out List<ObjectReferenceWriteRecord> objectReferenceWrites)
         {
             var context = new ObjectReferenceWriteContext();
+            objectReferenceWrites = context.Writes;
+            if (!ValidateMissingReferenceWrites(prop, value, warnings))
+            {
+                return false;
+            }
             bool success = SetValueInternal(prop, value, warnings, fieldName, context);
             objectReferenceWrites = context.Writes;
             if (success)
@@ -164,6 +169,79 @@ namespace McpUnity.Utils
                 }
             }
             return success;
+        }
+
+        /// <summary>
+        /// 在任何stage前拒絕會覆蓋或移除missing身份的操作；partial object只檢查提供的keys。
+        /// 顯式null亦拒絕，因為caller可能只是重播有資訊損失的reader null。
+        /// </summary>
+        internal static bool ValidateMissingReferenceWrites(
+            SerializedProperty prop, JToken value, List<string> warnings)
+        {
+            if (prop == null) return true;
+            if (prop.propertyType == SerializedPropertyType.ObjectReference)
+                return RejectMissingReference(prop, warnings);
+            if (prop.propertyType == SerializedPropertyType.ArraySize)
+            {
+                const string suffix = ".Array.size";
+                if (value?.Type == JTokenType.Integer
+                    && value.Value<long>() != prop.intValue
+                    && prop.propertyPath.EndsWith(suffix, StringComparison.Ordinal))
+                {
+                    string parentPath = prop.propertyPath.Substring(0, prop.propertyPath.Length - suffix.Length);
+                    return RejectMissingInSubtree(prop.serializedObject.FindProperty(parentPath), warnings);
+                }
+                return true;
+            }
+            if (prop.propertyType != SerializedPropertyType.Generic) return true;
+            // Reflection入口可清空整個class／array；亦須保護其內的missing引用。
+            if (value == null || value.Type == JTokenType.Null)
+                return RejectMissingInSubtree(prop, warnings);
+            if (prop.isArray && value is JArray array)
+            {
+                // 改變形狀可能刪除missing或複製最後的missing元素；一律在resize前拒絕。
+                if (array.Count != prop.arraySize && !RejectMissingInSubtree(prop, warnings))
+                    return false;
+                for (int i = 0; i < Math.Min(array.Count, prop.arraySize); i++)
+                    if (!ValidateMissingReferenceWrites(prop.GetArrayElementAtIndex(i), array[i], warnings))
+                        return false;
+            }
+            else if (!prop.isArray && value is JObject fields)
+            {
+                foreach (JProperty field in fields.Properties())
+                    if (!ValidateMissingReferenceWrites(prop.FindPropertyRelative(field.Name), field.Value, warnings))
+                        return false;
+            }
+            return true;
+        }
+
+        private static bool RejectMissingReference(SerializedProperty prop, List<string> warnings)
+        {
+            if (prop.objectReferenceValue != null || prop.objectReferenceInstanceIDValue == 0)
+                return true;
+            warnings?.Add($"missing_reference_write_blocked: '{prop.propertyPath}' has an unresolved " +
+                "reference; this field was not staged because its original GUID/fileID cannot be " +
+                "restored safely. Repair the reference explicitly in the Editor before retrying.");
+            return false;
+        }
+
+        private static bool RejectMissingInSubtree(SerializedProperty prop, List<string> warnings)
+        {
+            if (prop == null) return true;
+            if (prop.propertyType == SerializedPropertyType.ObjectReference)
+                return RejectMissingReference(prop, warnings);
+            if (prop.propertyType != SerializedPropertyType.Generic) return true;
+            if (prop.isArray)
+            {
+                for (int i = 0; i < prop.arraySize; i++)
+                    if (!RejectMissingInSubtree(prop.GetArrayElementAtIndex(i), warnings)) return false;
+            }
+            else
+            {
+                foreach (SerializedProperty child in GetDirectChildren(prop))
+                    if (!RejectMissingInSubtree(child, warnings)) return false;
+            }
+            return true;
         }
 
         private static bool SetValueInternal(
@@ -988,8 +1066,8 @@ namespace McpUnity.Utils
 
         /// <summary>
         /// Verify every object-reference write for one applied field. If any path fails read-back,
-        /// restores every safe collected object reference in one no-undo rollback apply, skips
-        /// missing-reference previous values, and verifies restored identities from a fresh read.
+        /// restores only references still matching this write in one no-undo rollback apply, skips
+        /// missing originals and conflicting current values, and verifies restored identities.
         /// </summary>
         internal static bool VerifyObjectReferenceWrites(
             UnityEngine.Object target,
@@ -1020,9 +1098,7 @@ namespace McpUnity.Utils
 
                 UnityEngine.Object readBackValue = readBackProperty.objectReferenceValue;
                 int readBackInstanceId = readBackProperty.objectReferenceInstanceIDValue;
-                bool matches = record.Write.IsIntentionalClear
-                    ? readBackValue == null && readBackInstanceId == 0
-                    : readBackValue == record.Write.AttemptedValue;
+                bool matches = MatchesAttemptedObjectReference(readBackProperty, record.Write);
                 if (matches)
                 {
                     continue;
@@ -1047,6 +1123,7 @@ namespace McpUnity.Utils
             var rollbackCandidates = new HashSet<string>(StringComparer.Ordinal);
             var restoredPaths = new HashSet<string>(alreadyRestoredPaths, StringComparer.Ordinal);
             var skippedMissingReferencePaths = new HashSet<string>(StringComparer.Ordinal);
+            var conflictPaths = new HashSet<string>(StringComparer.Ordinal);
             foreach (ObjectReferenceWriteRecord record in objectReferenceWrites)
             {
                 if (alreadyRestoredPaths.Contains(record.PropertyPath))
@@ -1063,6 +1140,13 @@ namespace McpUnity.Utils
                 if (record.Write.PreviousValue == null && record.Write.PreviousInstanceId != 0)
                 {
                     skippedMissingReferencePaths.Add(record.PropertyPath);
+                    continue;
+                }
+                // 不能分辨未知值來自Unity拒收、OnValidate或另一writer；保留並明確回報。
+                // 這是當前值比較，不是ownership鎖，不能偵測ABA／相同值重寫。
+                if (!MatchesAttemptedObjectReference(rollbackProperty, record.Write))
+                {
+                    conflictPaths.Add(record.PropertyPath);
                     continue;
                 }
                 try
@@ -1139,6 +1223,7 @@ namespace McpUnity.Utils
             var disclosures = new List<string>();
             if (restoredPaths.SetEquals(allPaths)
                 && skippedMissingReferencePaths.Count == 0
+                && conflictPaths.Count == 0
                 && rollbackFailures.Count == 0)
             {
                 disclosures.Add(
@@ -1149,6 +1234,8 @@ namespace McpUnity.Utils
             disclosures.Add(
                 "skipped (missing-reference previous): [" +
                 FormatSkippedMissingReferencePaths(skippedMissingReferencePaths) + "]");
+            disclosures.Add(
+                $"rollback conflicts (current reference preserved): [{FormatPaths(conflictPaths)}]");
             disclosures.Add(
                 $"rollback failures: [{FormatList(rollbackFailures)}]");
             if (arraySizeChanges.Count > 0)
@@ -1165,6 +1252,15 @@ namespace McpUnity.Utils
             failureReason = string.Join("; ", verificationFailures.ToArray()) + "; " +
                 string.Join("; ", disclosures.ToArray()) + ".";
             return false;
+        }
+
+        private static bool MatchesAttemptedObjectReference(
+            SerializedProperty prop, ObjectReferenceWrite write)
+        {
+            if (write.IsIntentionalClear)
+                return prop.objectReferenceValue == null && prop.objectReferenceInstanceIDValue == 0;
+            // 不把destroyed attempted物件的Unity fake-null誤認成另一個clear。
+            return write.AttemptedValue != null && prop.objectReferenceValue == write.AttemptedValue;
         }
 
         private static bool MatchesPreviousObjectReference(
@@ -1201,8 +1297,8 @@ namespace McpUnity.Utils
             foreach (string path in paths)
             {
                 formatted.Add(
-                    $"'{path}' — its previous value was a missing reference; the newly written value " +
-                    "was retained to avoid destroying the missing-reference GUID");
+                    $"'{path}' — its previous value was a missing reference; rollback left the current " +
+                    "value untouched. The original GUID/fileID was not restored and may already be lost");
             }
             formatted.Sort(StringComparer.Ordinal);
             return formatted.Count == 0 ? "none" : string.Join(", ", formatted);
@@ -1220,8 +1316,8 @@ namespace McpUnity.Utils
             string resolvedType = objectReferenceWrite.AttemptedValue != null
                 ? objectReferenceWrite.AttemptedValue.GetType().Name
                 : "null";
-            return $"Resolved object type {resolvedType} is not assignable to field " +
-                $"'{propertyPath}' (object-reference read-back did not retain the assigned identity)";
+            return $"Object reference field '{propertyPath}' failed verification for attempted type " +
+                $"{resolvedType} (object-reference read-back did not retain the assigned identity)";
         }
 
         private static bool TryConvertUnityStructValue(

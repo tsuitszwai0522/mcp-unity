@@ -48,9 +48,10 @@ describe('serialized field tool descriptions', () => {
     expect(description).toContain('Direct Array.size writes');
     expect(description).toContain('0 through 10000');
     expect(description).toContain("check arrayMetadata before writing it back");
-    expect(description).toContain('collected reference writes are restored where safe');
-    expect(description).toContain('non-reference children and array-size changes remain applied');
-    expect(description).toContain('missing-reference previous value is never restored by writing null');
+    expect(description).toContain('rollback preserves and reports conflicting current references');
+    expect(description).toContain('Non-reference children and array-size changes may remain applied');
+    expect(description).toContain('including null clears and affected array resizes');
+    expect(description).toContain('not an ownership lock or ABA protection');
     expect(description).toContain('AnimationCurve, Gradient');
     expect(description).toContain('Direct m_PersistentCalls writes');
     expect(description).toContain('prefer wire_unity_event');

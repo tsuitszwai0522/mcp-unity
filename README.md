@@ -839,3 +839,9 @@ This project is under [MIT License](LICENSE.md)
 - [Unity Technologies](https://unity.com)
 - [Node.js](https://nodejs.org)
 - [WebSocket-Sharp](https://github.com/sta/websocket-sharp)
+
+### Serialized write safety
+
+`write_serialized_fields` and resolvable serialized fields in `update_component` reject writes touching missing object references before staging (including null clears and affected array resizes). Repair such references explicitly in the Editor first. Serialized partial object writes only inspect supplied keys. update_component composite reflection assignments reject any missing reference in the entire assigned subtree, including omitted children; use a direct serialized child path for unrelated edits.
+
+On post-apply failure, reference rollback only restores a field still matching its attempted value. Different current references, including null, are preserved and reported as rollback conflicts. This cannot distinguish Unity rejection from another writer, and is not an ownership lock or ABA protection. Already-missing legacy snapshots cannot restore GUID/fileID and must not imply otherwise. Non-reference values, array shape, and other successful fields are not transactional.

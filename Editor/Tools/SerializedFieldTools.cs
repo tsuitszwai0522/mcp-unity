@@ -446,10 +446,11 @@ namespace McpUnity.Tools
                 "from type defaults, and nested objects are partial merges. Read output can be truncated " +
                 "by the element budget: check arrayMetadata before writing it back; shrink warns. Direct " +
                 $"Array.size writes accept 0-{SerializedPropertyHelper.MaxDirectArraySize}; growth warns " +
-                "and follows Unity's direct resize behavior. If object-reference read-back verification " +
-                "fails, collected reference writes are restored where safe; non-reference children and " +
-                "array-size changes remain applied, and missing-reference previous values are not written " +
-                "as null. Direct writes do not support Character, AnimationCurve, Gradient, " +
+                "and follows Unity's direct resize behavior. Writes touching missing references, including " +
+                "null clears and affected array resizes, are rejected before staging. On read-back failure, " +
+                "rollback preserves conflicting current references and reports them; it only restores values " +
+                "still matching the attempted write. This is value comparison, not an ownership lock or ABA " +
+                "protection. Non-reference children and array-size changes can remain applied. Direct writes do not support Character, AnimationCurve, Gradient, " +
                 "ExposedReference, FixedBufferSize, Vector2Int, Vector3Int, RectInt, BoundsInt, " +
                 "ManagedReference, or Hash128. Direct " +
                 "m_PersistentCalls writes warn that mode derivation is not validated and recommend " +

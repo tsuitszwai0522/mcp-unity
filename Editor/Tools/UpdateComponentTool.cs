@@ -265,6 +265,20 @@ namespace McpUnity.Tools
 
                 try
                 {
+                    // Reflection／property setter也不能繞過可辨識serialized欄位的missing保護。
+                    var serialized = new SerializedObject(component);
+                    var serializedProperty = SerializedPropertyHelper.FindProperty(serialized, fieldName);
+                    var missingWarnings = new List<string>();
+                    // Reflection會重新指派整個複合值，連未提供的child亦可能被重寫。
+                    JToken guardedValue = serializedProperty != null
+                        && serializedProperty.propertyType == SerializedPropertyType.Generic
+                        ? JValue.CreateNull() : fieldValue;
+                    if (!SerializedPropertyHelper.ValidateMissingReferenceWrites(
+                        serializedProperty, guardedValue, missingWarnings))
+                    {
+                        failedFields.Add(CreateFieldFailure(fieldName, string.Join("; ", missingWarnings)));
+                        continue;
+                    }
                     // Try to update field
                     FieldInfo fieldInfo = componentType.GetField(fieldName,
                         BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);

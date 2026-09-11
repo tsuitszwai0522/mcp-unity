@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using UnityEditor.SceneManagement;
+using UnityEngine.SceneManagement;
 using McpUnity.Tools;
 using McpUnity.Utils;
 using Newtonsoft.Json.Linq;
@@ -149,6 +151,7 @@ namespace McpUnity.Tests
         private const string CollisionPreviousPath = AssetDirectory + "/CollisionPrevious.asset";
         private const string CollisionAttemptedPath = AssetDirectory + "/CollisionAttempted.asset";
 
+        private Scene _ownedScene;
         private GameObject _gameObject;
         private SerializedPropertyWriteProbeBehaviour _probe;
         private SerializedPropertyWriteReferenceAsset _firstAsset;
@@ -195,7 +198,9 @@ namespace McpUnity.Tests
         [SetUp]
         public void SetUp()
         {
+            _ownedScene = EditorSceneManager.NewPreviewScene();
             _gameObject = new GameObject("SerializedPropertyWriteProbe");
+            SceneManager.MoveGameObjectToScene(_gameObject, _ownedScene);
             _probe = _gameObject.AddComponent<SerializedPropertyWriteProbeBehaviour>();
             _probe.References.primary = _firstAsset;
             _probe.References.secondary = _firstAsset;
@@ -212,6 +217,8 @@ namespace McpUnity.Tests
             {
                 UnityEngine.Object.DestroyImmediate(_gameObject);
             }
+            if (_ownedScene.IsValid() && _ownedScene.isLoaded)
+                EditorSceneManager.ClosePreviewScene(_ownedScene);
         }
 
         [OneTimeTearDown]
@@ -538,7 +545,9 @@ namespace McpUnity.Tests
             Assert.That(reason, Does.Contain("Shrinking array 'm_CollisionReferences'"));
             Assert.That(reason, Does.Not.Contain("Non-reference children"));
             Assert.AreEqual(1, _probe.CollisionReferences.Length);
-            Assert.AreSame(_collisionPrevious, _probe.CollisionReferences[0]);
+            // 未知null可能來自另一writer，不能以「Unity拒收」假說盲目還原。
+            Assert.IsTrue(_probe.CollisionReferences[0] == null);
+            Assert.That(reason, Does.Contain("rollback conflicts (current reference preserved)"));
         }
 
         [Test]
@@ -560,7 +569,9 @@ namespace McpUnity.Tests
             Assert.That(reason, Does.Contain("array size changes were not rolled back"));
             Assert.That(reason, Does.Contain("Shrinking array 'm_CollisionReferences'"));
             Assert.AreEqual(1, _probe.CollisionReferences.Length);
-            Assert.AreSame(_collisionPrevious, _probe.CollisionReferences[0]);
+            // 未知null可能來自另一writer，不能以「Unity拒收」假說盲目還原。
+            Assert.IsTrue(_probe.CollisionReferences[0] == null);
+            Assert.That(reason, Does.Contain("rollback conflicts (current reference preserved)"));
         }
 
         [Test]
@@ -870,7 +881,7 @@ namespace McpUnity.Tests
         }
 
         [Test]
-        public void MissingReferencePrevious_IsNotWrittenAsNullWhenSiblingVerificationFails()
+        public void LegacyMissingReferenceRecord_DisclosesIdentityNotRestored()
         {
             string missingPath = AssetDirectory + "/MissingPrevious.asset";
             string holderPath = AssetDirectory + "/MissingHolder.asset";
@@ -881,7 +892,7 @@ namespace McpUnity.Tests
             holder.References.primary = missing;
             holder.References.secondary = _firstAsset;
             AssetDatabase.CreateAsset(holder, holderPath);
-            AssetDatabase.SaveAssets();
+            AssetDatabase.SaveAssetIfDirty(holder);
             Assert.IsTrue(AssetDatabase.DeleteAsset(missingPath));
             AssetDatabase.Refresh();
 
@@ -898,36 +909,35 @@ namespace McpUnity.Tests
                 Does.Contain(missingGuid),
                 "Test setup must retain a Missing reference GUID");
 
-            var warnings = new List<string>();
-            bool staged = SerializedPropertyHelper.SetValue(
-                references,
-                new JObject
-                {
-                    ["primary"] = new JObject { ["assetPath"] = SecondAssetPath },
-                    ["secondary"] = new JObject { ["assetPath"] = SecondAssetPath }
-                },
-                warnings,
-                "m_References",
-                out List<SerializedPropertyHelper.ObjectReferenceWriteRecord> writes);
-            Assert.IsTrue(staged, string.Join("; ", warnings.ToArray()));
+            // 新preflight已拒絕missing寫入；手建舊record只驗防禦分支，不繞過正式入口收貨。
+            var writes = new List<SerializedPropertyHelper.ObjectReferenceWriteRecord>
+            {
+                new SerializedPropertyHelper.ObjectReferenceWriteRecord("m_References.primary",
+                    new SerializedPropertyHelper.ObjectReferenceWrite(null,
+                        missingProperty.objectReferenceInstanceIDValue, _secondAsset, false)),
+                new SerializedPropertyHelper.ObjectReferenceWriteRecord("m_References.secondary",
+                    new SerializedPropertyHelper.ObjectReferenceWrite(_firstAsset, _secondAsset, false))
+            };
+            missingProperty.objectReferenceValue = _secondAsset;
+            references.FindPropertyRelative("secondary").objectReferenceValue = _secondAsset;
             serializedObject.ApplyModifiedProperties();
 
             var simulateRejectedSibling = new SerializedObject(holder);
             simulateRejectedSibling.FindProperty("m_References.secondary")
                 .objectReferenceValue = _firstAsset;
             simulateRejectedSibling.ApplyModifiedPropertiesWithoutUndo();
-            AssetDatabase.SaveAssets();
+            AssetDatabase.SaveAssetIfDirty(holder);
             string beforeVerification = File.ReadAllText(absoluteHolderPath);
 
             bool verified = SerializedPropertyHelper.VerifyObjectReferenceWrites(
                 holder, writes, out string failureReason);
-            AssetDatabase.SaveAssets();
+            AssetDatabase.SaveAssetIfDirty(holder);
             string afterVerification = File.ReadAllText(absoluteHolderPath);
 
             Assert.IsFalse(verified);
             Assert.That(failureReason, Does.Contain("skipped (missing-reference previous)"));
             Assert.That(failureReason, Does.Contain("m_References.primary"));
-            Assert.That(failureReason, Does.Contain("missing-reference GUID"));
+            Assert.That(failureReason, Does.Contain("original GUID/fileID was not restored and may already be lost"));
             Assert.AreEqual(
                 beforeVerification,
                 afterVerification,
@@ -981,6 +991,74 @@ namespace McpUnity.Tests
                     "object-reference writes restored: " +
                     "['m_References.primary', 'm_SceneReference']"));
             Assert.That(failureReason, Does.Contain("skipped (missing-reference previous): [none]"));
+        }
+
+        [TestCase(0)]
+        [TestCase(1)]
+        [TestCase(2)]
+        public void MissingReferencePreflight_RejectsBeforeAnyStage(int mode)
+        {
+            string path = AssetDirectory + "/GuardMissing" + mode + ".asset";
+            var missing = ScriptableObject.CreateInstance<SerializedPropertyWriteReferenceAsset>();
+            AssetDatabase.CreateAsset(missing, path);
+            string guid = AssetDatabase.AssetPathToGUID(path);
+            var holder = ScriptableObject.CreateInstance<SerializedPropertyWriteReferenceHolderAsset>();
+            holder.References.primary = missing;
+            holder.References.secondary = _firstAsset;
+            string holderPath = AssetDirectory + "/GuardHolder" + mode + ".asset";
+            AssetDatabase.CreateAsset(holder, holderPath);
+            AssetDatabase.SaveAssetIfDirty(holder);
+            Assert.IsTrue(AssetDatabase.DeleteAsset(path));
+            var so = new SerializedObject(holder);
+            var reference = so.FindProperty("m_References.primary");
+            Assert.IsTrue(reference.objectReferenceValue == null);
+            int missingId = reference.objectReferenceInstanceIDValue;
+            Assert.AreNotEqual(0, missingId);
+            string before = File.ReadAllText(holderPath);
+            StringAssert.Contains(guid, before);
+            var warnings = new List<string>();
+            JToken value = mode == 0 ? JValue.CreateNull() : new JValue(_secondAsset.GetInstanceID());
+            var property = reference;
+            if (mode == 2)
+            {
+                property = so.FindProperty("m_References");
+                value = new JObject { ["nonReferenceValue"] = 999, ["primary"] = value };
+            }
+            Assert.IsFalse(SerializedPropertyHelper.SetValue(property, value, warnings,
+                property.propertyPath, out List<SerializedPropertyHelper.ObjectReferenceWriteRecord> writes));
+            Assert.AreEqual(0, writes.Count);
+            StringAssert.Contains("missing_reference_write_blocked", string.Join(";", warnings));
+            // 即使caller在false後apply，也不能殘留已stage的number或清空。
+            so.ApplyModifiedPropertiesWithoutUndo();
+            AssetDatabase.SaveAssetIfDirty(holder);
+            Assert.AreEqual(8, holder.References.nonReferenceValue);
+            Assert.AreEqual(missingId, new SerializedObject(holder).FindProperty("m_References.primary").objectReferenceInstanceIDValue);
+            Assert.AreEqual(before, File.ReadAllText(holderPath));
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void RollbackConflict_PreservesDifferentReferenceOrClear(bool clear)
+        {
+            var third = ScriptableObject.CreateInstance<SerializedPropertyWriteReferenceAsset>();
+            try
+            {
+                var so = new SerializedObject(_probe);
+                Assert.IsTrue(SerializedPropertyHelper.SetValue(so.FindProperty("m_References"),
+                    new JObject { ["primary"] = _secondAsset.GetInstanceID(), ["secondary"] = _secondAsset.GetInstanceID() },
+                    new List<string>(), "m_References", out List<SerializedPropertyHelper.ObjectReferenceWriteRecord> writes));
+                so.ApplyModifiedPropertiesWithoutUndo();
+                var b = new SerializedObject(_probe);
+                b.FindProperty("m_References.primary").objectReferenceValue = clear ? null : third;
+                b.FindProperty("m_References.secondary").objectReferenceValue = _firstAsset;
+                b.ApplyModifiedPropertiesWithoutUndo();
+                Assert.IsFalse(SerializedPropertyHelper.VerifyObjectReferenceWrites(_probe, writes, out string reason));
+                Assert.AreEqual(clear ? null : third, _probe.References.primary);
+                Assert.AreSame(_firstAsset, _probe.References.secondary);
+                StringAssert.Contains("rollback conflicts (current reference preserved): ['m_References.primary']", reason);
+                StringAssert.DoesNotContain("all collected object-reference writes were restored", reason);
+            }
+            finally { UnityEngine.Object.DestroyImmediate(third); }
         }
 
         private JObject ExecuteWrite(JObject fieldData)
