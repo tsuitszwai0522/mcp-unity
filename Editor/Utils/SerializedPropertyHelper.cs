@@ -820,7 +820,8 @@ namespace McpUnity.Utils
             List<string> warnings,
             string fieldName)
         {
-            const string typePrefix = "PPtr<$";
+            // Native references use PPtr<T>; managed references may use PPtr<$T>.
+            const string typePrefix = "PPtr<";
             string serializedType = prop.type;
             if (string.IsNullOrEmpty(serializedType)
                 || !serializedType.StartsWith(typePrefix, StringComparison.Ordinal)
@@ -832,6 +833,10 @@ namespace McpUnity.Utils
             string expectedTypeName = serializedType.Substring(
                 typePrefix.Length,
                 serializedType.Length - typePrefix.Length - 1);
+            if (expectedTypeName.StartsWith("$", StringComparison.Ordinal))
+            {
+                expectedTypeName = expectedTypeName.Substring(1);
+            }
             if (string.IsNullOrEmpty(expectedTypeName))
             {
                 return true;

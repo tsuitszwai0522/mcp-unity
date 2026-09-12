@@ -1111,3 +1111,67 @@ namespace McpUnity.Tests
         }
     }
 }
+
+namespace McpUnity.Tests
+{
+    public class NativePointerWriteTests
+    {
+        [TestCase("GameObject")]
+        [TestCase("Texture2D")]
+        [TestCase("Rigidbody")]
+        [TestCase("Clear")]
+        public void SpringJointReference_ValidatesNativePointerBeforeApply(string input)
+        {
+            var scene = EditorSceneManager.NewPreviewScene();
+            Texture2D texture = null;
+            try
+            {
+                var root = new GameObject("NativePointerProbe", typeof(Rigidbody), typeof(SpringJoint));
+                SceneManager.MoveGameObjectToScene(root, scene);
+                var firstObject = new GameObject("First", typeof(Rigidbody));
+                SceneManager.MoveGameObjectToScene(firstObject, scene);
+                var secondObject = new GameObject("Second", typeof(Rigidbody));
+                SceneManager.MoveGameObjectToScene(secondObject, scene);
+                var first = firstObject.GetComponent<Rigidbody>();
+                var second = secondObject.GetComponent<Rigidbody>();
+                var joint = root.GetComponent<SpringJoint>();
+                joint.connectedBody = first;
+                Assert.AreEqual("PPtr<Rigidbody>", new SerializedObject(joint).FindProperty("m_ConnectedBody").type);
+
+                JToken value;
+                if (input == "Clear") value = JValue.CreateNull();
+                else if (input == "Rigidbody") value = new JValue(second.GetInstanceID());
+                else if (input == "GameObject") value = new JValue(secondObject.GetInstanceID());
+                else
+                {
+                    texture = new Texture2D(2, 2);
+                    value = new JValue(texture.GetInstanceID());
+                }
+                JObject result = new WriteSerializedFieldsTool().Execute(new JObject
+                {
+                    ["instanceId"] = root.GetInstanceID(),
+                    ["componentName"] = typeof(SpringJoint).FullName,
+                    ["fieldData"] = new JObject { ["m_ConnectedBody"] = value }
+                });
+                Assert.IsNotNull(result["success"], result.ToString());
+                bool valid = input == "Rigidbody" || input == "Clear";
+                Assert.AreEqual(valid, result.Value<bool>("success"), result.ToString());
+                var actual = new SerializedObject(joint).FindProperty("m_ConnectedBody").objectReferenceValue;
+                if (!valid)
+                {
+                    Assert.That(result["failedFields"].ToString(), Does.Contain("not assignable"));
+                    Assert.That(result["failedFields"].ToString(), Does.Not.Contain("failed verification"));
+                    Assert.AreSame(first, actual);
+                    Assert.AreSame(first, joint.connectedBody);
+                }
+                else if (input == "Clear") Assert.IsTrue(actual == null);
+                else Assert.AreSame(second, actual);
+            }
+            finally
+            {
+                if (texture != null) UnityEngine.Object.DestroyImmediate(texture);
+                EditorSceneManager.ClosePreviewScene(scene);
+            }
+        }
+    }
+}

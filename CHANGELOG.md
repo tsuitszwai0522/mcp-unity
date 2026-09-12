@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [fork-1.19.4] - 2026-09-12
+
+### Fixed
+
+- Validate native serialized object pointers (`PPtr<T>`) before applying writes, alongside
+  managed object pointers (`PPtr<$T>`). Wrong-type GameObject or asset inputs can no longer
+  bypass this guard and change a native Rigidbody reference despite a failed response.
+
+### Compatibility
+
+- Existing inheritance-name matching, unknown-format fallback and rollback conflict rules
+  remain unchanged. This does not provide transactional writes or ABA protection.
+- Root-qualified object paths in an actual Prefab Stage remain unsupported; verified
+  internal references use component instance IDs.
+
+### Validation
+
+- Verified source: three actual Prefab Stage cases, four new native-pointer regressions,
+  and 49 existing Unity writer regressions passed in Unity 2022.3.62f3.
+- Source and test hashes match the recorded local fix. Release metadata and notes are
+  updated separately; these checks do not claim UI interaction or visual acceptance.
+
 ## [fork-1.19.3] - 2026-09-11
 
 ### Fixed
