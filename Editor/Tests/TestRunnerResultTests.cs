@@ -37,7 +37,12 @@ namespace McpUnity.Tests
         }
 
         [Test]
-        public async Task SocketHandlerCatchCarriesParsedRequestIdAndTypedError()
+        public void SocketHandlerCatchCarriesParsedRequestIdAndTypedError()
+        {
+            RunCompletedTask(() => SocketHandlerCatchCarriesParsedRequestIdAndTypedErrorAsync());
+        }
+
+        private async Task SocketHandlerCatchCarriesParsedRequestIdAndTypedErrorAsync()
         {
             IgnoreAmbientEditorLogsForThisTest();
             LogAssert.Expect(
@@ -282,6 +287,18 @@ namespace McpUnity.Tests
             {
                 Application.logMessageReceived -= captureErrors;
             }
+        }
+
+        // UTF 1.4.5 EditMode：Task 測試若同步完成，最後 yield 的 TestEnumerator 會殘留在
+        // EditModeRunner.m_CurrentYieldObject；其後若再無任何 yield，run 結束時
+        // "EditMode test can only yield null" 會被記到最後一個測試的 result，而該測試的
+        // TestFinished callback 已報 Passed（callback／XML 矛盾）。同步完成的案例改用 void
+        // 包裝，並明文斷言 Task 已完成，避免誤觸該框架路徑，也不會阻塞 Editor。
+        private static void RunCompletedTask(Func<Task> body)
+        {
+            Task task = body();
+            Assert.IsTrue(task.IsCompleted, "Test body must complete synchronously in EditMode.");
+            task.GetAwaiter().GetResult();
         }
 
         private void IgnoreAmbientEditorLogsForThisTest()
@@ -656,7 +673,12 @@ namespace McpUnity.Tests
         }
 
         [Test]
-        public async Task ExecuteUsesUnityRunGuidAndReturnsVerifiedArtifact()
+        public void ExecuteUsesUnityRunGuidAndReturnsVerifiedArtifact()
+        {
+            RunCompletedTask(() => ExecuteUsesUnityRunGuidAndReturnsVerifiedArtifactAsync());
+        }
+
+        private async Task ExecuteUsesUnityRunGuidAndReturnsVerifiedArtifactAsync()
         {
             const string unityRunId = "11111111-1111-1111-1111-111111111111";
             string artifactDirectory = PrepareArtifactDirectory(nameof(ExecuteUsesUnityRunGuidAndReturnsVerifiedArtifact));
@@ -708,7 +730,12 @@ namespace McpUnity.Tests
         }
 
         [Test]
-        public async Task CompletionProtectsCurrentArtifactFromFutureDatedRetentionEntries()
+        public void CompletionProtectsCurrentArtifactFromFutureDatedRetentionEntries()
+        {
+            RunCompletedTask(() => CompletionProtectsCurrentArtifactFromFutureDatedRetentionEntriesAsync());
+        }
+
+        private async Task CompletionProtectsCurrentArtifactFromFutureDatedRetentionEntriesAsync()
         {
             const string unityRunId = "16161616-1616-1616-1616-161616161616";
             string artifactDirectory = PrepareArtifactDirectory(
@@ -757,7 +784,12 @@ namespace McpUnity.Tests
         }
 
         [Test]
-        public async Task ArtifactMissingAfterPruneUsesArtifactFailureResponse()
+        public void ArtifactMissingAfterPruneUsesArtifactFailureResponse()
+        {
+            RunCompletedTask(() => ArtifactMissingAfterPruneUsesArtifactFailureResponseAsync());
+        }
+
+        private async Task ArtifactMissingAfterPruneUsesArtifactFailureResponseAsync()
         {
             const string unityRunId = "18181818-1818-1818-1818-181818181818";
             string artifactDirectory = PrepareArtifactDirectory(
@@ -801,7 +833,12 @@ namespace McpUnity.Tests
         }
 
         [Test]
-        public async Task ConcurrentRunFailsLoudWithoutCallingExecuteTwice()
+        public void ConcurrentRunFailsLoudWithoutCallingExecuteTwice()
+        {
+            RunCompletedTask(() => ConcurrentRunFailsLoudWithoutCallingExecuteTwiceAsync());
+        }
+
+        private async Task ConcurrentRunFailsLoudWithoutCallingExecuteTwiceAsync()
         {
             const string unityRunId = "22222222-2222-2222-2222-222222222222";
             string artifactDirectory = PrepareArtifactDirectory(nameof(ConcurrentRunFailsLoudWithoutCallingExecuteTwice));
@@ -836,7 +873,12 @@ namespace McpUnity.Tests
         }
 
         [Test]
-        public async Task PollKeepsRunAFilterAndResultsAfterRunBIsRejected()
+        public void PollKeepsRunAFilterAndResultsAfterRunBIsRejected()
+        {
+            RunCompletedTask(() => PollKeepsRunAFilterAndResultsAfterRunBIsRejectedAsync());
+        }
+
+        private async Task PollKeepsRunAFilterAndResultsAfterRunBIsRejectedAsync()
         {
             const string unityRunId = "33333333-3333-3333-3333-333333333333";
             string artifactDirectory = PrepareArtifactDirectory(nameof(PollKeepsRunAFilterAndResultsAfterRunBIsRejected));
@@ -886,7 +928,14 @@ namespace McpUnity.Tests
         [TestCase(
             ArtifactSaveBehavior.WritesWrongRootXml,
             "the XML root element is not <test-run>")]
-        public async Task ArtifactSaveFailureNeverReturnsArtifactPath(
+        public void ArtifactSaveFailureNeverReturnsArtifactPath(
+            ArtifactSaveBehavior saveBehavior,
+            string expectedArtifactErrorPrefix)
+        {
+            RunCompletedTask(() => ArtifactSaveFailureNeverReturnsArtifactPathAsync(saveBehavior, expectedArtifactErrorPrefix));
+        }
+
+        private async Task ArtifactSaveFailureNeverReturnsArtifactPathAsync(
             ArtifactSaveBehavior saveBehavior,
             string expectedArtifactErrorPrefix)
         {
@@ -961,7 +1010,12 @@ namespace McpUnity.Tests
         }
 
         [Test]
-        public async Task PollFailsLoudlyWhenCompletedArtifactWasDeleted()
+        public void PollFailsLoudlyWhenCompletedArtifactWasDeleted()
+        {
+            RunCompletedTask(() => PollFailsLoudlyWhenCompletedArtifactWasDeletedAsync());
+        }
+
+        private async Task PollFailsLoudlyWhenCompletedArtifactWasDeletedAsync()
         {
             const string unityRunId = "77777777-7777-7777-7777-777777777777";
             string artifactDirectory = PrepareArtifactDirectory(nameof(PollFailsLoudlyWhenCompletedArtifactWasDeleted));
@@ -994,7 +1048,12 @@ namespace McpUnity.Tests
         }
 
         [Test]
-        public async Task WaitForCompletionReturnsTimeoutWithoutCompletingPendingRun()
+        public void WaitForCompletionReturnsTimeoutWithoutCompletingPendingRun()
+        {
+            RunCompletedTask(() => WaitForCompletionReturnsTimeoutWithoutCompletingPendingRunAsync());
+        }
+
+        private async Task WaitForCompletionReturnsTimeoutWithoutCompletingPendingRunAsync()
         {
             var completionSource = new TaskCompletionSource<JObject>();
             var delayCompletionSource = new TaskCompletionSource<bool>();
@@ -1027,7 +1086,12 @@ namespace McpUnity.Tests
         }
 
         [Test]
-        public async Task TimeoutReturnsPollIdentityAndKeepsRunActive()
+        public void TimeoutReturnsPollIdentityAndKeepsRunActive()
+        {
+            RunCompletedTask(() => TimeoutReturnsPollIdentityAndKeepsRunActiveAsync());
+        }
+
+        private async Task TimeoutReturnsPollIdentityAndKeepsRunActiveAsync()
         {
             const string unityRunId = "66666666-6666-6666-6666-666666666666";
             string artifactDirectory = PrepareArtifactDirectory(nameof(TimeoutReturnsPollIdentityAndKeepsRunActive));
@@ -1071,7 +1135,12 @@ namespace McpUnity.Tests
         }
 
         [Test]
-        public async Task TimedOutRunCompletionDoesNotPolluteNextRunRecord()
+        public void TimedOutRunCompletionDoesNotPolluteNextRunRecord()
+        {
+            RunCompletedTask(() => TimedOutRunCompletionDoesNotPolluteNextRunRecordAsync());
+        }
+
+        private async Task TimedOutRunCompletionDoesNotPolluteNextRunRecordAsync()
         {
             const string firstRunId = "88888888-8888-8888-8888-888888888888";
             const string secondRunId = "99999999-9999-9999-9999-999999999999";
@@ -1121,7 +1190,12 @@ namespace McpUnity.Tests
         }
 
         [Test]
-        public async Task RestoredAndOriginalServicesUseEquivalentAdditiveResultTrees()
+        public void RestoredAndOriginalServicesUseEquivalentAdditiveResultTrees()
+        {
+            RunCompletedTask(() => RestoredAndOriginalServicesUseEquivalentAdditiveResultTreesAsync());
+        }
+
+        private async Task RestoredAndOriginalServicesUseEquivalentAdditiveResultTreesAsync()
         {
             const string originalRunId = "55555555-5555-5555-5555-555555555555";
             const string restoredRunId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
@@ -1197,7 +1271,12 @@ namespace McpUnity.Tests
         }
 
         [Test]
-        public async Task RestoredEmptyRunDoesNotSerializeRunRootAsTestResult()
+        public void RestoredEmptyRunDoesNotSerializeRunRootAsTestResult()
+        {
+            RunCompletedTask(() => RestoredEmptyRunDoesNotSerializeRunRootAsTestResultAsync());
+        }
+
+        private async Task RestoredEmptyRunDoesNotSerializeRunRootAsTestResultAsync()
         {
             const string runId = "abababab-abab-abab-abab-abababababab";
             string artifactDirectory = PrepareArtifactDirectory(
@@ -1616,7 +1695,12 @@ namespace McpUnity.Tests
         }
 
         [Test]
-        public async Task StaleActiveRunReleasesLockAndDisclosesRetry()
+        public void StaleActiveRunReleasesLockAndDisclosesRetry()
+        {
+            RunCompletedTask(() => StaleActiveRunReleasesLockAndDisclosesRetryAsync());
+        }
+
+        private async Task StaleActiveRunReleasesLockAndDisclosesRetryAsync()
         {
             const string staleRunId = "ffffffff-ffff-ffff-ffff-ffffffffffff";
             string artifactDirectory = PrepareArtifactDirectory(
@@ -1672,7 +1756,12 @@ namespace McpUnity.Tests
         }
 
         [Test]
-        public async Task SecondRunStartedInvalidatesRecordWithoutAttributingResult()
+        public void SecondRunStartedInvalidatesRecordWithoutAttributingResult()
+        {
+            RunCompletedTask(() => SecondRunStartedInvalidatesRecordWithoutAttributingResultAsync());
+        }
+
+        private async Task SecondRunStartedInvalidatesRecordWithoutAttributingResultAsync()
         {
             const string unityRunId = "13131313-1313-1313-1313-131313131313";
             string artifactDirectory = PrepareArtifactDirectory(
@@ -1719,7 +1808,12 @@ namespace McpUnity.Tests
         }
 
         [Test]
-        public async Task InvalidUnityRunIdNeverBuildsArtifactPath()
+        public void InvalidUnityRunIdNeverBuildsArtifactPath()
+        {
+            RunCompletedTask(() => InvalidUnityRunIdNeverBuildsArtifactPathAsync());
+        }
+
+        private async Task InvalidUnityRunIdNeverBuildsArtifactPathAsync()
         {
             string artifactDirectory = PrepareArtifactDirectory(
                 nameof(InvalidUnityRunIdNeverBuildsArtifactPath));
@@ -1766,7 +1860,12 @@ namespace McpUnity.Tests
         }
 
         [Test]
-        public async Task ReentrantRunBeforeGuidAssignmentReturnsStateErrorWithoutNre()
+        public void ReentrantRunBeforeGuidAssignmentReturnsStateErrorWithoutNre()
+        {
+            RunCompletedTask(() => ReentrantRunBeforeGuidAssignmentReturnsStateErrorWithoutNreAsync());
+        }
+
+        private async Task ReentrantRunBeforeGuidAssignmentReturnsStateErrorWithoutNreAsync()
         {
             const string unityRunId = "15151515-1515-1515-1515-151515151515";
             string artifactDirectory = PrepareArtifactDirectory(

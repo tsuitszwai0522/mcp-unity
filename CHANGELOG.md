@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [fork-1.19.7] - 2026-09-14
+
+### Fixed
+- Convert the 17 `TestRunnerResultTests` Task tests that complete synchronously into `void` wrappers that assert the Task already completed; each original body is unchanged in a private `…Async` method. The six Task tests that genuinely yield stay `async Task`.
+- Correct the `McpUnitySocketHandler.OnOpen` comment: websocket-sharp `Sessions.InactiveIDs` pings every session (`Broadping`) like `ActiveIDs`; a session that does not answer within the wait time is closed as `Stale session cleanup`. No behavior change.
+
+### Root cause (UTF 1.4.5 EditMode)
+- When a `Task` test completes without yielding, the last object yielded to `EditModeRunner` is the `TestEnumerator` instruction. If nothing yields afterwards until the run ends, the final `TestConsumer` pass invokes `InvokeDelegator` on that stale object and records `EditMode test can only yield null` on the current (last) test result after its `TestFinished` callback already reported Passed. The callback/adaptor summary and the NUnit XML then disagree, and fork-1.19.6 correctly marks the run `untrusted`. A single synchronously-completing Task test run alone is affected too. This is a framework behavior, not an MCP defect.
+
+### Validation
+- Isolated Unity 2022.3.62f3 / UTF 1.4.5 Editor on the fork-1.19.6 archive: the real fixture reproduced the contradiction via MCP and via direct `TestRunnerApi` (no MCP). Owned discriminating fixtures reproduced it for `return Task.CompletedTask` and `await` of an already-completed task; an intervening genuinely yielding Task test removed it; `[Timeout]` expiry with real awaits did not trigger it.
+- After the change: 17/17 single-test runs, the four-test minimal combination, the full fixture (69 leaves, direct and via MCP), and the whole `McpUnity.Editor.Tests` assembly via MCP (567 leaves) had matching callbacks, XML leaves, and replay. An unchanged owned synchronous-Task control remained `untrusted`, confirming the fix is test-side.
+
 ## [fork-1.19.6] - 2026-09-14
 
 ### Fixed

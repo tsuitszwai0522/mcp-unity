@@ -206,7 +206,9 @@ namespace McpUnity.Unity
         {
             // Clean up inactive (dead) sessions to prevent file descriptor accumulation.
             // Only removes sessions that are no longer connected — active clients are preserved.
-            // Note: Do NOT use ActiveIDs here — it pings every client and blocks.
+            // Note: InactiveIDs is not passive — websocket-sharp computes it with Broadping, pinging every
+            // session and waiting for pongs. A live client that cannot answer in time (e.g. a suspended
+            // process) is treated as inactive and closed here.
             var inactiveIds = Sessions.InactiveIDs.ToList();
             if (inactiveIds.Count > 0)
             {

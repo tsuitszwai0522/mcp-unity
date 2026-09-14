@@ -218,3 +218,5 @@ On post-apply failure, reference rollback only restores a field still matching i
 ### Test result consistency
 
 `run_tests` rejects callback/XML leaf identity, result, or count contradictions as `untrusted`; raw XML remains for diagnosis but is not returned as a trusted artifact. `get_test_run` also rejects contradictory leaf counts against stored metadata. Do not treat `success`, summary counts, or XML root alone as test acceptance.
+
+In UTF 1.4.5 EditMode, a `[Test]` returning a `Task` that completes without yielding can make the last test of the run record `EditMode test can only yield null` in XML after its callback reported Passed, so the run becomes `untrusted`. Write synchronously-completing cases as `void` tests that assert the Task is already completed (see `RunCompletedTask` in `TestRunnerResultTests`); keep `async Task` only for bodies that genuinely wait on the Editor loop.
