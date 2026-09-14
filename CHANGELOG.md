@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [fork-1.19.6] - 2026-09-14
+
+### Fixed
+- Reject contradictory callback/XML test results before publishing completion; recheck XML leaf counts on replay. Retain raw XML for diagnosis without exposing it as a trusted artifact.
+- Make the seven cancellation guard regression cases synchronous at verified-completed fake task boundaries; preserve their assertions and the recovery case's two-second timeout.
+
+### Validation
+- ProjectT Unity 2022.3.62f3 / UTF 1.4.5: seven adjusted cases and eight consistency cases passed with matching callback, XML leaves, and explicit-ID replay. The recovery case initially exceeded its unchanged two-second timeout and passed one unchanged recheck (16 case executions: 15 passed, 1 failed). The initial failure remains recorded; its cause is unknown. A real prior contradictory run is now rejected as untrusted on replay.
+
+### Evidence correction
+- The fork-1.19.5 historical fixture summary was 59 passed / 2 failed, but its XML leaves were 58 passed / 3 failed: the final `ZeroExecutionFromTestFilterFailsLoud` leaf also contained an EditMode yield error. The two timeout rechecks did not cover that third failure. The seven new leaves and isolated cancellation/recovery evidence remain unchanged. Full fixture acceptance was not established.
+
 ## [fork-1.19.5] - 2026-09-14
 
 ### Fixed

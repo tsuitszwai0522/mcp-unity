@@ -107,6 +107,12 @@ cannot establish inactivity. Starting another run from Unity's Test Runner windo
 `RunStarted`; the MCP record is then marked `untrusted`, its result is discarded, and no result is
 published under the MCP run's `runId`.
 
+Completion also compares XML leaf identities/results and counts with the callback summary.
+Contradictions mark the record `untrusted` and return no trusted results/artifact. The raw GUID XML
+is retained locally for diagnosis. Polling rechecks leaf counts against retained metadata, so a
+contradictory or subsequently damaged artifact cannot replay an old Passed summary. This is a
+consistency check, not proof of run ownership or protection against all same-count file tampering.
+
 - `send_console_log`: Send a console log to Unity
   > **Example prompt:** "Send a console log to Unity Editor"
 

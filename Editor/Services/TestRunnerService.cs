@@ -564,6 +564,16 @@ namespace McpUnity.Services
                         });
                 }
 
+                if (!TryValidateArtifactConsistency(artifactPath,
+                    BuildResponseFromRecord(record, results), null, out validationError))
+                {
+                    record.Status = TestRunStatus.Untrusted;
+                    record.ArtifactPath = null;
+                    record.Message = $"Test run '{record.RunId}' has inconsistent NUnit XML: {validationError}";
+                    _registry.Upsert(record);
+                    return CreateErrorResponse(ArtifactUnavailableErrorCode, record.Message,
+                        new JObject { ["runId"] = record.RunId, ["status"] = record.Status });
+                }
                 JObject completedResponse = BuildResponseFromRecord(record, results);
                 completedResponse["artifactPath"] = artifactPath;
                 return completedResponse;
@@ -683,10 +693,20 @@ namespace McpUnity.Services
                     : null);
             summary["runId"] = completedRun.Record.RunId;
 
+            // 保存前凍結完整 callback leaf，避免 SaveResultToFile 期間 adaptor 改動。
+            JObject fullSummary = BuildResultJson(runResults, result, false, false,
+                ParseTestMode(filter), filter?.Value<string>("testFilter"), null);
             string artifactPath = completedRun.Record.ArtifactPath;
             bool artifactSaved = TryWriteArtifact(result, artifactPath, out string artifactError);
             if (artifactSaved)
             {
+                if (!TryValidateArtifactConsistency(artifactPath, summary,
+                    (JArray)fullSummary["results"], out string consistencyError))
+                {
+                    // 保留原始 XML 供診斷，但不可將矛盾結果交付為可信 artifact。
+                    InvalidateActiveRun($"Test run '{completedRun.Record.RunId}' has inconsistent NUnit XML: {consistencyError}");
+                    return;
+                }
                 _pruneArtifacts(artifactPath);
                 if (!File.Exists(artifactPath))
                 {
@@ -1287,6 +1307,63 @@ namespace McpUnity.Services
             catch (Exception exception)
             {
                 error = $"the file is not complete NUnit XML ({exception.Message})";
+                return false;
+            }
+        }
+
+        internal static bool TryValidateArtifactConsistency(
+            string artifactPath, JObject summary, JArray expectedLeaves, out string error)
+        {
+            try
+            {
+                XDocument document = XDocument.Load(artifactPath, LoadOptions.None);
+                if (document.Root?.Name.LocalName != "test-run")
+                    throw new InvalidDataException("missing test-run root");
+                XElement[] leaves = document.Descendants()
+                    .Where(node => node.Name.LocalName == "test-case").ToArray();
+                string[] states = { "Passed", "Failed", "Skipped", "Inconclusive" };
+                string[] countKeys = { "passCount", "failCount", "skipCount", "inconclusiveCount" };
+                string[] xmlKeys = { "passed", "failed", "skipped", "inconclusive" };
+                if (leaves.Any(node => !states.Contains(AttributeValue(node, "result"))))
+                    throw new InvalidDataException("unknown test-case result");
+                for (int i = 0; i < states.Length; i++)
+                {
+                    int count = leaves.Count(node => AttributeValue(node, "result") == states[i]);
+                    if (summary.Value<int?>(countKeys[i]) != count)
+                        throw new InvalidDataException($"{countKeys[i]} disagrees with test-case leaves");
+                    XAttribute declared = document.Root.Attribute(xmlKeys[i]);
+                    if (declared != null && (!int.TryParse(declared.Value, out int value) || value != count))
+                        throw new InvalidDataException($"XML {xmlKeys[i]} disagrees with test-case leaves");
+                }
+                if (summary.Value<int?>("testCount") != leaves.Length)
+                    throw new InvalidDataException("testCount disagrees with test-case leaves");
+                XAttribute total = document.Root.Attribute("total");
+                if (total != null && (!int.TryParse(total.Value, out int totalValue) || totalValue != leaves.Length))
+                    throw new InvalidDataException("XML total disagrees with test-case leaves");
+                bool hasFailures = leaves.Any(node => AttributeValue(node, "result") == "Failed");
+                if (hasFailures && (AttributeValue(document.Root, "result") == "Passed" ||
+                    summary.Value<string>("resultState") == "Passed"))
+                    throw new InvalidDataException("Passed summary contains Failed leaves");
+                if (expectedLeaves != null)
+                {
+                    // 排序保留重複 leaf，不能用 dictionary 吞掉同名案例。
+                    Func<string, string> category = state => states.FirstOrDefault(
+                        value => state == value || state.StartsWith(value + ":", StringComparison.Ordinal) ||
+                            state.StartsWith(value + "(", StringComparison.Ordinal)) ?? state;
+                    string[] expected = expectedLeaves.Select(node =>
+                        node.Value<string>("fullName") + "\n" + category(node.Value<string>("state") ?? ""))
+                        .OrderBy(value => value, StringComparer.Ordinal).ToArray();
+                    string[] actual = leaves.Select(node => AttributeValue(node, "fullname") + "\n" +
+                        AttributeValue(node, "result")).OrderBy(value => value, StringComparer.Ordinal).ToArray();
+                    if (!expected.SequenceEqual(actual))
+                        throw new InvalidDataException("callback and XML test-case identities/results disagree");
+                }
+                error = null;
+                return true;
+            }
+            catch (Exception exception)
+            {
+                error = exception.Message;
                 return false;
             }
         }

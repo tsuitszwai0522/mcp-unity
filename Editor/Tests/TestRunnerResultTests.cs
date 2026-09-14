@@ -1458,8 +1458,88 @@ namespace McpUnity.Tests
             }
         }
 
+        [TestCase("validMixed", true)]
+        [TestCase("rootMismatch", false)]
+        [TestCase("summaryMismatch", false)]
+        [TestCase("identityMismatch", false)]
+        [TestCase("swapStates", false)]
+        [TestCase("empty", true)]
+        public void ArtifactConsistencyChecksEveryLeaf(string condition, bool expected)
+        {
+            string directory = PrepareArtifactDirectory(nameof(ArtifactConsistencyChecksEveryLeaf) + condition);
+            try
+            {
+                Directory.CreateDirectory(directory);
+                string path = Path.Combine(directory, "result.xml");
+                string[] states = condition == "empty" ? new string[0] :
+                    new[] { "Passed", "Failed", "Skipped", "Inconclusive" };
+                var root = new XElement("test-run", new XAttribute("result", states.Length == 0 ? "Passed" : "Failed"));
+                var leaves = new JArray();
+                for (int i = 0; i < states.Length; i++)
+                {
+                    root.Add(new XElement("test-case", new XAttribute("fullname", "Case" + i),
+                        new XAttribute("result", states[i])));
+                    leaves.Add(new JObject { ["fullName"] = "Case" + i, ["state"] = states[i] });
+                }
+                int count = states.Length == 0 ? 0 : 1;
+                var summary = new JObject { ["testCount"] = states.Length, ["passCount"] = count,
+                    ["failCount"] = count, ["skipCount"] = count, ["inconclusiveCount"] = count,
+                    ["resultState"] = states.Length == 0 ? "Passed" : "Failed" };
+                if (condition == "rootMismatch") root.SetAttributeValue("passed", 2);
+                if (condition == "summaryMismatch") summary["passCount"] = 2;
+                if (condition == "identityMismatch") leaves[0]["fullName"] = "WrongCase";
+                if (condition == "swapStates") { leaves[0]["state"] = "Failed"; leaves[1]["state"] = "Passed"; }
+                new XDocument(root).Save(path);
+                Assert.AreEqual(expected, TestRunnerService.TryValidateArtifactConsistency(path, summary, leaves, out string error), error);
+            }
+            finally { DeleteArtifactDirectory(directory); }
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void ContradictoryArtifactCannotPublishOrReplayPass(bool tamperAfterCompletion)
+        {
+            string directory = PrepareArtifactDirectory(nameof(ContradictoryArtifactCannotPublishOrReplayPass) + tamperAfterCompletion);
+            const string id = "29292929-2929-2929-2929-292929292929";
+            try
+            {
+                var api = new FakeTestRunnerApi(id, ArtifactSaveBehavior.ValidXml);
+                if (!tamperAfterCompletion) api.AfterSave = CorruptArtifactLeaf;
+                var service = new TestRunnerService(api, new InMemoryTestRunRegistry(), directory);
+                Task<JObject> pending = service.ExecuteTestsAsync(TestMode.EditMode, true, false, "Identity");
+                api.StartRun("Identity"); api.CompleteSuccessfulRun("Identity");
+                Assert.IsTrue(pending.IsCompleted);
+                JObject reply = pending.GetAwaiter().GetResult();
+                if (tamperAfterCompletion)
+                {
+                    Assert.AreEqual("completed", reply.Value<string>("status"));
+                    Assert.AreEqual(0, ((JArray)reply["results"]).Count);
+                    CorruptArtifactLeaf(Path.Combine(directory, id + ".xml"));
+                }
+                else
+                {
+                    Assert.AreEqual("untrusted", reply.Value<string>("status"));
+                    Assert.IsFalse(reply.Value<bool>("success"));
+                    Assert.IsNull(reply["results"]); Assert.IsNull(reply["artifactPath"]);
+                }
+                JObject reread = service.GetTestRun(id);
+                Assert.AreEqual("untrusted", reread.Value<string>("status"));
+                Assert.IsFalse(reread.Value<bool>("success"));
+                Assert.IsNull(reread["results"]); Assert.IsNull(reread["artifactPath"]);
+                Assert.IsTrue(File.Exists(Path.Combine(directory, id + ".xml")));
+            }
+            finally { DeleteArtifactDirectory(directory); }
+        }
+
+        private static void CorruptArtifactLeaf(string path)
+        {
+            XDocument xml = XDocument.Load(path);
+            xml.Descendants("test-case").First().SetAttributeValue("result", "Failed");
+            xml.Save(path);
+        }
+
         [Test, Timeout(2000)]
-        public async Task StoppedFrameworkWithoutResultInvalidatesPendingRunAndAllowsExplicitRecovery()
+        public void StoppedFrameworkWithoutResultInvalidatesPendingRunAndAllowsExplicitRecovery()
         {
             string directory = PrepareArtifactDirectory(nameof(StoppedFrameworkWithoutResultInvalidatesPendingRunAndAllowsExplicitRecovery));
             DateTime now = new DateTime(2026, 9, 12, 12, 0, 0, DateTimeKind.Utc);
@@ -1474,10 +1554,13 @@ namespace McpUnity.Tests
                 api.StartRun("Cancelled");
                 Assert.AreEqual("running", service.GetTestRun(oldId).Value<string>("status"));
                 now += TestRunnerService.InactiveRunGrace;
-                JObject gate = await service.ExecuteTestsAsync(TestMode.EditMode, false, false, "DoNotStartYet");
+                Task<JObject> gateTask = service.ExecuteTestsAsync(TestMode.EditMode, false, false, "DoNotStartYet");
+                Assert.IsTrue(gateTask.IsCompleted);
+                JObject gate = gateTask.GetAwaiter().GetResult();
                 Assert.AreEqual("untrusted", gate.Value<string>("status"));
                 Assert.AreEqual(1, api.ExecuteCalls);
-                JObject reply = await pending;
+                Assert.IsTrue(pending.IsCompleted);
+                JObject reply = pending.GetAwaiter().GetResult();
                 Assert.AreEqual(oldId, reply.Value<string>("invalidatedRunId"));
                 Assert.IsTrue(reply.Value<bool>("lockReleased"));
                 Assert.IsNull(reply["results"]); Assert.IsNull(reply["artifactPath"]);
@@ -1487,7 +1570,8 @@ namespace McpUnity.Tests
                 api.RunId = "27272727-2727-2727-2727-272727272727";
                 Task<JObject> recovery = service.ExecuteTestsAsync(TestMode.EditMode, false, false, "Recovery");
                 api.StartRun("Recovery"); api.CompleteSuccessfulRun("Recovery");
-                Assert.AreEqual(api.RunId, (await recovery).Value<string>("runId"));
+                Assert.IsTrue(recovery.IsCompleted);
+                Assert.AreEqual(api.RunId, recovery.GetAwaiter().GetResult().Value<string>("runId"));
                 Assert.AreEqual("completed", service.GetTestRun(api.RunId).Value<string>("status"));
                 Assert.AreEqual("untrusted", service.GetTestRun(oldId).Value<string>("status"));
             }
@@ -1500,7 +1584,7 @@ namespace McpUnity.Tests
         [TestCase("unstarted")]
         [TestCase("short")]
         [TestCase("reset")]
-        public async Task InactiveProbeDoesNotReleaseUnconfirmedRun(string condition)
+        public void InactiveProbeDoesNotReleaseUnconfirmedRun(string condition)
         {
             string directory = PrepareArtifactDirectory(nameof(InactiveProbeDoesNotReleaseUnconfirmedRun) + condition);
             DateTime now = new DateTime(2026, 9, 12, 12, 0, 0, DateTimeKind.Utc);
@@ -1513,7 +1597,9 @@ namespace McpUnity.Tests
                         if (condition == "throws") throw new InvalidOperationException("probe unavailable");
                         return active;
                     });
-                await service.ExecuteTestsAsync(TestMode.EditMode, false, false, "StillTracked");
+                Task<JObject> tracked = service.ExecuteTestsAsync(TestMode.EditMode, false, false, "StillTracked");
+                Assert.IsTrue(tracked.IsCompleted);
+                tracked.GetAwaiter().GetResult();
                 if (condition != "unstarted") api.StartRun("StillTracked");
                 if (condition == "active") active = true;
                 if (condition == "unknown") active = null;
@@ -1888,6 +1974,7 @@ namespace McpUnity.Tests
             public int ExecuteCalls { get; private set; }
             public string RunId { get; set; }
             public Action OnExecute { get; set; }
+            public Action<string> AfterSave { get; set; }
 
             public FakeTestRunnerApi(string runId, ArtifactSaveBehavior saveBehavior)
             {
@@ -1936,6 +2023,7 @@ namespace McpUnity.Tests
                     }
                     var document = new XDocument(root);
                     document.Save(xmlFilePath);
+                    AfterSave?.Invoke(xmlFilePath);
                 }
                 if (_saveBehavior == ArtifactSaveBehavior.WritesMalformedXml)
                 {
