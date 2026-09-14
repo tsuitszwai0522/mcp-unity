@@ -78,6 +78,10 @@ namespace McpUnity.Tools
             handler => Camera.onPreRender -= handler;
         private static Func<IEnumerable<Camera>> _findAllCameras =
             () => UnityEngine.Resources.FindObjectsOfTypeAll<Camera>();
+        // A preview-scene Camera can be enabled yet dormant: it is absent from Camera.allCameras
+        // and does not render until an enabled false->true transition registers it. Isolating such
+        // a camera would register it on restore and let it hijack later Game View frames.
+        private static Func<IEnumerable<Camera>> _findRenderingCameras = () => Camera.allCameras;
         private static Func<HashSet<int>> _findLoadedSceneHandles = () =>
         {
             var handles = new HashSet<int>();
@@ -154,6 +158,8 @@ namespace McpUnity.Tools
             public FreshnessMeasurement Freshness;
             public readonly List<CameraDisclosure> ContextCameras =
                 new List<CameraDisclosure>();
+            public readonly List<CameraDisclosure> DormantCameras =
+                new List<CameraDisclosure>();
         }
 
         private sealed class CameraDisclosure
@@ -220,6 +226,7 @@ namespace McpUnity.Tools
             private void IsolateCameras(CaptureDiagnosticsState diagnostics)
             {
                 HashSet<int> loadedSceneHandles = _findLoadedSceneHandles();
+                HashSet<Camera> renderingCameras = null;
 
                 var contextSceneHandles = new HashSet<int>();
                 var prefabStage = PrefabStageUtility.GetCurrentPrefabStage();
@@ -264,6 +271,15 @@ namespace McpUnity.Tools
                         continue;
                     }
 
+                    if (renderingCameras == null)
+                        renderingCameras = new HashSet<Camera>(_findRenderingCameras() ?? Array.Empty<Camera>());
+                    if (!renderingCameras.Contains(camera))
+                    {
+                        // Dormant cameras do not render now; toggling enabled would wake them.
+                        diagnostics.DormantCameras.Add(disclosure);
+                        continue;
+                    }
+
                     try
                     {
                         // Track before invoking the setter: a custom/native setter may change
@@ -303,6 +319,9 @@ namespace McpUnity.Tools
                           "with force_focus=true only when isolatedCameraCount=0; focus cannot repair " +
                           "the post-isolation frame while isolated cameras exist. no_camera_render " +
                           "has no force-focus remediation. " +
+                          "Orphan preview-scene cameras that are enabled but not currently rendering " +
+                          "(absent from Camera.allCameras) are left untouched and disclosed as " +
+                          "dormantCameras, because toggling them would make them start rendering. " +
                           "While Prefab contents are open, failed Game View capture never falls " +
                           "back to a loaded scene Main Camera.";
             IsAsync = true;
@@ -1100,13 +1119,15 @@ namespace McpUnity.Tools
         {
             JArray isolatedCameras = BuildCameraDisclosures(isolatedCameraObjects);
             JArray contextCameras = BuildCameraDisclosures(diagnostics.ContextCameras);
+            JArray dormantCameras = BuildCameraDisclosures(diagnostics.DormantCameras);
             int cameraRenders = diagnostics.Freshness?.CameraRenders ?? 0;
             string diagnosticText =
                 $"frameFresh={decision.FrameFresh} " +
                 $"cameraRenders={cameraRenders} " +
                 $"frameFreshReason={decision.FrameFreshReason} " +
                 $"isolatedCameraCount={isolatedCount} " +
-                $"contextCameraCount={diagnostics.ContextCameras.Count}";
+                $"contextCameraCount={diagnostics.ContextCameras.Count} " +
+                $"dormantCameraCount={diagnostics.DormantCameras.Count}";
             if (!string.IsNullOrEmpty(decision.Remediation))
                 diagnosticText += $" remediation={decision.Remediation}";
 
@@ -1124,6 +1145,8 @@ namespace McpUnity.Tools
             response["contextCameras"] = contextCameras;
             response["isolatedCameraCount"] = isolatedCount;
             response["contextCameraCount"] = diagnostics.ContextCameras.Count;
+            response["dormantCameras"] = dormantCameras;
+            response["dormantCameraCount"] = diagnostics.DormantCameras.Count;
 
             string message = response["message"]?.ToString();
             response["message"] = AppendMessageDiagnostics(message, diagnosticText);

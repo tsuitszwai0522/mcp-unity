@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Xml.Linq;
 using McpUnity.Unity;
@@ -1311,6 +1312,17 @@ namespace McpUnity.Services
             }
         }
 
+        // NUnit 寫 XML 前會以 TNode.EscapeInvalidXmlCharacters 把 XML 不容許的字元（含 lone surrogate）
+        // 換成字面反斜線＋u＋4 位小寫 hex；callback 的 FullName 保留原字元，比對前要套同一規則。
+        private static readonly Regex NUnitInvalidXmlCharacters = new Regex(
+            "[^\u0009\u000A\u000D\u0020-\uFFFD]|([\uD800-\uDBFF](?![\uDC00-\uDFFF]))|((?<![\uD800-\uDBFF])[\uDC00-\uDFFF])");
+
+        internal static string EscapeLikeNUnitXml(string value)
+        {
+            return value == null ? null : NUnitInvalidXmlCharacters.Replace(
+                value, match => "\\u" + ((int)match.Value[0]).ToString("x4", CultureInfo.InvariantCulture));
+        }
+
         internal static bool TryValidateArtifactConsistency(
             string artifactPath, JObject summary, JArray expectedLeaves, out string error)
         {
@@ -1351,7 +1363,7 @@ namespace McpUnity.Services
                         value => state == value || state.StartsWith(value + ":", StringComparison.Ordinal) ||
                             state.StartsWith(value + "(", StringComparison.Ordinal)) ?? state;
                     string[] expected = expectedLeaves.Select(node =>
-                        node.Value<string>("fullName") + "\n" + category(node.Value<string>("state") ?? ""))
+                        EscapeLikeNUnitXml(node.Value<string>("fullName")) + "\n" + category(node.Value<string>("state") ?? ""))
                         .OrderBy(value => value, StringComparer.Ordinal).ToArray();
                     string[] actual = leaves.Select(node => AttributeValue(node, "fullname") + "\n" +
                         AttributeValue(node, "result")).OrderBy(value => value, StringComparer.Ordinal).ToArray();

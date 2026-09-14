@@ -74,6 +74,7 @@ namespace McpUnity.Tests
                 "_subscribeCameraPreRender",
                 "_unsubscribeCameraPreRender",
                 "_findAllCameras",
+                "_findRenderingCameras",
                 "_findLoadedSceneHandles",
                 "_setCameraEnabled");
             SetGameViewSeam(
@@ -575,7 +576,7 @@ namespace McpUnity.Tests
             {
                 var orphanObject = new GameObject("S8InactiveTabOrphanCamera");
                 SceneManager.MoveGameObjectToScene(orphanObject, orphanScene);
-                Camera orphanCamera = orphanObject.AddComponent<Camera>();
+                Camera orphanCamera = WakeRenderingOrphan(orphanObject.AddComponent<Camera>());
                 SetGameViewSeam(
                     "_findAllCameras",
                     new Func<IEnumerable<Camera>>(() => new[] { orphanCamera }));
@@ -872,7 +873,7 @@ namespace McpUnity.Tests
                 {
                     var cameraObject = new GameObject($"S8OrphanCamera{index}");
                     SceneManager.MoveGameObjectToScene(cameraObject, orphanScene);
-                    orphanCameras.Add(cameraObject.AddComponent<Camera>());
+                    orphanCameras.Add(WakeRenderingOrphan(cameraObject.AddComponent<Camera>()));
                 }
 
                 Camera disabledOrphan = new GameObject("S8DisabledOrphanCamera")
@@ -973,7 +974,7 @@ namespace McpUnity.Tests
             {
                 var cameraObject = new GameObject("S8FailurePathOrphanCamera");
                 SceneManager.MoveGameObjectToScene(cameraObject, orphanScene);
-                Camera orphanCamera = cameraObject.AddComponent<Camera>();
+                Camera orphanCamera = WakeRenderingOrphan(cameraObject.AddComponent<Camera>());
                 SetGameViewSeam(
                     "_findAllCameras",
                     new Func<IEnumerable<Camera>>(() => new[] { orphanCamera }));
@@ -1028,7 +1029,7 @@ namespace McpUnity.Tests
             {
                 var cameraObject = new GameObject("S8UnknownFreshnessOrphanCamera");
                 SceneManager.MoveGameObjectToScene(cameraObject, orphanScene);
-                Camera orphanCamera = cameraObject.AddComponent<Camera>();
+                Camera orphanCamera = WakeRenderingOrphan(cameraObject.AddComponent<Camera>());
                 SetGameViewSeam(
                     "_findAllCameras",
                     new Func<IEnumerable<Camera>>(() => new[] { orphanCamera }));
@@ -1221,8 +1222,8 @@ namespace McpUnity.Tests
                 var secondOrphanObject = new GameObject("S8IsolationContinuesCamera");
                 SceneManager.MoveGameObjectToScene(orphanObject, orphanScene);
                 SceneManager.MoveGameObjectToScene(secondOrphanObject, orphanScene);
-                Camera orphanCamera = orphanObject.AddComponent<Camera>();
-                Camera secondOrphanCamera = secondOrphanObject.AddComponent<Camera>();
+                Camera orphanCamera = WakeRenderingOrphan(orphanObject.AddComponent<Camera>());
+                Camera secondOrphanCamera = WakeRenderingOrphan(secondOrphanObject.AddComponent<Camera>());
                 Camera renderedCamera = Track(new GameObject("S8IsolationObservedCamera"))
                     .AddComponent<Camera>();
                 SetGameViewSeam(
@@ -1275,6 +1276,112 @@ namespace McpUnity.Tests
         }
 
         [Test]
+        public void GameView_DormantOrphanCamera_IsDisclosedAndNeverToggled()
+        {
+            Scene orphanScene = EditorSceneManager.NewPreviewScene();
+            try
+            {
+                // 同 2026-09-14 隔離 Editor 實測形狀：先加 Camera，再搬入 preview scene ⇒ enabled 但休眠。
+                Camera dormantCamera = new GameObject("B2DormantOrphanCamera").AddComponent<Camera>();
+                SceneManager.MoveGameObjectToScene(dormantCamera.gameObject, orphanScene);
+                Assume.That(dormantCamera.enabled, Is.True);
+                Assert.IsFalse(Camera.allCameras.Contains(dormantCamera),
+                    "Precondition: a camera moved into a preview scene after AddComponent is dormant.");
+                Camera renderedCamera = Track(new GameObject("B2DormantRenderedCamera"))
+                    .AddComponent<Camera>();
+                SetGameViewSeam(
+                    "_findAllCameras",
+                    new Func<IEnumerable<Camera>>(() => new[] { dormantCamera }));
+                var toggles = new List<string>();
+                SetGameViewSeam(
+                    "_setCameraEnabled",
+                    new Action<Camera, bool>((camera, enabled) =>
+                    {
+                        toggles.Add($"{camera.name}={enabled}");
+                        camera.enabled = enabled;
+                    }));
+                TestEditorWindow window = CreateTestWindow();
+                RenderTexture source = CreateSolidRenderTexture(Color.magenta);
+                ConfigureRenderView(window, DummyMethod, (_, __) => source);
+                ConfigureHandshakeWithRenderedCameras(window, renderedCamera);
+
+                JObject result = ExecuteGameView();
+
+                AssertCapture(result, "render_view", false, null);
+                CollectionAssert.IsEmpty(toggles);
+                Assert.AreEqual(0, result["isolatedCameraCount"]?.ToObject<int>());
+                Assert.AreEqual(1, result["dormantCameraCount"]?.ToObject<int>());
+                Assert.AreEqual("B2DormantOrphanCamera", result["dormantCameras"]?[0]?["name"]?.ToString());
+                Assert.That(result["message"]?.ToString(), Does.Contain("dormantCameraCount=1"));
+                Assert.IsTrue(dormantCamera.enabled);
+                Assert.IsFalse(Camera.allCameras.Contains(dormantCamera),
+                    "Capturing must not wake a dormant orphan camera.");
+            }
+            finally
+            {
+                if (orphanScene.IsValid())
+                    EditorSceneManager.ClosePreviewScene(orphanScene);
+            }
+        }
+
+        [Test]
+        public void GameView_IsolatesRenderingOrphanButLeavesDormantSiblingUntouched()
+        {
+            Scene orphanScene = EditorSceneManager.NewPreviewScene();
+            try
+            {
+                var renderingObject = new GameObject("B2RenderingOrphanCamera");
+                var dormantObject = new GameObject("B2DormantSiblingCamera");
+                SceneManager.MoveGameObjectToScene(renderingObject, orphanScene);
+                SceneManager.MoveGameObjectToScene(dormantObject, orphanScene);
+                Camera renderingOrphan = renderingObject.AddComponent<Camera>();
+                Camera dormantSibling = dormantObject.AddComponent<Camera>();
+                Camera renderedCamera = Track(new GameObject("B2SiblingRenderedCamera"))
+                    .AddComponent<Camera>();
+                SetGameViewSeam(
+                    "_findAllCameras",
+                    new Func<IEnumerable<Camera>>(() => new[] { renderingOrphan, dormantSibling }));
+                SetGameViewSeam(
+                    "_findRenderingCameras",
+                    new Func<IEnumerable<Camera>>(() => new[] { renderingOrphan, renderedCamera }));
+                var toggles = new List<string>();
+                SetGameViewSeam(
+                    "_setCameraEnabled",
+                    new Action<Camera, bool>((camera, enabled) =>
+                    {
+                        toggles.Add($"{camera.name}={enabled}");
+                        camera.enabled = enabled;
+                    }));
+                TestEditorWindow window = CreateTestWindow();
+                RenderTexture source = CreateSolidRenderTexture(Color.magenta);
+                bool renderingOrphanDisabledDuringRender = false;
+                ConfigureRenderView(window, DummyMethod, (_, __) =>
+                {
+                    renderingOrphanDisabledDuringRender = !renderingOrphan.enabled;
+                    return source;
+                });
+                ConfigureHandshakeWithRenderedCameras(window, renderedCamera);
+
+                JObject result = ExecuteGameView();
+
+                AssertCapture(result, "render_view", false, null);
+                Assert.IsTrue(renderingOrphanDisabledDuringRender);
+                CollectionAssert.AreEqual(
+                    new[] { "B2RenderingOrphanCamera=False", "B2RenderingOrphanCamera=True" }, toggles);
+                Assert.AreEqual(1, result["isolatedCameraCount"]?.ToObject<int>());
+                Assert.AreEqual(1, result["dormantCameraCount"]?.ToObject<int>());
+                Assert.AreEqual("B2DormantSiblingCamera", result["dormantCameras"]?[0]?["name"]?.ToString());
+                Assert.IsTrue(renderingOrphan.enabled);
+                Assert.IsTrue(dormantSibling.enabled);
+            }
+            finally
+            {
+                if (orphanScene.IsValid())
+                    EditorSceneManager.ClosePreviewScene(orphanScene);
+            }
+        }
+
+        [Test]
         public void GameView_IsolationRestoreFailure_DoesNotReplaceResultOrSkipOtherCameras()
         {
             Scene orphanScene = EditorSceneManager.NewPreviewScene();
@@ -1284,8 +1391,8 @@ namespace McpUnity.Tests
                 var secondObject = new GameObject("S8RestoredAfterFailureCamera");
                 SceneManager.MoveGameObjectToScene(firstObject, orphanScene);
                 SceneManager.MoveGameObjectToScene(secondObject, orphanScene);
-                Camera firstCamera = firstObject.AddComponent<Camera>();
-                Camera secondCamera = secondObject.AddComponent<Camera>();
+                Camera firstCamera = WakeRenderingOrphan(firstObject.AddComponent<Camera>());
+                Camera secondCamera = WakeRenderingOrphan(secondObject.AddComponent<Camera>());
                 Camera renderedCamera = Track(new GameObject("S8RestoreRenderedCamera"))
                     .AddComponent<Camera>();
                 SetGameViewSeam(
@@ -1335,7 +1442,7 @@ namespace McpUnity.Tests
             {
                 var cameraObject = new GameObject("S8CreateFailureOrphanCamera");
                 SceneManager.MoveGameObjectToScene(cameraObject, orphanScene);
-                Camera orphanCamera = cameraObject.AddComponent<Camera>();
+                Camera orphanCamera = WakeRenderingOrphan(cameraObject.AddComponent<Camera>());
                 SetGameViewSeam(
                     "_findAllCameras",
                     new Func<IEnumerable<Camera>>(
@@ -1434,7 +1541,7 @@ namespace McpUnity.Tests
             {
                 var orphanObject = new GameObject("T1MethodMissingOrphanCamera");
                 SceneManager.MoveGameObjectToScene(orphanObject, orphanScene);
-                Camera orphanCamera = orphanObject.AddComponent<Camera>();
+                Camera orphanCamera = WakeRenderingOrphan(orphanObject.AddComponent<Camera>());
                 SetGameViewSeam(
                     "_findAllCameras",
                     new Func<IEnumerable<Camera>>(() => new[] { orphanCamera }));
@@ -1513,7 +1620,7 @@ namespace McpUnity.Tests
             {
                 var orphanObject = new GameObject("S8MainFallbackOrphanCamera");
                 SceneManager.MoveGameObjectToScene(orphanObject, orphanScene);
-                Camera orphanCamera = orphanObject.AddComponent<Camera>();
+                Camera orphanCamera = WakeRenderingOrphan(orphanObject.AddComponent<Camera>());
                 SetGameViewSeam(
                     "_findAllCameras",
                     new Func<IEnumerable<Camera>>(() => new[] { orphanCamera }));
@@ -2227,6 +2334,17 @@ namespace McpUnity.Tests
             if (field == null)
                 throw new MissingFieldException(ownerType.FullName, name);
             return field.GetValue(null);
+        }
+
+        // 2026-09-14：先搬入 preview scene 再 AddComponent 的 Camera 係 enabled 但休眠（唔喺 Camera.allCameras），
+        // 截圖工具唔會隔離佢。要模擬「正在參與 render 的孤兒」就做一次真 enabled 轉換令佢註冊。
+        private static Camera WakeRenderingOrphan(Camera camera)
+        {
+            camera.enabled = false;
+            camera.enabled = true;
+            Assert.That(Camera.allCameras, Does.Contain(camera),
+                "Precondition: an enabled false->true transition registers the orphan camera for rendering.");
+            return camera;
         }
 
         private static void SetPrivateStaticField(Type ownerType, string name, object value)

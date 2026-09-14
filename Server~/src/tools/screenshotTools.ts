@@ -8,7 +8,7 @@ import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 // --- screenshot_game_view ---
 
 const gameViewToolName = 'screenshot_game_view';
-const gameViewToolDescription = 'Captures a screenshot from the Game View, reflecting what the player sees. Only frameFresh=verified means the pixels reflect the current scene. When frameFreshReason includes game_view_not_active_tab, retry with force_focus=true so the Game View becomes the active tab and rerenders before capture through Unity\'s normal path. When it includes repaint_immediately_unavailable:, retry with force_focus=true only when isolatedCameraCount=0; focus cannot repair the post-isolation frame while isolated cameras exist. no_camera_render has no force-focus remediation. While Prefab contents are open, failed Game View capture never falls back to a loaded scene Main Camera.';
+const gameViewToolDescription = 'Captures a screenshot from the Game View, reflecting what the player sees. Only frameFresh=verified means the pixels reflect the current scene. When frameFreshReason includes game_view_not_active_tab, retry with force_focus=true so the Game View becomes the active tab and rerenders before capture through Unity\'s normal path. When it includes repaint_immediately_unavailable:, retry with force_focus=true only when isolatedCameraCount=0; focus cannot repair the post-isolation frame while isolated cameras exist. no_camera_render has no force-focus remediation. Orphan preview-scene cameras that are enabled but not currently rendering (absent from Camera.allCameras) are left untouched and disclosed as dormantCameras, because toggling them would make them start rendering. While Prefab contents are open, failed Game View capture never falls back to a loaded scene Main Camera.';
 
 function screenshotDimension(name: 'width' | 'height') {
   const message = `Screenshot ${name} must be between 1 and 4096 pixels (maximum 4096)`;
@@ -162,6 +162,14 @@ async function screenshotHandler(mcpUnity: McpUnity, toolName: string, params: a
         diagnostics.push('contextCameraCount=unknown');
         s8bUnityMetadataAbsent = true;
       }
+    }
+    if (!message.includes('dormantCameras=') && Array.isArray(response.dormantCameras)) {
+      diagnostics.push(`dormantCameras=${JSON.stringify(response.dormantCameras)}`);
+    }
+    if (!message.includes('dormantCameraCount=')) {
+      diagnostics.push(Number.isInteger(response.dormantCameraCount)
+        ? `dormantCameraCount=${response.dormantCameraCount}`
+        : 'dormantCameraCount=unknown');
     }
   }
 

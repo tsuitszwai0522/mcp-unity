@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [fork-1.19.8] - 2026-09-14
+
+### Fixed
+- `run_tests`/`get_test_run` artifact consistency gate: callback leaf names are now escaped with NUnit's own XML rule (`TNode.EscapeInvalidXmlCharacters`: characters outside `\t \n \r U+0020–U+FFFD` and lone surrogates become a literal backslash-u sequence with four lowercase hex digits) before comparison with XML `fullname`. Previously any `[TestCase]` argument containing such a character (for example U+0001) made the run `untrusted` even though every XML leaf matched.
+- `screenshot_game_view` no longer wakes dormant orphan cameras. A preview-scene `Camera` can be enabled yet absent from `Camera.allCameras` (not rendering) until an `enabled` false→true transition registers it; isolating and restoring such a camera registered it and let it hijack later Game View frames. Only orphan cameras present in `Camera.allCameras` are isolated; dormant ones are left untouched and disclosed as `dormantCameras`/`dormantCameraCount` (additive fields, also in the message diagnostics).
+
+### Validation
+- Isolated Unity 2022.3.62f3 GUI Editors, built-in RP and URP 14.0.12, fork-1.19.7 archive vs this tree: orphans created by `NewPreviewScene`+`MoveGameObjectToScene` and by an unreleased `PrefabUtility.LoadPrefabContents` were both dormant (absent from `Camera.allCameras`, not rendering). On 1.19.7 one screenshot made each start rendering; on this tree they stayed dormant and were disclosed, while an already-rendering orphan was still isolated and restored.
+- `McpUnity.Editor.Tests` via MCP: 578/578 with matching callback/XML leaves, including a real `[TestCase]` whose name contains U+0001. Four mutations (no escape, uppercase hex, no dormant skip, no dormant disclosure) each turned the targeted tests red; the no-escape mutation also made the U+0001 fixture run `untrusted` again. Nine existing isolation tests now wake their orphan cameras with a real enabled transition, because cameras added after moving into a preview scene are dormant.
+- Node: 33 suites / 344 tests.
+
 ## [fork-1.19.7] - 2026-09-14
 
 ### Fixed

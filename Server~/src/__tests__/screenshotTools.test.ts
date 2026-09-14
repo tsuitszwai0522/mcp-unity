@@ -186,6 +186,57 @@ describe('screenshot_game_view', () => {
     expect(result).not.toHaveProperty('structuredContent');
   });
 
+  it('discloses dormant orphan cameras once and marks missing dormant metadata as unknown', async () => {
+    (mockSendRequest as any).mockResolvedValueOnce({
+      success: true,
+      mimeType: 'image/png',
+      data: 'iVBORw0KGgo=',
+      message: 'Game View screenshot captured [capturePath=render_view degraded=false frameFresh=verified cameraRenders=1 frameFreshReason=camera_render_observed isolatedCameraCount=0 contextCameraCount=0 dormantCameraCount=1]',
+      capturePath: 'render_view',
+      degraded: false,
+      frameFresh: 'verified',
+      cameraRenders: 1,
+      frameFreshReason: 'camera_render_observed',
+      isolatedCameras: [],
+      isolatedCameraCount: 0,
+      contextCameras: [],
+      contextCameraCount: 0,
+      dormantCameras: [{ name: 'DormantPreviewCamera', scenePath: '' }],
+      dormantCameraCount: 1,
+    });
+    const handler = getHandler('screenshot_game_view');
+
+    const text = (await handler({ width: 320, height: 180 })).content[0].text;
+    expect(text.split('dormantCameraCount=1')).toHaveLength(2);
+    expect(text).toContain('dormantCameras=[{"name":"DormantPreviewCamera","scenePath":""}]');
+
+    (mockSendRequest as any).mockResolvedValueOnce({
+      success: true,
+      mimeType: 'image/png',
+      data: 'iVBORw0KGgo=',
+      message: 'Game View screenshot captured',
+      capturePath: 'render_view',
+      degraded: false,
+      frameFresh: 'verified',
+      cameraRenders: 1,
+      frameFreshReason: 'camera_render_observed',
+      isolatedCameras: [],
+      isolatedCameraCount: 0,
+      contextCameras: [],
+      contextCameraCount: 0,
+    });
+    const legacyText = (await handler({ width: 320, height: 180 })).content[0].text;
+    expect(legacyText).toContain('dormantCameraCount=unknown');
+    expect(legacyText).not.toContain('dormantCameras=');
+  });
+
+  it('describes dormant orphan cameras as untouched', () => {
+    registerScreenshotTools(mockServer, mockMcpUnity, mockLogger);
+    const gameViewCall = mockServerTool.mock.calls.find((c) => c[0] === 'screenshot_game_view');
+    expect(gameViewCall?.[1]).toContain('absent from Camera.allCameras');
+    expect(gameViewCall?.[1]).toContain('disclosed as dormantCameras');
+  });
+
   it('does not apply Game View S8-b enrichment to other screenshot tools', async () => {
     (mockSendRequest as any).mockResolvedValue({
       success: true,

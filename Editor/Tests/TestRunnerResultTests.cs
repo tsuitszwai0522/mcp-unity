@@ -1574,6 +1574,75 @@ namespace McpUnity.Tests
             finally { DeleteArtifactDirectory(directory); }
         }
 
+        // NUnit 寫 XML 時把 XML 不容許的字元轉成字面反斜線 u 序列；gate 要以同一規則比對 callback 名。
+        [TestCase("control", true)]
+        [TestCase("loneHigh", true)]
+        [TestCase("loneLow", true)]
+        [TestCase("validPair", true)]
+        [TestCase("literalBackslashU", true)]
+        [TestCase("wrongEscape", false)]
+        [TestCase("nameMismatchAfterEscaping", false)]
+        public void ArtifactConsistencyMatchesNUnitEscapedLeafNames(string condition, bool expected)
+        {
+            string directory = PrepareArtifactDirectory(nameof(ArtifactConsistencyMatchesNUnitEscapedLeafNames) + condition);
+            try
+            {
+                Directory.CreateDirectory(directory);
+                string path = Path.Combine(directory, "result.xml");
+                string callbackName;
+                string xmlName;
+                switch (condition)
+                {
+                    case "control": callbackName = "Case(a" + (char)1 + "b)"; xmlName = "Case(a\\u0001b)"; break;
+                    case "loneHigh": callbackName = "Case(a" + (char)0xD800 + "b)"; xmlName = "Case(a\\ud800b)"; break;
+                    case "loneLow": callbackName = "Case(a" + (char)0xDC00 + "b)"; xmlName = "Case(a\\udc00b)"; break;
+                    case "validPair": callbackName = "Case(a" + (char)0xD83D + (char)0xDE00 + "b)"; xmlName = callbackName; break;
+                    case "literalBackslashU": callbackName = "Case(a\\u0001b)"; xmlName = "Case(a\\u0001b)"; break;
+                    case "wrongEscape": callbackName = "Case(a" + (char)1 + "b)"; xmlName = "Case(a\\u0002b)"; break;
+                    default: callbackName = "Case(ab)"; xmlName = "Case(a\\u0001b)"; break;
+                }
+                var root = new XElement("test-run", new XAttribute("result", "Passed"),
+                    new XElement("test-case", new XAttribute("fullname", xmlName), new XAttribute("result", "Passed")));
+                var leaves = new JArray { new JObject { ["fullName"] = callbackName, ["state"] = "Passed" } };
+                var summary = new JObject { ["testCount"] = 1, ["passCount"] = 1, ["failCount"] = 0,
+                    ["skipCount"] = 0, ["inconclusiveCount"] = 0, ["resultState"] = "Passed" };
+                new XDocument(root).Save(path);
+                Assert.AreEqual(expected, TestRunnerService.TryValidateArtifactConsistency(path, summary, leaves, out string error), error);
+            }
+            finally { DeleteArtifactDirectory(directory); }
+        }
+
+        [Test]
+        public void EscapeLikeNUnitXmlMatchesNUnitAttributeWriterForEveryCharacterClass()
+        {
+            var samples = new List<string>();
+            for (int code = 0; code < 0x20; code++) samples.Add("x" + (char)code + "y");
+            foreach (int code in new[] { 0x7F, 0x85, 0x2028, 0xD7FF, 0xE000, 0xFFFD, 0xFFFE, 0xFFFF })
+                samples.Add("x" + (char)code + "y");
+            samples.Add("x" + (char)0xD800 + "y");
+            samples.Add("x" + (char)0xDBFF + (char)0xDBFF + "y");
+            samples.Add("x" + (char)0xDC00 + "y");
+            samples.Add("x" + (char)0xD83D + (char)0xDE00 + "y");
+            samples.Add("x" + (char)0xDE00 + (char)0xD83D + "y");
+            samples.Add("x\\u0001y");
+            foreach (string sample in samples)
+            {
+                var node = new NUnit.Framework.Interfaces.TNode("test-case");
+                node.AddAttribute("fullname", sample);
+                string written = XElement.Parse(node.OuterXml).Attribute("fullname").Value;
+                Assert.AreEqual(written, TestRunnerService.EscapeLikeNUnitXml(sample),
+                    "Mismatch for UTF-16 units: " + string.Join(" ", sample.Select(c => ((int)c).ToString("x4"))));
+            }
+        }
+
+        // 真 TestCase 名含 U+0001：經 MCP 跑本 fixture 時，舊 gate 會判 untrusted（2026-09-14 ProjectT 實例）。
+        [TestCase("control" + "\u0001" + "name")]
+        public void ControlCharacterTestCaseNameDoesNotBreakArtifactTrust(string name)
+        {
+            Assert.AreEqual(12, name.Length);
+            Assert.AreEqual(1, (int)name[7]);
+        }
+
         [TestCase(false)]
         [TestCase(true)]
         public void ContradictoryArtifactCannotPublishOrReplayPass(bool tamperAfterCompletion)
