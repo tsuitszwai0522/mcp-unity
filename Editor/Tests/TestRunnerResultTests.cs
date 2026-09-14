@@ -1458,6 +1458,77 @@ namespace McpUnity.Tests
             }
         }
 
+        [Test, Timeout(2000)]
+        public async Task StoppedFrameworkWithoutResultInvalidatesPendingRunAndAllowsExplicitRecovery()
+        {
+            string directory = PrepareArtifactDirectory(nameof(StoppedFrameworkWithoutResultInvalidatesPendingRunAndAllowsExplicitRecovery));
+            DateTime now = new DateTime(2026, 9, 12, 12, 0, 0, DateTimeKind.Utc);
+            const string oldId = "26262626-2626-2626-2626-262626262626";
+            try
+            {
+                var api = new FakeTestRunnerApi(oldId, ArtifactSaveBehavior.ValidXml);
+                var registry = new InMemoryTestRunRegistry();
+                var service = new TestRunnerService(api, registry, directory,
+                    _ => new TaskCompletionSource<bool>().Task, () => now, frameworkRunActive: () => false);
+                Task<JObject> pending = service.ExecuteTestsAsync(TestMode.EditMode, false, false, "Cancelled");
+                api.StartRun("Cancelled");
+                Assert.AreEqual("running", service.GetTestRun(oldId).Value<string>("status"));
+                now += TestRunnerService.InactiveRunGrace;
+                JObject gate = await service.ExecuteTestsAsync(TestMode.EditMode, false, false, "DoNotStartYet");
+                Assert.AreEqual("untrusted", gate.Value<string>("status"));
+                Assert.AreEqual(1, api.ExecuteCalls);
+                JObject reply = await pending;
+                Assert.AreEqual(oldId, reply.Value<string>("invalidatedRunId"));
+                Assert.IsTrue(reply.Value<bool>("lockReleased"));
+                Assert.IsNull(reply["results"]); Assert.IsNull(reply["artifactPath"]);
+                api.CompleteSuccessfulRun("LateForeignResult");
+                Assert.AreEqual("untrusted", service.GetTestRun(oldId).Value<string>("status"));
+                Assert.IsFalse(File.Exists(Path.Combine(directory, oldId + ".xml")));
+                api.RunId = "27272727-2727-2727-2727-272727272727";
+                Task<JObject> recovery = service.ExecuteTestsAsync(TestMode.EditMode, false, false, "Recovery");
+                api.StartRun("Recovery"); api.CompleteSuccessfulRun("Recovery");
+                Assert.AreEqual(api.RunId, (await recovery).Value<string>("runId"));
+                Assert.AreEqual("completed", service.GetTestRun(api.RunId).Value<string>("status"));
+                Assert.AreEqual("untrusted", service.GetTestRun(oldId).Value<string>("status"));
+            }
+            finally { DeleteArtifactDirectory(directory); }
+        }
+
+        [TestCase("active")]
+        [TestCase("unknown")]
+        [TestCase("throws")]
+        [TestCase("unstarted")]
+        [TestCase("short")]
+        [TestCase("reset")]
+        public async Task InactiveProbeDoesNotReleaseUnconfirmedRun(string condition)
+        {
+            string directory = PrepareArtifactDirectory(nameof(InactiveProbeDoesNotReleaseUnconfirmedRun) + condition);
+            DateTime now = new DateTime(2026, 9, 12, 12, 0, 0, DateTimeKind.Utc);
+            bool? active = false;
+            try
+            {
+                var api = new FakeTestRunnerApi("28282828-2828-2828-2828-282828282828", ArtifactSaveBehavior.ValidXml);
+                var service = new TestRunnerService(api, new InMemoryTestRunRegistry(), directory,
+                    _ => Task.CompletedTask, () => now, frameworkRunActive: () => {
+                        if (condition == "throws") throw new InvalidOperationException("probe unavailable");
+                        return active;
+                    });
+                await service.ExecuteTestsAsync(TestMode.EditMode, false, false, "StillTracked");
+                if (condition != "unstarted") api.StartRun("StillTracked");
+                if (condition == "active") active = true;
+                if (condition == "unknown") active = null;
+                service.GetTestRun(api.RunId);
+                now += TimeSpan.FromSeconds(condition == "short" ? 1 : 3);
+                if (condition == "reset") {
+                    active = true; service.GetTestRun(api.RunId); active = false;
+                }
+                Assert.AreEqual("running", service.GetTestRun(api.RunId).Value<string>("status"));
+                api.CompleteSuccessfulRun("StillTracked");
+                Assert.AreEqual("completed", service.GetTestRun(api.RunId).Value<string>("status"));
+            }
+            finally { DeleteArtifactDirectory(directory); }
+        }
+
         [Test]
         public async Task StaleActiveRunReleasesLockAndDisclosesRetry()
         {

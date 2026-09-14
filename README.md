@@ -94,10 +94,16 @@ The following tools are available for manipulating and querying Unity scenes and
 
 `run_tests` permits one tracked run at a time because Unity's global test callbacks do not identify
 which run emitted them. A concurrent MCP request returns `test_run_in_progress`. Wait for the active
-run and poll it; the lock normally clears on `RunFinished`. If Unity never emits that callback after a
-cancel, terminal framework error, or compile interruption, the record becomes stale after 24 hours:
-the next poll or `run_tests` call releases the lock, reports `lockReleased:true`, and asks the caller to
-retry. Starting another run from Unity's Test Runner window while an MCP run is active emits a second
+run and poll it; the lock normally clears on `RunFinished`. If a started run stops without that callback,
+`get_test_run` or the new-run guard can reconcile it: a supported Unity framework activity probe must
+report no active jobs on consecutive observations at least two seconds apart. The record becomes
+`untrusted`, the pending request is resolved without results or an artifact, and `lockReleased:true`
+is returned. A new-run request that performs this reconciliation does not also launch a replacement;
+verify owned resource cleanup before an explicit retry. Cancellation can skip fixture `finally` and
+teardown, so framework inactivity does not prove cleanup. This probe uses an internal UTF API;
+unavailable probes and compilation/import report unknown and retain the lock. No background polling
+or cancellation endpoint is added. The existing 24-hour stale fallback still applies if reconciliation
+cannot establish inactivity. Starting another run from Unity's Test Runner window while an MCP run is active emits a second
 `RunStarted`; the MCP record is then marked `untrusted`, its result is discarded, and no result is
 published under the MCP run's `runId`.
 

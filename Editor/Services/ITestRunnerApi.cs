@@ -1,4 +1,6 @@
 using System;
+using System.Reflection;
+using UnityEditor;
 using UnityEditor.TestTools.TestRunner.Api;
 using UnityEngine;
 
@@ -23,6 +25,25 @@ namespace McpUnity.Services
         public UnityTestRunnerApi()
         {
             _api = ScriptableObject.CreateInstance<TestRunnerApi>();
+        }
+
+        // UTF 活動 API 為 internal；不支援或 reload/import 時視為未知，不能据此解鎖。
+        internal static bool? GetFrameworkRunActive()
+        {
+            if (EditorApplication.isCompiling || EditorApplication.isUpdating)
+                return null;
+            try
+            {
+                MethodInfo method = typeof(TestRunnerApi).GetMethod(
+                    "IsRunActive", BindingFlags.Static | BindingFlags.NonPublic);
+                if (method == null || method.ReturnType != typeof(bool))
+                    return null;
+                return (bool)method.Invoke(null, null);
+            }
+            catch (Exception)
+            {
+                return null;
+            }
         }
 
         public string Execute(ExecutionSettings executionSettings)

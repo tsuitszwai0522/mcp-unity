@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [fork-1.19.5] - 2026-09-14
+
+### Fixed
+- Reconcile a started test run that stops without `RunFinished`: polling or the new-run guard marks it `untrusted` only after the framework reports no active jobs across observations at least two seconds apart. Release the tracking lock without inventing results or an artifact; an explicit subsequent request is required to start a replacement.
+- Keep the lock when framework activity is unknown, compilation/import is active, `RunStarted` was not observed, or the inactivity window is too short. The internal UTF activity API is queried conservatively; no cancellation endpoint or background polling is added.
+
+### Validation and limits
+- Unity 2022.3.62f3 / UTF 1.4.5 isolated Editor: direct cancellation reproduced the original stuck lock, and the fix returned `untrusted`; recovery sentinel passed after explicit owned resource cleanup.
+- Seven new regression cases passed. The affected fixture initially passed 59/61; two existing one-second resource timeouts each passed an unchanged isolated recheck. Initial failures are retained; their cause is not established.
+- Cancellation still did not emit result callbacks/XML or run fixture `finally`/teardown in the probe. This release does not promise automatic resource cleanup or support for every UTF version.
+
 ## [fork-1.19.4] - 2026-09-12
 
 ### Fixed

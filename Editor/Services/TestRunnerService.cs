@@ -263,6 +263,10 @@ namespace McpUnity.Services
         private readonly Func<DateTime> _utcNow;
         private readonly Action<string> _pruneArtifacts;
         private ActiveRun _activeRun;
+        private readonly Func<bool?> _frameworkRunActive;
+        private DateTime? _inactiveObservedAt;
+        private string _inactiveObservedRunId;
+        internal static readonly TimeSpan InactiveRunGrace = TimeSpan.FromSeconds(2);
 
         /// <summary>
         /// Constructor. The optional API seam allows deterministic tests while preserving the
@@ -274,7 +278,10 @@ namespace McpUnity.Services
                 new SessionStateTestRunRegistry(),
                 GetDefaultArtifactDirectory(),
                 duration => Task.Delay(duration),
-                () => DateTime.UtcNow)
+                () => DateTime.UtcNow,
+                frameworkRunActive: testRunnerApi == null || testRunnerApi is UnityTestRunnerApi
+                    ? (Func<bool?>)UnityTestRunnerApi.GetFrameworkRunActive
+                    : null)
         {
         }
 
@@ -284,7 +291,8 @@ namespace McpUnity.Services
             string artifactDirectory,
             Func<TimeSpan, Task> delay = null,
             Func<DateTime> utcNow = null,
-            Action<string> pruneArtifacts = null)
+            Action<string> pruneArtifacts = null,
+            Func<bool?> frameworkRunActive = null)
         {
             _testRunnerApi = testRunnerApi ?? throw new ArgumentNullException(nameof(testRunnerApi));
             _registry = registry ?? throw new ArgumentNullException(nameof(registry));
@@ -292,6 +300,7 @@ namespace McpUnity.Services
             _delay = delay ?? (duration => Task.Delay(duration));
             _utcNow = utcNow ?? (() => DateTime.UtcNow);
             _pruneArtifacts = pruneArtifacts ?? (Action<string>)PruneArtifacts;
+            _frameworkRunActive = frameworkRunActive;
             _testRunnerApi.RegisterCallbacks(this);
 
             TestRunRecord persistedRun = _registry.GetActive();
@@ -353,6 +362,11 @@ namespace McpUnity.Services
                         "test_run_state_invalid");
                 }
 
+                if (ReconcileInactiveRun(activeRecord))
+                {
+                    // 本次僅回報舊 run 終止；下一個明確請求才可開新 run。
+                    return GetTestRun(activeRecord.RunId);
+                }
                 if (IsStale(activeRecord, _utcNow(), out string staleReason))
                 {
                     return ReleaseStaleRun(activeRecord, staleReason);
@@ -481,6 +495,11 @@ namespace McpUnity.Services
                         ? "No Unity test run is recorded in this Editor session."
                         : $"Unity test run '{normalizedRunId}' was not found in this Editor session.",
                     metadata);
+            }
+
+            if (record.Status == TestRunStatus.Running && ReconcileInactiveRun(record))
+            {
+                record = _registry.Get(record.RunId);
             }
 
             if (record.Status == TestRunStatus.Running)
@@ -915,6 +934,42 @@ namespace McpUnity.Services
                 error = exception.Message;
                 return false;
             }
+        }
+
+        private bool ReconcileInactiveRun(TestRunRecord record)
+        {
+            // 啟動前或狀態未知都不能把「暫未跑」當作取消／完成。
+            bool? active = null;
+            try { active = _frameworkRunActive?.Invoke(); }
+            catch (Exception) { /* 第三方探針失敗時保守維持鎖。 */ }
+            if (record?.Status != TestRunStatus.Running || !record.RunStartedObserved || active != false)
+            {
+                _inactiveObservedAt = null;
+                _inactiveObservedRunId = null;
+                return false;
+            }
+            DateTime now = _utcNow();
+            if (_inactiveObservedAt == null || _inactiveObservedRunId != record.RunId || now < _inactiveObservedAt.Value)
+            {
+                _inactiveObservedAt = now;
+                _inactiveObservedRunId = record.RunId;
+                return false;
+            }
+            if (now - _inactiveObservedAt.Value < InactiveRunGrace)
+                return false;
+            if (_activeRun == null)
+                RestoreActiveRun();
+            if (_activeRun?.Record.RunId != record.RunId)
+                return false;
+            InvalidateActiveRun(
+                $"Test run '{record.RunId}' has no RunFinished result, while Unity reports no active " +
+                $"framework jobs across polls at least {InactiveRunGrace.TotalSeconds:0} seconds apart. " +
+                "It may have been cancelled or interrupted; no trustworthy result is available. " +
+                "The active-run lock was released. Verify owned resource cleanup and that all " +
+                "Test Runner jobs have stopped before retrying run_tests; fixture teardown is not guaranteed.");
+            _inactiveObservedAt = null;
+            _inactiveObservedRunId = null;
+            return true;
         }
 
         private bool IsStale(
