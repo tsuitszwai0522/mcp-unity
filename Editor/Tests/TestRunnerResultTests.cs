@@ -11,6 +11,7 @@ using McpUnity.Resources;
 using McpUnity.Services;
 using McpUnity.Tools;
 using McpUnity.Unity;
+using McpUnity.Utils;
 using Newtonsoft.Json.Linq;
 using NUnit.Framework;
 using NUnit.Framework.Interfaces;
@@ -860,6 +861,90 @@ namespace McpUnity.Tests
 
                 Assert.AreEqual(1, api.ExecuteCalls);
                 Assert.IsFalse(runB.Value<bool>("success"));
+                Assert.AreEqual("test_run_in_progress", runB.Value<string>("error_code"));
+                Assert.AreEqual(unityRunId, runB.Value<string>("activeRunId"));
+
+                api.CompleteSuccessfulRun("RunA.Test");
+                await runA;
+            }
+            finally
+            {
+                DeleteArtifactDirectory(artifactDirectory);
+            }
+        }
+
+        [Test]
+        public void DirtyScenesRefuseRunWithoutExecuteLockOrSideEffects()
+        {
+            RunCompletedTask(() => DirtyScenesRefuseRunWithoutExecuteLockOrSideEffectsAsync());
+        }
+
+        private async Task DirtyScenesRefuseRunWithoutExecuteLockOrSideEffectsAsync()
+        {
+            const string unityRunId = "3a3a3a3a-3a3a-3a3a-3a3a-3a3a3a3a3a3a";
+            string artifactDirectory = PrepareArtifactDirectory(nameof(DirtyScenesRefuseRunWithoutExecuteLockOrSideEffects));
+            try
+            {
+                var dirty = new List<DirtySceneInfo>
+                {
+                    new DirtySceneInfo { Name = "Level", Path = "Assets/Scenes/Level.unity" },
+                    new DirtySceneInfo { Name = string.Empty, Path = string.Empty }
+                };
+                var api = new FakeTestRunnerApi(unityRunId, ArtifactSaveBehavior.ValidXml);
+                var registry = new InMemoryTestRunRegistry();
+                var service = new TestRunnerService(api, registry, artifactDirectory, dirtyScenes: () => dirty);
+
+                JObject refused = await service.ExecuteTestsAsync(TestMode.EditMode, false, false, "RunA");
+
+                Assert.AreEqual(0, api.ExecuteCalls);
+                Assert.IsFalse(refused.Value<bool>("success"));
+                Assert.AreEqual(TestRunnerService.DirtyScenesErrorCode, refused.Value<string>("error_code"));
+                StringAssert.Contains("'Assets/Scenes/Level.unity'", refused.Value<string>("message"));
+                StringAssert.Contains("No test run was started", refused.Value<string>("message"));
+                var scenes = (JArray)refused["dirtyScenes"];
+                Assert.AreEqual(2, scenes.Count);
+                Assert.AreEqual("Assets/Scenes/Level.unity", scenes[0].Value<string>("path"));
+                Assert.IsFalse(scenes[0].Value<bool>("untitled"));
+                Assert.AreEqual(JTokenType.Null, scenes[1]["path"].Type);
+                Assert.IsTrue(scenes[1].Value<bool>("untitled"));
+                Assert.IsNull(refused["runId"]);
+                Assert.IsNull(registry.GetActive(), "A refused run must not take the active-run lock.");
+
+                dirty.Clear();
+                Task<JObject> started = service.ExecuteTestsAsync(TestMode.EditMode, false, false, "RunA");
+                Assert.AreEqual(1, api.ExecuteCalls, "Once scenes are clean the next request runs normally.");
+                api.CompleteSuccessfulRun("RunA.Test");
+                JObject completed = await started;
+                Assert.AreEqual(unityRunId, completed.Value<string>("runId"));
+            }
+            finally
+            {
+                DeleteArtifactDirectory(artifactDirectory);
+            }
+        }
+
+        [Test]
+        public void ActiveRunIsReportedBeforeDirtyScenes()
+        {
+            RunCompletedTask(() => ActiveRunIsReportedBeforeDirtyScenesAsync());
+        }
+
+        private async Task ActiveRunIsReportedBeforeDirtyScenesAsync()
+        {
+            const string unityRunId = "3b3b3b3b-3b3b-3b3b-3b3b-3b3b3b3b3b3b";
+            string artifactDirectory = PrepareArtifactDirectory(nameof(ActiveRunIsReportedBeforeDirtyScenes));
+            try
+            {
+                var dirty = new List<DirtySceneInfo>();
+                var api = new FakeTestRunnerApi(unityRunId, ArtifactSaveBehavior.ValidXml);
+                var service = new TestRunnerService(
+                    api, new InMemoryTestRunRegistry(), artifactDirectory, dirtyScenes: () => dirty);
+                Task<JObject> runA = service.ExecuteTestsAsync(TestMode.EditMode, false, false, "RunA");
+
+                dirty.Add(new DirtySceneInfo { Name = "Level", Path = "Assets/Scenes/Level.unity" });
+                JObject runB = await service.ExecuteTestsAsync(TestMode.EditMode, false, false, "RunB");
+
+                Assert.AreEqual(1, api.ExecuteCalls);
                 Assert.AreEqual("test_run_in_progress", runB.Value<string>("error_code"));
                 Assert.AreEqual(unityRunId, runB.Value<string>("activeRunId"));
 

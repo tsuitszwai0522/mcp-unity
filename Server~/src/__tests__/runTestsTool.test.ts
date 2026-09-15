@@ -172,4 +172,33 @@ describe('run_tests result forwarding', () => {
       error_code: 'test_run_in_progress',
     });
   });
+
+  it('forwards dirtyScenes when Unity refuses to start a run with unsaved scenes', async () => {
+    const dirtyScenes = [
+      { name: 'Level', path: 'Assets/Scenes/Level.unity', untitled: false },
+      { name: '', path: null, untitled: true },
+    ];
+    mockSendRequest.mockResolvedValue({
+      success: false,
+      error_code: 'dirty_scenes_present',
+      message: "2 loaded scene(s) have unsaved changes: 'Assets/Scenes/Level.unity', 'Untitled' (untitled).",
+      dirtyScenes,
+    });
+
+    const result = await getToolHandler()({ testFilter: 'RunA' });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('unsaved changes');
+    expect(JSON.parse(result.content[1].text)).toEqual({
+      error_code: 'dirty_scenes_present',
+      dirtyScenes,
+    });
+  });
+
+  it('describes the dirty-scene refusal to callers', () => {
+    getToolHandler();
+    const description = (mockServerTool.mock.calls[0] as any)[1] as string;
+    expect(description).toContain('dirty_scenes_present');
+    expect(description).toContain('dirtyScenes');
+  });
 });

@@ -6,7 +6,7 @@ import { Logger } from '../utils/logger.js';
 import { payloadContent } from '../utils/toolPayload.js';
 
 const toolName = 'unload_scene';
-const toolDescription = 'Unloads a scene by path or name (does not delete the scene asset, just closes it from the hierarchy)';
+const toolDescription = 'Unloads a scene by path or name (does not delete the scene asset, just closes it from the hierarchy). By default a dirty scene with a path is saved first; saved and discardedUnsavedChanges report what happened to unsaved changes (saveIfDirty:false or an untitled scene discards them). If that save fails the scene is not unloaded';
 
 const paramsSchema = z.object({
   scenePath: z.string().optional().describe("Full asset path to the scene (e.g., 'Assets/Scenes/MyScene.unity')"),
@@ -66,6 +66,8 @@ async function toolHandler(mcpUnity: McpUnity, params: any) {
           sceneName: response.sceneName,
           scenePath: response.scenePath,
           wasDirty: response.wasDirty,
+          saved: response.saved,
+          discardedUnsavedChanges: response.discardedUnsavedChanges,
           removed: response.removed,
           message: response.message
         })

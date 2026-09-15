@@ -16,7 +16,9 @@ namespace McpUnity.Tools
         public UnloadSceneTool()
         {
             Name = "unload_scene";
-            Description = "Unloads a scene by path or name (does not delete the scene asset, just closes it from the hierarchy)";
+            Description = "Unloads a scene by path or name (does not delete the scene asset, just closes it from the hierarchy). " +
+                "By default a dirty scene with a path is saved first; the response reports saved and discardedUnsavedChanges " +
+                "(saveIfDirty:false or an untitled scene discards the changes). If that save fails the scene is not unloaded";
         }
 
         /// <summary>
@@ -72,15 +74,25 @@ namespace McpUnity.Tools
                 string unloadedScenePath = sceneToUnload.path;
                 bool wasDirty = sceneToUnload.isDirty;
 
-                // If scene has unsaved changes, save it first
+                // If scene has unsaved changes, save it first. A failed save must not fall through to
+                // CloseScene, which would silently drop the changes the caller asked to keep.
+                bool saved = false;
                 if (wasDirty)
                 {
                     bool savePrompt = parameters["saveIfDirty"]?.ToObject<bool?>() ?? true;
                     if (savePrompt && !string.IsNullOrEmpty(unloadedScenePath))
                     {
-                        EditorSceneManager.SaveScene(sceneToUnload);
+                        saved = EditorSceneManager.SaveScene(sceneToUnload);
+                        if (!saved)
+                        {
+                            return McpUnitySocketHandler.CreateErrorResponse(
+                                $"Failed to save dirty scene '{unloadedScenePath}' before unloading, so it was not unloaded",
+                                "save_error"
+                            );
+                        }
                     }
                 }
+                bool discardedUnsavedChanges = wasDirty && !saved;
 
                 // Close/unload the scene
                 bool success = EditorSceneManager.CloseScene(sceneToUnload, removeScene);
@@ -99,10 +111,14 @@ namespace McpUnity.Tools
                 {
                     ["success"] = true,
                     ["type"] = "text",
-                    ["message"] = $"Successfully unloaded scene '{unloadedSceneName}'",
+                    ["message"] = $"Successfully unloaded scene '{unloadedSceneName}'" +
+                        (saved ? "; its unsaved changes were saved first" : "") +
+                        (discardedUnsavedChanges ? "; its unsaved changes were discarded" : ""),
                     ["sceneName"] = unloadedSceneName,
                     ["scenePath"] = unloadedScenePath,
                     ["wasDirty"] = wasDirty,
+                    ["saved"] = saved,
+                    ["discardedUnsavedChanges"] = discardedUnsavedChanges,
                     ["removed"] = removeScene
                 };
             }

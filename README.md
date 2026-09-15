@@ -92,6 +92,9 @@ The following tools are available for manipulating and querying Unity scenes and
 - `get_test_run`: Polls a test run by Unity GUID `runId`; omit `runId` to retrieve the most recent run, including after a PlayMode domain reload disconnects the original request. SessionState retains bounded metadata only; completed result rows and logs are rebuilt from the NUnit XML artifact
   > **Example prompt:** "Get the most recent Unity test run"
 
+`run_tests` refuses to start while any loaded scene has unsaved changes (`dirty_scenes_present` with
+`dirtyScenes`), because Unity Test Framework would block the Editor on a save dialog.
+
 `run_tests` permits one tracked run at a time because Unity's global test callbacks do not identify
 which run emitted them. A concurrent MCP request returns `test_run_in_progress`. Wait for the active
 run and poll it; the lock normally clears on `RunFinished`. If a started run stops without that callback,
@@ -125,10 +128,10 @@ consistency check, not proof of run ownership or protection against all same-cou
 - `create_scene`: Creates a new scene and saves it to the specified path
   > **Example prompt:** "Create a new scene called 'Level1' in the Scenes folder"
 
-- `load_scene`: Loads a scene by path or name, with optional additive loading
+- `load_scene`: Loads a scene by path or name, with optional additive loading. A non-additive load saves dirty open scenes first and reports `savedScenes`/`discardedScenes`; it is refused with `untitled_dirty_scene` when an untitled scene has unsaved changes
   > **Example prompt:** "Load the MainMenu scene"
 
-- `delete_scene`: Deletes a scene by path or name and removes it from Build Settings
+- `delete_scene`: Deletes a scene by path or name and removes it from Build Settings. A loaded scene is closed without saving (reported in `discardedUnsavedChanges`); the only loaded scene is refused
   > **Example prompt:** "Delete the old TestScene from my project"
 
 - `get_gameobject`: Gets detailed information about a specific GameObject including all components
@@ -149,7 +152,7 @@ consistency check, not proof of run ownership or protection against all same-cou
 - `get_scene_info`: Gets information about the active scene including name, path, dirty state, and all loaded scenes
   > **Example prompt:** "What scenes are currently loaded in my project?"
 
-- `unload_scene`: Unloads a scene from the hierarchy (does not delete the scene asset)
+- `unload_scene`: Unloads a scene from the hierarchy (does not delete the scene asset). Reports `saved` and `discardedUnsavedChanges`; a failed default save leaves the scene loaded
   > **Example prompt:** "Unload the UI scene from the hierarchy"
 
 - `duplicate_gameobject`: Duplicates a GameObject in the scene with optional renaming and reparenting

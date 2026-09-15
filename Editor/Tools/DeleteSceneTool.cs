@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 using UnityEditor;
 using Newtonsoft.Json.Linq;
 using McpUnity.Unity;
@@ -16,8 +17,15 @@ namespace McpUnity.Tools
         public DeleteSceneTool()
         {
             Name = "delete_scene";
-            Description = "Deletes a scene by path or name and removes it from Build Settings";
+            Description = "Deletes a scene by path or name and removes it from Build Settings. " +
+                "A loaded scene is closed without saving first and the response reports discarded unsaved changes; " +
+                "the only loaded scene is refused because Unity cannot close the last loaded scene";
         }
+
+        // Seams for the refusal branches; production reads and closes the real Editor scenes.
+        internal static Func<int> LoadedSceneCount = () => SceneManager.loadedSceneCount;
+        internal static Func<Scene, bool> CloseLoadedScene =
+            scene => UnityEditor.SceneManagement.EditorSceneManager.CloseScene(scene, true);
 
         /// <summary>
         /// Execute the DeleteScene tool with the provided parameters
@@ -77,11 +85,30 @@ namespace McpUnity.Tools
 
             try
             {
-                // If the scene is open, close it without saving changes
+                // If the scene is open, close it without saving changes. Unity refuses to close the last
+                // loaded scene (it only logs an error), so refuse first instead of deleting the asset under a
+                // scene that stays loaded; a failed close likewise leaves the asset untouched.
                 var scene = UnityEditor.SceneManagement.EditorSceneManager.GetSceneByPath(scenePath);
-                if (scene.IsValid() && scene.isLoaded)
+                bool wasLoaded = scene.IsValid() && scene.isLoaded;
+                bool discardedUnsavedChanges = wasLoaded && scene.isDirty;
+                if (wasLoaded)
                 {
-                    UnityEditor.SceneManagement.EditorSceneManager.CloseScene(scene, true);
+                    if (LoadedSceneCount() <= 1)
+                    {
+                        return McpUnitySocketHandler.CreateErrorResponse(
+                            $"Scene '{scenePath}' is the only loaded scene and Unity cannot close the last loaded scene, " +
+                            "so it was not deleted. Open another scene first, then retry.",
+                            "validation_error"
+                        );
+                    }
+
+                    if (!CloseLoadedScene(scene))
+                    {
+                        return McpUnitySocketHandler.CreateErrorResponse(
+                            $"Failed to close loaded scene '{scenePath}', so it was not deleted.",
+                            "scene_close_error"
+                        );
+                    }
                 }
 
                 // Remove from Build Settings
@@ -105,8 +132,11 @@ namespace McpUnity.Tools
                 {
                     ["success"] = true,
                     ["type"] = "text",
-                    ["message"] = $"Successfully deleted scene at path '{scenePath}' and removed from Build Settings",
-                    ["scenePath"] = scenePath
+                    ["message"] = $"Successfully deleted scene at path '{scenePath}' and removed from Build Settings" +
+                        (discardedUnsavedChanges ? "; the loaded scene was closed and its unsaved changes were discarded" : ""),
+                    ["scenePath"] = scenePath,
+                    ["closedLoadedScene"] = wasLoaded,
+                    ["discardedUnsavedChanges"] = discardedUnsavedChanges
                 };
             }
             catch (Exception ex)

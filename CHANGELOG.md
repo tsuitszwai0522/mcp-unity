@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [fork-1.19.9] - 2026-09-15
+
+### Fixed
+- `run_tests` no longer hangs on Unity Test Framework's save dialog. UTF 1.4.5 starts every run with `SaveCurrentModifiedScenesIfUserWantsTo`; with any dirty loaded scene the modal dialog blocked the Editor main thread (the request timed out and no test ran), and choosing Don't Save reloaded saved scenes from disk, discarding the changes. The run is now refused before `Execute` with `success:false`, `error_code:"dirty_scenes_present"` and `dirtyScenes[{name,path,untitled}]`; nothing is started, locked, saved or discarded. An already active run is still reported first as `test_run_in_progress`. Node forwards `dirtyScenes`.
+- `load_scene` (non-additive) no longer hangs on a Save Scene file dialog. Saving open scenes with an untitled dirty scene opened the dialog and blocked the Editor; it now returns `untitled_dirty_scene` listing the scene, without saving or loading anything.
+- `delete_scene` no longer reports success when the scene could not be closed. Unity refuses to close the last loaded scene (it only logs an error), so the tool deleted the asset while the scene stayed loaded and dirty. The only loaded scene is now refused with `validation_error`, and a failed close returns `scene_close_error`; neither deletes the asset or touches Build Settings.
+- `unload_scene` no longer unloads (and drops changes) when its default save of a dirty scene fails; it returns `save_error`.
+
+### Added
+- Disclosure of unsaved-change handling: non-additive `load_scene` reports `savedScenes` (dirty scenes it saved, which may hold someone else's changes) and `discardedScenes` (dirty scenes replaced without saving); `unload_scene` reports `saved` and `discardedUnsavedChanges`; `delete_scene` reports `closedLoadedScene` and `discardedUnsavedChanges`. Save/discard behaviour is otherwise unchanged.
+
+### Validation
+- Before-fix behaviour on fork-1.19.8 (isolated Editor, same day): a dirty scene plus `run_tests` showed the save dialog with the Editor heartbeat frozen for 60s+ and a request timeout; `delete_scene` on the last loaded scene returned success while the scene stayed loaded; an untitled dirty scene plus non-additive `load_scene` showed a Save Scene dialog with a 30s timeout.
+- This tree, isolated Unity 2022.3.62f3 GUI Editor: `McpUnity.Editor.Tests` via MCP 591/591 with matching callback/XML leaves (578 + 13 new). Live: dirty scene refused in under 50 ms with no dialog and the scene still dirty; a saved scene then ran 1/1; last-scene delete refused with the file kept; additive delete, non-additive load, default and no-save unload reported correctly; untitled dirty load refused in 7 ms with no dialog. Six mutations (guard removed, guard before the active-run check, last-scene refusal removed, discard flag forced, `dirtyScenes` not forwarded, untitled refusal removed) each turned the targeted test red and passed again after restore.
+- Node: 34 suites / 349 tests.
+
 ## [fork-1.19.8] - 2026-09-14
 
 ### Fixed

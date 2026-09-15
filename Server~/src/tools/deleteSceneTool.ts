@@ -6,7 +6,7 @@ import { Logger } from '../utils/logger.js';
 import { payloadContent } from '../utils/toolPayload.js';
 
 const toolName = 'delete_scene';
-const toolDescription = 'Deletes a scene by path or name and removes it from Build Settings';
+const toolDescription = 'Deletes a scene by path or name and removes it from Build Settings. A loaded scene is closed without saving first (reported in discardedUnsavedChanges); the only loaded scene is refused because Unity cannot close the last loaded scene';
 
 const paramsSchema = z.object({
   scenePath: z.string().optional().describe("Full asset path to the scene (e.g., 'Assets/Scenes/MyScene.unity')"),
@@ -63,6 +63,8 @@ async function toolHandler(mcpUnity: McpUnity, params: any) {
       },
       payloadContent({
           scenePath: response.scenePath,
+          closedLoadedScene: response.closedLoadedScene,
+          discardedUnsavedChanges: response.discardedUnsavedChanges,
           message: response.message
         })
     ]

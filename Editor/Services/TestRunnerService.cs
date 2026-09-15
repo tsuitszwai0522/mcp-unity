@@ -265,9 +265,11 @@ namespace McpUnity.Services
         private readonly Action<string> _pruneArtifacts;
         private ActiveRun _activeRun;
         private readonly Func<bool?> _frameworkRunActive;
+        private readonly Func<IReadOnlyList<DirtySceneInfo>> _dirtyScenes;
         private DateTime? _inactiveObservedAt;
         private string _inactiveObservedRunId;
         internal static readonly TimeSpan InactiveRunGrace = TimeSpan.FromSeconds(2);
+        internal const string DirtyScenesErrorCode = "dirty_scenes_present";
 
         /// <summary>
         /// Constructor. The optional API seam allows deterministic tests while preserving the
@@ -282,10 +284,15 @@ namespace McpUnity.Services
                 () => DateTime.UtcNow,
                 frameworkRunActive: testRunnerApi == null || testRunnerApi is UnityTestRunnerApi
                     ? (Func<bool?>)UnityTestRunnerApi.GetFrameworkRunActive
+                    : null,
+                dirtyScenes: testRunnerApi == null || testRunnerApi is UnityTestRunnerApi
+                    ? (Func<IReadOnlyList<DirtySceneInfo>>)SceneDirtyState.DescribeDirtyLoadedScenes
                     : null)
         {
         }
 
+        /// <param name="dirtyScenes">Reads loaded scenes with unsaved changes before a run starts.
+        /// Null skips the guard, so fake-API tests are not coupled to the runner scene's state.</param>
         internal TestRunnerService(
             ITestRunnerApi testRunnerApi,
             ITestRunRegistry registry,
@@ -293,7 +300,8 @@ namespace McpUnity.Services
             Func<TimeSpan, Task> delay = null,
             Func<DateTime> utcNow = null,
             Action<string> pruneArtifacts = null,
-            Func<bool?> frameworkRunActive = null)
+            Func<bool?> frameworkRunActive = null,
+            Func<IReadOnlyList<DirtySceneInfo>> dirtyScenes = null)
         {
             _testRunnerApi = testRunnerApi ?? throw new ArgumentNullException(nameof(testRunnerApi));
             _registry = registry ?? throw new ArgumentNullException(nameof(registry));
@@ -302,6 +310,7 @@ namespace McpUnity.Services
             _utcNow = utcNow ?? (() => DateTime.UtcNow);
             _pruneArtifacts = pruneArtifacts ?? (Action<string>)PruneArtifacts;
             _frameworkRunActive = frameworkRunActive;
+            _dirtyScenes = dirtyScenes;
             _testRunnerApi.RegisterCallbacks(this);
 
             TestRunRecord persistedRun = _registry.GetActive();
@@ -385,6 +394,15 @@ namespace McpUnity.Services
                         ["lockReleased"] = false,
                         ["staleAfterSeconds"] = (long)ActiveRunTtl.TotalSeconds
                     });
+            }
+
+            // Unity Test Framework's first run task asks to save modified scenes. That modal dialog
+            // blocks the Editor main thread until someone answers, and Don't Save reloads saved scenes
+            // from disk. Refuse before Execute so nothing is started, saved or discarded.
+            IReadOnlyList<DirtySceneInfo> dirtyScenes = _dirtyScenes?.Invoke();
+            if (dirtyScenes != null && dirtyScenes.Count > 0)
+            {
+                return CreateDirtyScenesResponse(dirtyScenes);
             }
 
             string normalizedTestFilter = string.IsNullOrEmpty(testFilter) ? null : testFilter;
@@ -876,6 +894,19 @@ namespace McpUnity.Services
                    "testFilter matches full test names starting at the namespace " +
                    "(e.g. \"MyNamespace.MyFixture.MyTest\"); an assembly name is not part of a test's full name - " +
                    "use assemblyNames for that. Use the get_tests resource to list available tests.";
+        }
+
+        internal static JObject CreateDirtyScenesResponse(IReadOnlyList<DirtySceneInfo> dirtyScenes)
+        {
+            string names = string.Join(", ", dirtyScenes.Select(scene => scene.Describe()));
+            return CreateErrorResponse(
+                DirtyScenesErrorCode,
+                $"{dirtyScenes.Count} loaded scene(s) have unsaved changes: {names}. " +
+                "Unity Test Framework asks to save modified scenes before a run, and that modal dialog " +
+                "blocks the Editor until someone answers; choosing Don't Save reloads saved scenes from disk " +
+                "and discards the changes. No test run was started and nothing was saved or discarded. " +
+                "Save or discard these changes deliberately (they may belong to someone else), then retry.",
+                new JObject { ["dirtyScenes"] = SceneDirtyState.ToJson(dirtyScenes) });
         }
 
         private static JObject CreateErrorResponse(
