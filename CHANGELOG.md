@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [fork-1.19.10] - 2026-09-18
+
+### Fixed
+- `package.json` now declares `com.unity.test-framework: 1.4.5` instead of `1.3.3`. Since fork-1.18.0 the Editor assembly calls `TestRunnerApi.SaveResultToFile`, which does not exist anywhere in UTF 1.3.3 (it first ships in 1.4.x). The declared floor was therefore lower than the code requires, so UPM had no reason to upgrade a consumer sitting on 1.3.3 and the package failed to compile on resolve with `Editor/Services/ITestRunnerApi.cs(66,27): error CS0117: 'TestRunnerApi' does not contain a definition for 'SaveResultToFile'` — an error that points at this package's file and gives no hint that the real cause is the consumer's Test Framework version. Consumers already on UTF 1.4.5 are unaffected; consumers on 1.3.3 will now be upgraded by UPM instead of failing to compile.
+
+### Notes
+- No behaviour change: this release only corrects package metadata. Everything else is identical to fork-1.19.9.
+- `SaveResultToFile` is the package's only UTF 1.4-only dependency (`Execute`, `RegisterCallbacks` and `RetrieveTestList` all exist in 1.3.3; `GetFrameworkRunActive` is this package's own internal helper in `Editor/Services/ITestRunnerApi.cs`, not a UTF API), so 1.4.5 is the floor the code actually needs.
+- Found by the ProjectA consumer while upgrading fork-1.5.0 → fork-1.19.9: it took UTF transitively at 1.3.3 and hit `CS0117` on resolve. ProjectT never saw it because its manifest has pinned `com.unity.test-framework: 1.4.5` since the Unity 6 → 2022.3 migration.
+
 ## [fork-1.19.9] - 2026-09-15
 
 ### Fixed
